@@ -125,13 +125,22 @@ from sys import executable as PYEXEC  # Full path to the current Python interpre
 execpool = ExecPool(max(cpu_count() - 1, 1))
 global_timeout = 30 * 60  # 30 min, timeout to execute all scheduled jobs or terminate them
 
-# 2. Fill the pool with jobs
-# 2.1 Create the job with specified parameters
+
+# 2. Schedule jobs execution in the pool
+
+# 2.a Job scheduling using external executable: "ls -la"
+execpool.execute(Job(name='list_dir', args=('ls', '-la')))
+
+
+# 2.b Job scheduling using python function / code fragment,
+# which is not a goal of the design, but is possible.
+
+# 2.b.1 Create the job with specified parameters
 jobname = 'NetShuffling'
 jobtimeout = 3 * 60  # 3 min
 
 # The network shuffling routine to be scheduled as a job,
-# which can also be a call of any external executable
+# which can also be a call of any external executable (see 2.alt below)
 args = (PYEXEC, '-c',
 """import os
 import subprocess
@@ -145,7 +154,7 @@ for i in range(1, {shufnum} + 1):
 		subprocess.call(('sort', '-R', basenet, '-o', netfile))
 """.format(jobname=jobname, _EXTNETFILE='.net', shufnum=5, overwrite=False))
 
-# 2.2 Schedule the job execution, which might be postponed
+# 2.b.2 Schedule the job execution, which might be postponed
 # if there are no any free executor processes available
 execpool.execute(Job(name=jobname, workdir='this_sub_dir', args=args, timeout=jobtimeout
 	# Note: onstart/ondone callbacks, custom parameters and others can be also specified here!
@@ -153,6 +162,7 @@ execpool.execute(Job(name=jobname, workdir='this_sub_dir', args=args, timeout=jo
 
 # Add another jobs
 # ...
+
 
 # 3. Wait for the jobs execution for the specified timeout at most
 execpool.join(global_timeout)  # 30 min
