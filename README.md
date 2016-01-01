@@ -167,3 +167,8 @@ execpool.execute(Job(name=jobname, workdir='this_sub_dir', args=args, timeout=jo
 # 3. Wait for the jobs execution for the specified timeout at most
 execpool.join(global_timeout)  # 30 min
 ```
+
+**Note:** Please, [star this project](//github.com/XI-lab/PyExPool) if you use it.
+
+## Related Projects
+- [ExecTime](https://bitbucket.org/lumais/exectime)  -  *failover* lightweight resource consumption profiler (*timings and memory*), applicable to multiple processes with optional *per-process results labeling* and sycnchronized *output to the specified file* or `stderr`: https://bitbucket.org/lumais/exectime
