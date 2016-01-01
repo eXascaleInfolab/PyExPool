@@ -83,6 +83,24 @@ ExecPool(workers=cpu_count())
 	
 	workers  - number of resident worker processes
 	"""
+
+	def execute(self, job, async=True):
+		"""Schecule the job for the execution
+
+		job  - the job to be executed, instance of Job
+		async  - async execution or wait until execution completed
+		  NOTE: sync tasks are started at once
+		return  - 0 on successful execution, proc. returncode otherwise
+		"""
+
+	def join(self, timeout=0):
+		"""Execution cycle
+
+		timeout  - execution timeout in seconds before the workers termination, >= 0.
+			0 means absebse of the timeout. The time is measured SINCE the first job
+			was scheduled UNTIL the completion of all scheduled jobs.
+		return  - True on graceful completion, Flase on termination by the specified timeout
+		"""
 ```
 
 
