@@ -88,6 +88,16 @@ ExecPool(workers=cpu_count())
 
 ## Usage
 
+Target version of the Python is 2.7+ including 3.x, also works fine on PyPy.
+
+The workflow consists of the following steps:
+
+1. Create Execution Pool.
+1. Create and schedule Jobs with required parameters, callbacks and optionally packing them into Tasks.
+1. Wait on Execution pool untill all the jobs are completed or terminated, or until the global timeout is elapsed.
+
+**Usage Example:**
+
 ```python
 from multiprocessing import cpu_count
 from sys import executable as PYEXEC  # Full path to the current Python interpreter
