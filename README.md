@@ -7,7 +7,7 @@ Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-jo
 - stdout/err output, which can be redireted to any custom file or PIPE
 - custom parameters for each Job and embracing Task besides the name/id
 	
-The implementation is a *single file module* to be easily included into your project and *customized* as a part of your distribution, not as a separate library.
+The implementation is a ***single file module* to be easily included into your project and *customized* as a part of your distribution** (like in [PyCaBeM](//github.com/XI-lab/PyCABeM)), not as a separate library.
 
 \author: (c) Artem Lutov <artem@exascale.info>  
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
