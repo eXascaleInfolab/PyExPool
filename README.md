@@ -102,45 +102,39 @@ The workflow consists of the following steps:
 from multiprocessing import cpu_count
 from sys import executable as PYEXEC  # Full path to the current Python interpreter
 
-# Create Multi-process execution pool
+# 1. Create Multi-process execution pool
 execpool = ExecPool(max(cpu_count() - 1, 1))
 global_timeout = 30 * 60  # 30 min, timeout to execute all scheduled jobs or terminate them
 
-# Fill the pool with jobs
+# 2. Fill the pool with jobs
+# 2.1 Create the job with specified parameters
 jobname = 'NetShuffling'
 jobtimeout = 3 * 60  # 3 min
 
+# The network shuffling routine to be scheduled as a job,
+# which can also be a call of any external executable
 args = (PYEXEC, '-c',
-# The network shuffling procedure to be sccheduled as a job, which can also be a call of any external executable
 """import os
 import subprocess
 
 basenet = '{jobname}' + '{_EXTNETFILE}'
 #print('basenet: ' + basenet, file=sys.stderr)
 for i in range(1, {shufnum} + 1):
-	# sort -R pgp_udir.net -o pgp_udir_rand3.net
 	netfile = ''.join(('{jobname}', '.', str(i), '{_EXTNETFILE}'))
 	if {overwrite} or not os.path.exists(netfile):
+		# sort -R pgp_udir.net -o pgp_udir_rand3.net
 		subprocess.call(('sort', '-R', basenet, '-o', netfile))
-# Remove existent redundant shuffles if any
-#i = {shufnum} + 1
-#while i < 100:  # Max number of shuffles
-#	netfile = ''.join(('{jobname}', '.', str(i), '{_EXTNETFILE}'))
-#	if not os.path.exists(netfile):
-#		break
-#	else:
-#		os.remove(netfile)
 """.format(jobname=jobname, _EXTNETFILE='.net', shufnum=5, overwrite=False))
 
-# Schedule the job execution, which might be postponed if there are no free executor processes available
+# 2.2 Schedule the job execution, which might be postponed
+# if there are no any free executor processes available
 execpool.execute(Job(name=jobname, workdir='this_sub_dir', args=args, timeout=jobtimeout
 	# Note: onstart/ondone callbacks, custom parameters and others can be also specified here!
 ))
 
-
 # Add another jobs
 # ...
 
-# Wait for the jobs execution for the specified timeout at most
+# 3. Wait for the jobs execution for the specified timeout at most
 execpool.join(global_timeout)  # 30 min
 ```
