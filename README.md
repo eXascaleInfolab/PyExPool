@@ -14,10 +14,20 @@ The main purpose of this single-file module is *asynchronious execution of modul
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
 \date: 2016-01  
 
+## Content
+- [API](#api)
+	- [Job](#job)
+	- [Task](#task)
+	- [ExecPool](#execpool)
+- [Usage](#usage)
+	- [Usage Example](#usage-example)
+	- [Failover Example](#failover-example)
+- [Related Projects](#related-projects)
 
 ## API
 
 Flexible API provides optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and much more...
+### Job
 
 ```python
 Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
@@ -54,7 +64,7 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 	proc  - process of the job, can be used in the ondone() to read it's PIPE
 	"""
 ```
-
+### Task
 ```python
 Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout, stderr=sys.stderr):
 	"""Initialize task, which is a group of jobs to be executed
@@ -77,7 +87,7 @@ Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout,
 	tstop  - termination / completion time after ondone
 	"""
 ```
-
+### ExecPool
 ```python
 ExecPool(workers=cpu_count())
 	"""Multi-process execution pool of jobs
@@ -85,7 +95,7 @@ ExecPool(workers=cpu_count())
 	workers  - number of resident worker processes
 	"""
 
-	def execute(self, job, async=True):
+	execute(job, async=True):
 		"""Schecule the job for the execution
 
 		job  - the job to be executed, instance of Job
@@ -94,7 +104,7 @@ ExecPool(workers=cpu_count())
 		return  - 0 on successful execution, proc. returncode otherwise
 		"""
 
-	def join(self, timeout=0):
+	join(timeout=0):
 		"""Execution cycle
 
 		timeout  - execution timeout in seconds before the workers termination, >= 0.
@@ -102,6 +112,12 @@ ExecPool(workers=cpu_count())
 			was scheduled UNTIL the completion of all scheduled jobs.
 		return  - True on graceful completion, Flase on termination by the specified timeout
 		"""
+		
+	__del__():
+		"""Force termination of the pool"""
+		
+	__finalize__():
+		"""Force termination of the pool"""
 ```
 
 
@@ -115,8 +131,7 @@ The workflow consists of the following steps:
 1. Create and schedule Jobs with required parameters, callbacks and optionally packing them into Tasks.
 1. Wait on Execution pool untill all the jobs are completed or terminated, or until the global timeout is elapsed.
 
-**Usage Example:**
-
+### Usage Example
 ```python
 from multiprocessing import cpu_count
 from sys import executable as PYEXEC  # Full path to the current Python interpreter
@@ -166,6 +181,38 @@ execpool.execute(Job(name=jobname, workdir='this_sub_dir', args=args, timeout=jo
 
 # 3. Wait for the jobs execution for the specified timeout at most
 execpool.join(global_timeout)  # 30 min
+```
+
+### Failover Example
+To perform *graceful termination* of the Jobs in case of external terminatoin of your program, signal handlers can be set:
+```python
+import signal  # Intercept kill signals
+
+# Use execpool as a global variable, which is set to None when all jobs are done,
+# and recreated on jobs scheduling
+execpool = None
+
+def terminationHandler(signal, frame):
+	"""Signal termination handler"""
+	global execpool
+
+	if execpool:
+		del execpool  # Destructors are caled later
+	sys.exit(0)
+
+# Set handlers of external signals, which can be the first lines inside
+# if __name__ == '__main__':
+signal.signal(signal.SIGTERM, terminationHandler)
+signal.signal(signal.SIGHUP, terminationHandler)
+signal.signal(signal.SIGINT, terminationHandler)
+signal.signal(signal.SIGQUIT, terminationHandler)
+signal.signal(signal.SIGABRT, terminationHandler)
+
+
+# Define execpool to schedule some jobs
+execpool = ExecPool(max(cpu_count() - 1, 1))
+
+# Failsafe sage of execpool ...
 ```
 
 **Note:** Please, [star this project](//github.com/XI-lab/PyExPool) if you use it.
