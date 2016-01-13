@@ -25,6 +25,7 @@ import collections
 import os
 import ctypes  # Required for the multiprocessing Value definition
 import types  # Required for instance methods definition
+import traceback  # Stacktrace
 
 from multiprocessing import cpu_count
 from multiprocessing import Value
@@ -218,7 +219,8 @@ class Job(object):
 				try:
 					self.ondone()
 				except StandardError as err:
-					print('ERROR in ondone callback of "{}": {}'.format(self.name, err), file=sys.stderr)
+					print('ERROR in ondone callback of "{}": {}. {}'.format(
+						self.name, err, traceback.format_exc()), file=sys.stderr)
 			# Clean up
 			# Remove empty logs skipping the system devnull
 			tpaths = []  # Base dir of the output
@@ -255,6 +257,10 @@ class ExecPool(object):
 	'''
 
 	def __init__(self, workers=cpu_count()):
+		"""Execution Pool constructor
+
+		workers  - number of resident worker processes
+		"""
 		assert workers >= 1, 'At least one worker should be managed by the pool'
 
 		self._workersLim = workers  # Max number of workers
@@ -332,7 +338,8 @@ class ExecPool(object):
 			try:
 				job.onstart()
 			except StandardError as err:
-				print('ERROR in onstart() callback of "{}": {}'.format(job.name, err), file=sys.stderr)
+				print('ERROR in onstart() callback of "{}": {}. {}'.format(
+					job.name, err, traceback.format_exc()), file=sys.stderr)
 				return -1
 		# Consider custom output channels for the job
 		fstdout = None
@@ -376,7 +383,8 @@ class ExecPool(object):
 				if job.startdelay > 0:
 					time.sleep(job.startdelay)
 		except StandardError as err:  # Should not occur: subprocess.CalledProcessError
-			print('ERROR on "{}" execution occurred: {}, skipping the job'.format(job.name, err), file=sys.stderr)
+			print('ERROR on "{}" execution occurred: {}, skipping the job. {}'.format(
+				job.name, err, traceback.format_exc()), file=sys.stderr)
 			# Note: process-associated file descriptors are closed in complete()
 			job.complete(False)
 		else:
@@ -435,9 +443,9 @@ class ExecPool(object):
 		"""Schecule the job for the execution
 
 		job  - the job to be executed, instance of Job
-		async  - async execution or wait intill execution completed
+		async  - async execution or wait until execution completed
 		  NOTE: sync tasks are started at once
-		return  - 0 on successful execution, proc.returncode otherwise
+		return  - 0 on successful execution, proc. returncode otherwise
 		"""
 		assert isinstance(job, Job), 'job type is invalid'
 		assert len(self._workers) <= self._workersLim, 'Number of workers exceeds the limit'
