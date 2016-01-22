@@ -1,14 +1,14 @@
 # PyExPool
 
-Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying execution paremeters:
+Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying execution parameters:
 
-- timeout per each Job (it was the main motivation to implemtent this module, because this feature is not provided by any Python implementation out of the box)
+- timeout per each Job (it was the main motivation to implement this module, because this feature is not provided by any Python implementation out of the box)
 - onstart/ondone callbacks, ondone is called only on successful completion (not termination) for both Jobs and Tasks (group of jobs)
-- stdout/err output, which can be redireted to any custom file or PIPE
+- stdout/err output, which can be redirected to any custom file or PIPE
 - custom parameters for each Job and embracing Task besides the name/id
 	
 The implementation is a ***single file module* to be easily included into your project and *customized* as a part of your distribution** (like in [PyCaBeM](//github.com/XI-lab/PyCABeM)), not as a separate library.  
-The main purpose of this single-file module is *asynchronious execution of modules and external executables*. When asynchronious execution of Python functions is required and usage of external dependences is not a problem, then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
+The main purpose of this single-file module is *asynchronouschronious execution of modules and external executables*. When asynchronious execution of Python functions is required and usage of external dependences is not a problem, then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
 
 \author: (c) Artem Lutov <artem@exascale.info>  
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
@@ -96,7 +96,7 @@ ExecPool(workers=cpu_count())
 	"""
 
 	execute(job, async=True):
-		"""Schecule the job for the execution
+		"""Schedule the job for the execution
 
 		job  - the job to be executed, instance of Job
 		async  - async execution or wait until execution completed
@@ -108,9 +108,9 @@ ExecPool(workers=cpu_count())
 		"""Execution cycle
 
 		timeout  - execution timeout in seconds before the workers termination, >= 0.
-			0 means absebse of the timeout. The time is measured SINCE the first job
+			0 means absence of the timeout. The time is measured SINCE the first job
 			was scheduled UNTIL the completion of all scheduled jobs.
-		return  - True on graceful completion, Flase on termination by the specified timeout
+		return  - True on graceful completion, False on termination by the specified timeout
 		"""
 		
 	__del__():
@@ -129,7 +129,7 @@ The workflow consists of the following steps:
 
 1. Create Execution Pool.
 1. Create and schedule Jobs with required parameters, callbacks and optionally packing them into Tasks.
-1. Wait on Execution pool untill all the jobs are completed or terminated, or until the global timeout is elapsed.
+1. Wait on Execution pool until all the jobs are completed or terminated, or until the global timeout is elapsed.
 
 ### Usage Example
 ```python
@@ -184,7 +184,7 @@ execpool.join(global_timeout)  # 30 min
 ```
 
 ### Failover Example
-To perform *graceful termination* of the Jobs in case of external terminatoin of your program, signal handlers can be set:
+To perform *graceful termination* of the Jobs in case of external termination of your program, signal handlers can be set:
 ```python
 import signal  # Intercept kill signals
 
@@ -197,7 +197,7 @@ def terminationHandler(signal, frame):
 	global execpool
 
 	if execpool:
-		del execpool  # Destructors are caled later
+		del execpool  # Destructors are called later
 	sys.exit(0)
 
 # Set handlers of external signals, which can be the first lines inside
@@ -218,4 +218,4 @@ execpool = ExecPool(max(cpu_count() - 1, 1))
 **Note:** Please, [star this project](//github.com/XI-lab/PyExPool) if you use it.
 
 ## Related Projects
-- [ExecTime](https://bitbucket.org/lumais/exectime)  -  *failover* lightweight resource consumption profiler (*timings and memory*), applicable to multiple processes with optional *per-process results labeling* and sycnchronized *output to the specified file* or `stderr`: https://bitbucket.org/lumais/exectime
+- [ExecTime](https://bitbucket.org/lumais/exectime)  -  *failover* lightweight resource consumption profiler (*timings and memory*), applicable to multiple processes with optional *per-process results labeling* and synchronized *output to the specified file* or `stderr`: https://bitbucket.org/lumais/exectime
