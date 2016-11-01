@@ -1,14 +1,14 @@
 # PyExPool
 
-Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying execution parameters:
+A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying execution parameters:
 
 - timeout per each Job (it was the main motivation to implement this module, because this feature is not provided by any Python implementation out of the box)
 - onstart/ondone callbacks, ondone is called only on successful completion (not termination) for both Jobs and Tasks (group of jobs)
 - stdout/err output, which can be redirected to any custom file or PIPE
 - custom parameters for each Job and embracing Task besides the name/id
 	
-The implementation is a ***single file module* to be easily included into your project and *customized* as a part of your distribution** (like in [PyCaBeM](//github.com/XI-lab/PyCABeM)), not as a separate library.  
-The main purpose of this single-file module is *asynchronouschronious execution of modules and external executables*. When asynchronious execution of Python functions is required and usage of external dependences is not a problem, then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
+Implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/XI-lab/PyCABeM)), not as a separate library.  
+The main purpose of this single-file module is the **asynchronous execution of modules and external executables**. In case asynchronious execution of the Python functions is required and usage of external dependences is not a problem, then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
 
 \author: (c) Artem Lutov <artem@exascale.info>  
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
@@ -21,12 +21,14 @@ The main purpose of this single-file module is *asynchronouschronious execution 
 	- [ExecPool](#execpool)
 - [Usage](#usage)
 	- [Usage Example](#usage-example)
-	- [Failover Example](#failover-example)
+	- [Failover Termination](#failover-termination)
 - [Related Projects](#related-projects)
 
 ## API
 
-Flexible API provides optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and much more...
+Flexible API provides optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and much more...  
+`ExecPool` represents a pool of worker processes to execute `Job`s that can be grouped into `Tasks`s for more flexible management.
+
 ### Job
 
 ```python
@@ -183,7 +185,7 @@ execpool.execute(Job(name=jobname, workdir='this_sub_dir', args=args, timeout=jo
 execpool.join(global_timeout)  # 30 min
 ```
 
-### Failover Example
+### Failover Termination
 To perform *graceful termination* of the Jobs in case of external termination of your program, signal handlers can be set:
 ```python
 import signal  # Intercept kill signals
@@ -212,7 +214,13 @@ signal.signal(signal.SIGABRT, terminationHandler)
 # Define execpool to schedule some jobs
 execpool = ExecPool(max(cpu_count() - 1, 1))
 
-# Failsafe sage of execpool ...
+# Failsafe usage of execpool ...
+```
+Also it is recommended to register the termination handler for the normal interpreter termination using [**atexit**](https://docs.python.org/2/library/atexit.html):
+```python
+import atexit
+...
+atexit.register(terminationHandler)
 ```
 
 **Note:** Please, [star this project](//github.com/XI-lab/PyExPool) if you use it.
