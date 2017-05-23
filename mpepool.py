@@ -17,7 +17,7 @@
 \date: 2015-07
 """
 
-from __future__ import print_function  # Required for stderr output, must be the first import
+from __future__ import print_function  # Required for stderr output, must be the first import;  division
 import sys
 import time
 import subprocess
@@ -445,11 +445,11 @@ class ExecPool(object):
 		job  - the job to be executed, instance of Job
 		async  - async execution or wait until execution completed
 		  NOTE: sync tasks are started at once
-		return  - 0 on successful execution, proc. returncode otherwise
+		return  - 0 on successful execution, proc. return code otherwise
 		"""
 		assert isinstance(job, Job), 'job type is invalid'
 		assert len(self._workers) <= self._workersLim, 'Number of workers exceeds the limit'
-		assert job.name, "Job parameters must be defined"  #  and job.workdir and job.args
+		assert job.name, 'Job parameters must be defined'  #  and job.workdir and job.args
 
 		if DEBUG_TRACE:
 			print('Scheduling the job "{}" with timeout {}'.format(job.name, job.timeout))

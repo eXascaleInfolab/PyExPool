@@ -6,9 +6,9 @@ A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-
 - onstart/ondone callbacks, ondone is called only on successful completion (not termination) for both Jobs and Tasks (group of jobs)
 - stdout/err output, which can be redirected to any custom file or PIPE
 - custom parameters for each Job and embracing Task besides the name/id
-	
+
 Implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/XI-lab/PyCABeM)), not as a separate library.  
-The main purpose of this single-file module is the **asynchronous execution of modules and external executables**. In case asynchronious execution of the Python functions is required and usage of external dependences is not a problem, then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
+The main purpose of this single-file module is the **asynchronous execution of modules and external executables**. In case asynchronous execution of the Python functions is required and usage of external dependences is not a problem, then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
 
 \author: (c) Artem Lutov <artem@exascale.info>  
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
@@ -21,7 +21,7 @@ The main purpose of this single-file module is the **asynchronous execution of m
 	- [ExecPool](#execpool)
 - [Usage](#usage)
 	- [Usage Example](#usage-example)
-	- [Failover Termination](#failover-termination)
+	- [Failsafe Termination](#failsafe-termination)
 - [Related Projects](#related-projects)
 
 ## API
@@ -70,7 +70,7 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 ```python
 Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout, stderr=sys.stderr):
 	"""Initialize task, which is a group of jobs to be executed
-	
+
 	name  - task name
 	timeout  - execution timeout. Default: 0, means infinity
 	onstart  - callback which is executed on the task starting (before the execution
@@ -84,7 +84,7 @@ Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout,
 	stdout  - None or file name or PIPE for the buffered output to be APPENDED
 	stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 		ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited
-	
+
 	tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 	tstop  - termination / completion time after ondone
 	"""
@@ -93,7 +93,7 @@ Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout,
 ```python
 ExecPool(workers=cpu_count())
 	"""Multi-process execution pool of jobs
-	
+
 	workers  - number of resident worker processes
 	"""
 
@@ -103,7 +103,7 @@ ExecPool(workers=cpu_count())
 		job  - the job to be executed, instance of Job
 		async  - async execution or wait until execution completed
 		  NOTE: sync tasks are started at once
-		return  - 0 on successful execution, proc. returncode otherwise
+		return  - 0 on successful execution, proc. return code otherwise
 		"""
 
 	join(timeout=0):
@@ -114,10 +114,10 @@ ExecPool(workers=cpu_count())
 			was scheduled UNTIL the completion of all scheduled jobs.
 		return  - True on graceful completion, False on termination by the specified timeout
 		"""
-		
+
 	__del__():
 		"""Force termination of the pool"""
-		
+
 	__finalize__():
 		"""Force termination of the pool"""
 ```
@@ -185,7 +185,7 @@ execpool.execute(Job(name=jobname, workdir='this_sub_dir', args=args, timeout=jo
 execpool.join(global_timeout)  # 30 min
 ```
 
-### Failover Termination
+### Failsafe Termination
 To perform *graceful termination* of the Jobs in case of external termination of your program, signal handlers can be set:
 ```python
 import signal  # Intercept kill signals
