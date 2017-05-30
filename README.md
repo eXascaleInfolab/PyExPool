@@ -1,7 +1,9 @@
 # PyExPool
 
-A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying execution parameters:
+A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying optional execution parameters:
 
+- automatic CPU affinity management and maximization of the dedicated CPU cache for a worker process
+- minimal amount of RAM per a worker process
 - timeout per each Job (it was the main motivation to implement this module, because this feature is not provided by any Python implementation out of the box)
 - onstart/ondone callbacks, ondone is called only on successful completion (not termination) for both Jobs and Tasks (group of jobs)
 - stdout/err output, which can be redirected to any custom file or PIPE
@@ -26,7 +28,7 @@ The main purpose of this single-file module is the **asynchronous execution of m
 
 ## API
 
-Flexible API provides optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and much more...  
+Flexible API provides *automatic CPU affinity management, maximization of the dedicated CPU cache and limitation of the minimal dedicated RAM per a worker process*, optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and more...  
 `ExecPool` represents a pool of worker processes to execute `Job`s that can be grouped into `Tasks`s for more flexible management.
 
 ### Job
@@ -60,6 +62,8 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 	stdout  - None or file name or PIPE for the buffered output to be APPENDED
 	stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 		ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited
+	omitafn  - Omit affinity policy of the scheduler, which is actual when the affinity is enabled
+	 	and the process has multiple treads
 
 	tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 	tstop  - termination / completion time after ondone
@@ -91,10 +95,38 @@ Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout,
 ```
 ### ExecPool
 ```python
-ExecPool(workers=cpu_count())
+def ramfracs(fracsize):
+	"""Evaluate the minimal number of RAM fractions of the specified size in GB
+
+	Used to estimate the reasonable number of processes with the specified minimal
+	dedicated RAM.
+
+	fracsize  - minimal size of each fraction in GB, can be a fractional number
+	return the minimal number of RAM fractions having the specified size in GB
+	"""
+
+def cpucorethreads():
+	"""The number of hardware treads per a CPU core
+
+	Used to specify CPU afinity step dedicating the maximal amount of CPU cache.
+	"""
+
+ExecPool(workers=cpu_count(), afnstep=None)
 	"""Multi-process execution pool of jobs
 
-	workers  - number of resident worker processes
+	workers  - number of resident worker processes, >=1. The reasonable value is
+		<= NUMA nodes * node CPUs (which is typically returned by cpu_count()),
+		where "node CPU" is CPU cores * HW treads per core.
+		To guarantee minimal number of RAM per a process, for example 2.5 GB:
+			workers = min(cpu_count(), ramfracs(2.5))
+	afnstep  - affinity step, integer if applied. Used to bound whole CPU cores
+		instead of the hardware treads to have more dedicated cache.
+		Typical values:
+			None  - do not use affinity at all (recommended for multi-threaded workers),
+			1  - maximize parallelization (the number of worker processes = CPU units),
+			cpucorethreads()  - maximize the dedicated CPU cache (the number of
+				worker processes = CPU cores = CPU units / hardware treads per CPU core).
+		NOTE: specification of the afnstep might cause reduction of the workers.
 	"""
 
 	execute(job, async=True):
@@ -103,7 +135,7 @@ ExecPool(workers=cpu_count())
 		job  - the job to be executed, instance of Job
 		async  - async execution or wait until execution completed
 		  NOTE: sync tasks are started at once
-		return  - 0 on successful execution, proc. return code otherwise
+		return  - 0 on successful execution, process return code otherwise
 		"""
 
 	join(timeout=0):
@@ -138,8 +170,8 @@ The workflow consists of the following steps:
 from multiprocessing import cpu_count
 from sys import executable as PYEXEC  # Full path to the current Python interpreter
 
-# 1. Create Multi-process execution pool
-execpool = ExecPool(max(cpu_count() - 1, 1))
+# 1. Create Multi-process execution pool with the optimal affinity step to maximize the dedicated CPU cache size
+execpool = ExecPool(max(cpu_count() - 1, 1), cpucorethreads())
 global_timeout = 30 * 60  # 30 min, timeout to execute all scheduled jobs or terminate them
 
 

@@ -20,12 +20,12 @@
 from __future__ import print_function  # Required for stderr output, must be the first import;  division
 import sys
 import time
-import subprocess
 import collections
 import os
 import ctypes  # Required for the multiprocessing Value definition
 import types  # Required for instance methods definition
 import traceback  # Stacktrace
+import subprocess
 
 from multiprocessing import cpu_count
 from multiprocessing import Value
@@ -33,6 +33,7 @@ from subprocess import PIPE
 from subprocess import STDOUT
 
 
+_AFFINITYBIN = 'taskset'  # System app to set CPU affinity if required, should be preliminarry installed (taskset is present by default on NIX systems)
 DEBUG_TRACE = False  # Trace start / stop and other events to stderr
 
 
@@ -137,7 +138,7 @@ class Job(object):
 	"""
 	# NOTE: keyword-only arguments are specified after the *, supported only since Python 3
 	def __init__(self, name, workdir=None, args=(), timeout=0, ontimeout=False, task=None #,*
-	, startdelay=0, onstart=None, ondone=None, params=None, stdout=sys.stdout, stderr=sys.stderr):
+	, startdelay=0, onstart=None, ondone=None, params=None, stdout=sys.stdout, stderr=sys.stderr, omitafn=False):
 		"""Initialize job to be executed
 
 		name  - job name
@@ -164,6 +165,8 @@ class Job(object):
 		stdout  - None or file name or PIPE for the buffered output to be APPENDED
 		stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited
+		omitafn  - Omit affinity policy of the scheduler, which is actual when the affinity is enabled
+			and the process has multiple treads
 
 		tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 		tstop  - termination / completion time after ondone
@@ -197,6 +200,8 @@ class Job(object):
 		# Process-related file descriptors to be closed
 		self._fstdout = None
 		self._fstderr = None
+		# Omit scheduler affinity policy (actual when some process is computed on all treads, etc.)
+		self._omitafn = omitafn
 
 
 	def complete(self, graceful=True):
@@ -249,6 +254,26 @@ class Job(object):
 		self.tstop = time.time()
 
 
+def ramfracs(fracsize):
+	"""Evaluate the minimal number of RAM fractions of the specified size in GB
+
+	Used to estimate the reasonable number of processes with the specified minimal
+	dedicated RAM.
+
+	fracsize  - minimal size of each fraction in GB, can be a fractional number
+	return the minimal number of RAM fractions having the specified size in GB
+	"""
+	return int(os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / float(1024**3) / fracsize)
+
+
+def cpucorethreads():
+	"""The number of hardware treads per a CPU core
+
+	Used to specify CPU afinity step dedicating the maximal amount of CPU cache.
+	"""
+	return int(subprocess.check_output([r"lscpu | sed -rn 's/^Thread.*(\w+)$/\1/p'"], shell=True))
+
+
 class ExecPool(object):
 	'''Execution Pool of workers for jobs
 
@@ -256,20 +281,64 @@ class ExecPool(object):
 	each subsequent job.
 	'''
 
-	def __init__(self, workers=cpu_count()):
+	def __init__(self, workers=cpu_count(), afnstep=None):
 		"""Execution Pool constructor
 
-		workers  - number of resident worker processes
+		workers  - number of resident worker processes, >=1. The reasonable value is
+			<= NUMA nodes * node CPUs (which is typically returned by cpu_count()),
+			where "node CPU" is CPU cores * HW treads per core.
+			To guarantee minimal number of RAM per a process, for example 2.5 GB:
+				workers = min(cpu_count(), ramfracs(2.5))
+		afnstep  - affinity step, integer if applied. Used to bind worker to the
+			processing units to have warm cache for single thread workers.
+			Typical values:
+				None  - do not use affinity at all (recommended for multi-threaded workers),
+				1  - maximize parallelization (the number of worker processes = CPU units),
+				cpucorethreads()  - maximize the dedicated CPU cache (the number of
+					worker processes = CPU cores = CPU units / hardware treads per CPU core).
+			NOTE: specification of the afnstep might cause reduction of the workers.
 		"""
 		assert workers >= 1, 'At least one worker should be managed by the pool'
 
+		# Verify and update workers and afnstep if required
+		if afnstep:
+			# Check whether _AFFINITYBIN exists in the system
+			try:
+				subprocess.call([_AFFINITYBIN, '-V'])
+				if afnstep > cpu_count() / workers:
+					print('WARNING: the number of worker processes is reduced'
+						' ({wlim0} -> {wlim} to satisfy the affinity step'
+						.format(wlim0=workers, wlim=cpu_count() // afnstep))
+					workers = cpu_count() // afnstep
+			except OSError as err:
+				afnstep = None
+				print('WARNING: {afnbin} does not exists in the system to fix affinity: {err}'
+					.format(afnbin=_AFFINITYBIN, err=err))
 		self._workersLim = workers  # Max number of workers
-		self._workers = {}  # Current workers: 'jname': <proc>; <proc>: timeout
+		self._workers = {}  # Current workers (processes, executing jobs): 'jname': <proc>; <proc>: timeout
 		self._jobs = collections.deque()  # Scheduled jobs: 'jname': **args
 		self._tstart = None  # Start time of the execution of the first task
 		# Predefined privte attributes
 		self._latency = 1  # 1 sec of sleep on pooling
 		self._killCount = 3  # 3 cycles of self._latency, termination wait time
+		self._afnstep = afnstep  # Affinity step for each worker process
+		self._affinity = None if not self._afnstep else [None]*self._workersLim
+		assert self._workersLim * (self._afnstep if self._afnstep else 1) <= cpu_count(), (
+			'_workersLim or _afnstep is too large')
+
+
+	def __clearAffinity(self, job):
+		"""Clear job affinity
+
+		job  - the job to be processed
+		"""
+		if self._affinity and not job._omitafn and job.proc is not None:
+			try:
+				self._affinity[self._affinity.index(job.proc.pid)] = None
+			except ValueError:
+				print('WARNING: affinity clearup is requested to the job "{}" without the activated affinity'
+					.format(job.name))
+				pass  # Do nothing if the affinity was not set for this process
 
 
 	def __del__(self):
@@ -285,9 +354,11 @@ class ExecPool(object):
 		if not self._jobs and not self._workers:
 			return
 
-		print('WARNING: terminating the workers pool ...')
+		print('WARNING: terminating the execution pool with {} non-scheduled jobs and {} workers...'
+			.format(len(self._jobs), len(self._workers)))
 		for job in self._jobs:
 			job.complete(False)
+			# Note: only executing jobs, i.e. workers might have activated affinity
 			print('  Scheduled "{}" is removed'.format(job.name))
 		self._jobs.clear()
 		while self._workers:
@@ -314,6 +385,7 @@ class ExecPool(object):
 			# Tidy jobs
 			for job in self._workers.values():
 				job.complete(False)
+				self.__clearAffinity(job)
 			self._workers.clear()
 
 
@@ -377,8 +449,16 @@ class ExecPool(object):
 				print('"{}" output channels:\n\tstdout: {}\n\tstderr: {}'.format(job.name
 					, str(job.stdout), str(job.stderr)))
 			if(job.args):
+				# Consider CPU affinity
+				iafn = -1 if not self._affinity or job._omitafn else self._affinity.index(None)  # Index in the affinity table to bind process to the CPU/core
+				if iafn >= 0:
+					job.args = [_AFFINITYBIN, '-c', str(iafn * self._afnstep)] + list(job.args)
 				#print('Opening proc with:\n\tjob.args: {},\n\tcwd: {}'.format(' '.join(job.args), job.workdir), file=sys.stderr)
 				job.proc = subprocess.Popen(job.args, bufsize=-1, cwd=job.workdir, stdout=fstdout, stderr=fstderr)  # bufsize=-1 - use system default IO buffer size
+				if iafn >= 0:
+					self._affinity[iafn] = job.proc.pid
+					print('Affinity {afn} (CPU #{icpu}) is set for the job "{jname}" proc {pid}'
+						.format(afn=iafn, icpu=iafn*self._afnstep, jname=job.name, pid=job.proc.pid))
 				# Wait a little bit to start the process besides it's scheduling
 				if job.startdelay > 0:
 					time.sleep(job.startdelay)
@@ -387,12 +467,15 @@ class ExecPool(object):
 				job.name, err, traceback.format_exc()), file=sys.stderr)
 			# Note: process-associated file descriptors are closed in complete()
 			job.complete(False)
+			if job.proc is not None:  # Note: this is an extra rare, but possible case
+				self.__clearAffinity(job)  # Note: process can both exists here and does not exist, i.e. the process state is undefined
 		else:
 			if async:
 				self._workers[job.proc] = job
 			else:
 				job.proc.wait()
 				job.complete()
+				self.__clearAffinity(job)
 				return job.proc.returncode
 		return 0
 
@@ -428,11 +511,13 @@ class ExecPool(object):
 				self.__startJob(job)
 			else:
 				job.complete(False)
+				self.__clearAffinity(job)
 
 		# Process completed jobs: execute callbacks and remove the workers
 		for proc, job in completed:
 			del self._workers[proc]
 			job.complete()
+			self.__clearAffinity(job)
 
 		# Start subsequent job if it is required
 		while self._jobs and len(self._workers) <  self._workersLim:
@@ -445,7 +530,7 @@ class ExecPool(object):
 		job  - the job to be executed, instance of Job
 		async  - async execution or wait until execution completed
 		  NOTE: sync tasks are started at once
-		return  - 0 on successful execution, proc. return code otherwise
+		return  - 0 on successful execution, process return code otherwise
 		"""
 		assert isinstance(job, Job), 'job type is invalid'
 		assert len(self._workers) <= self._workersLim, 'Number of workers exceeds the limit'
