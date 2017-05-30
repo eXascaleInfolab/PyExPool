@@ -1,6 +1,6 @@
 # PyExPool
 
-A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying optional execution parameters:
+A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying optional execution parameters considering NUMA architecture:
 
 - automatic CPU affinity management and maximization of the dedicated CPU cache for a worker process
 - minimal amount of RAM per a worker process

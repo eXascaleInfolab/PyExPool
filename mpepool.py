@@ -17,7 +17,7 @@
 \date: 2015-07
 """
 
-from __future__ import print_function  # Required for stderr output, must be the first import;  division
+from __future__ import print_function, division  # Required for stderr output, must be the first import
 import sys
 import time
 import collections
@@ -271,7 +271,61 @@ def cpucorethreads():
 
 	Used to specify CPU afinity step dedicating the maximal amount of CPU cache.
 	"""
-	return int(subprocess.check_output([r"lscpu | sed -rn 's/^Thread.*(\w+)$/\1/p'"], shell=True))
+	return int(subprocess.check_output([r"lscpu | sed -rn 's/^Thread\(s\).*(\w+)$/\1/p'"], shell=True))
+
+
+def cpunodes():
+	"""The number of NUMA nodes, where CPUs are located
+
+	Used to evaluate CPU index  afinity step considering that
+	"""
+	return int(subprocess.check_output([r"lscpu | sed -rn 's/^NUMA node\(s\).*(\w+)$/\1/p'"], shell=True))
+
+
+def afnicpu(iafn, corethreads=1, nodes=1, crossnodes=True):
+	"""Affinity table index mapping to the CPU index
+
+	Affinity table is a reduced CPU table by the non-primary HW treads in each core.
+	Typically CPUs are evumerated across the nodes:
+	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30
+	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31
+	So, in case the number of threads per core is 2 then the following CPUs should be bound:
+	0, 1, 4, 5, 8, ...
+	2 > 4, 4 > 8
+	#i ->  i  +  i // cpunodes() * cpunodes() * (cpucorethreads() - 1)
+
+	iafn  - index in the affinity table to be mapped into the respective CPU index
+	corethreads  - HW threads per CPU core or just some affinity step,
+		1  - maximal parallelization with the minimal CPU cache size
+	nodes  - NUMA nodes containing CPUs
+	crossnodes  - cross-nodes enumeration of the CPUs in the NUMA nodes
+
+	return CPU index respective to the specified index in the affinity table
+
+	>>> afnicpu(2, 2, 2, True)
+	4
+	>>> afnicpu(4, 2, 2, True)
+	8
+	>>> afnicpu(2, 4, 2, True)
+	8
+	>>> afnicpu(2, 2, 3, True)
+	2
+	>>> afnicpu(4, 2, 3, True)
+	7
+	>>> afnicpu(1, 2, 1, True)
+	2
+	>>> afnicpu(3, 2, 1, True)
+	6
+	>>> afnicpu(4, 1, 3, True)
+	4
+	>>> afnicpu(3, 2, 2, False)
+	6
+	>>> afnicpu(3, 2, 3, False)
+	6
+	"""
+	if crossnodes:
+		return iafn + iafn // nodes * nodes * (corethreads - 1)
+	return iafn * corethreads
 
 
 class ExecPool(object):
@@ -325,6 +379,7 @@ class ExecPool(object):
 		self._affinity = None if not self._afnstep else [None]*self._workersLim
 		assert self._workersLim * (self._afnstep if self._afnstep else 1) <= cpu_count(), (
 			'_workersLim or _afnstep is too large')
+		self._numanodes = cpunodes()  # Defines secuence of the CPU ids on affinity table mapping for the crossnodes enumeration
 
 
 	def __clearAffinity(self, job):
@@ -452,13 +507,13 @@ class ExecPool(object):
 				# Consider CPU affinity
 				iafn = -1 if not self._affinity or job._omitafn else self._affinity.index(None)  # Index in the affinity table to bind process to the CPU/core
 				if iafn >= 0:
-					job.args = [_AFFINITYBIN, '-c', str(iafn * self._afnstep)] + list(job.args)
+					job.args = [_AFFINITYBIN, '-c', str(afnicpu(iafn, self._afnstep, self._numanodes))] + list(job.args)
 				#print('Opening proc with:\n\tjob.args: {},\n\tcwd: {}'.format(' '.join(job.args), job.workdir), file=sys.stderr)
 				job.proc = subprocess.Popen(job.args, bufsize=-1, cwd=job.workdir, stdout=fstdout, stderr=fstderr)  # bufsize=-1 - use system default IO buffer size
 				if iafn >= 0:
 					self._affinity[iafn] = job.proc.pid
 					print('Affinity {afn} (CPU #{icpu}) is set for the job "{jname}" proc {pid}'
-						.format(afn=iafn, icpu=iafn*self._afnstep, jname=job.name, pid=job.proc.pid))
+						.format(afn=iafn, icpu=afnicpu(iafn, self._afnstep, self._numanodes), jname=job.name, pid=job.proc.pid))
 				# Wait a little bit to start the process besides it's scheduling
 				if job.startdelay > 0:
 					time.sleep(job.startdelay)
@@ -577,3 +632,15 @@ class ExecPool(object):
 			self.__reviseWorkers()
 		self._tstart = None
 		return True
+
+
+if __name__ == '__main__':
+	"""Doc tests execution"""
+	import doctest
+	#doctest.testmod()  # Detailed tests output
+	flags = doctest.REPORT_NDIFF | doctest.REPORT_ONLY_FIRST_FAILURE
+	failed, total = doctest.testmod(optionflags=flags)
+	if failed:
+		print("Doctest FAILED: {} failures out of {} tests".format(failed, total))
+	else:
+		print('Doctest PASSED')
