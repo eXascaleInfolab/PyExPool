@@ -277,7 +277,7 @@ def cpucorethreads():
 def cpunodes():
 	"""The number of NUMA nodes, where CPUs are located
 
-	Used to evaluate CPU index  afinity step considering that
+	Used to evaluate CPU index from the affinity table index considerin the NUMA architectore.
 	"""
 	return int(subprocess.check_output([r"lscpu | sed -rn 's/^NUMA node\(s\).*(\w+)$/\1/p'"], shell=True))
 
@@ -291,7 +291,7 @@ def afnicpu(iafn, corethreads=1, nodes=1, crossnodes=True):
 	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31
 	So, in case the number of threads per core is 2 then the following CPUs should be bound:
 	0, 1, 4, 5, 8, ...
-	2 > 4, 4 > 8
+	2 -> 4, 4 -> 8
 	#i ->  i  +  i // cpunodes() * cpunodes() * (cpucorethreads() - 1)
 
 	iafn  - index in the affinity table to be mapped into the respective CPU index

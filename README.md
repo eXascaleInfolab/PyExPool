@@ -111,6 +111,33 @@ def cpucorethreads():
 	Used to specify CPU afinity step dedicating the maximal amount of CPU cache.
 	"""
 
+def cpunodes():
+	"""The number of NUMA nodes, where CPUs are located
+
+	Used to evaluate CPU index from the affinity table index considerin the NUMA architectore.
+	"""
+
+def afnicpu(iafn, corethreads=1, nodes=1, crossnodes=True):
+	"""Affinity table index mapping to the CPU index
+
+	Affinity table is a reduced CPU table by the non-primary HW treads in each core.
+	Typically CPUs are evumerated across the nodes:
+	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30
+	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31
+	So, in case the number of threads per core is 2 then the following CPUs should be bound:
+	0, 1, 4, 5, 8, ...
+	2 -> 4, 4 -> 8
+	#i ->  i  +  i // cpunodes() * cpunodes() * (cpucorethreads() - 1)
+
+	iafn  - index in the affinity table to be mapped into the respective CPU index
+	corethreads  - HW threads per CPU core or just some affinity step,
+		1  - maximal parallelization with the minimal CPU cache size
+	nodes  - NUMA nodes containing CPUs
+	crossnodes  - cross-nodes enumeration of the CPUs in the NUMA nodes
+
+	return CPU index respective to the specified index in the affinity table
+	"""
+
 ExecPool(workers=cpu_count(), afnstep=None)
 	"""Multi-process execution pool of jobs
 
