@@ -285,10 +285,10 @@ class ExecPool(object):
 		"""Execution Pool constructor
 
 		workers  - number of resident worker processes, >=1. The reasonable value is
-			<= NUMA nodes * node CPUs (which is typically returned by cpu_count()),
-			where "node CPU" is CPU cores * HW treads per core.
+			<= NUMA nodes * node CPUs, which is typically returned by cpu_count(),
+			where node CPUs = CPU cores * HW treads per core.
 			To guarantee minimal number of RAM per a process, for example 2.5 GB:
-				workers = min(cpu_count(), ramfracs(2.5))
+				workers = min(cpu_count(), max(ramfracs(2.5), 1))
 		afnstep  - affinity step, integer if applied. Used to bind worker to the
 			processing units to have warm cache for single thread workers.
 			Typical values:

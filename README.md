@@ -34,8 +34,8 @@ Flexible API provides *automatic CPU affinity management, maximization of the de
 ### Job
 
 ```python
-Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
-, startdelay=0, onstart=None, ondone=None, params=None, stdout=sys.stdout, stderr=sys.stderr):
+Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None, startdelay=0
+, onstart=None, ondone=None, params=None, stdout=sys.stdout, stderr=sys.stderr, omitafn=False):
 	"""Initialize job to be executed
 
 	name  - job name
@@ -115,10 +115,10 @@ ExecPool(workers=cpu_count(), afnstep=None)
 	"""Multi-process execution pool of jobs
 
 	workers  - number of resident worker processes, >=1. The reasonable value is
-		<= NUMA nodes * node CPUs (which is typically returned by cpu_count()),
-		where "node CPU" is CPU cores * HW treads per core.
+		<= NUMA nodes * node CPUs, which is typically returned by cpu_count(),
+		where node CPUs = CPU cores * HW treads per core.
 		To guarantee minimal number of RAM per a process, for example 2.5 GB:
-			workers = min(cpu_count(), ramfracs(2.5))
+			workers = min(cpu_count(), max(ramfracs(2.5), 1))
 	afnstep  - affinity step, integer if applied. Used to bound whole CPU cores
 		instead of the hardware treads to have more dedicated cache.
 		Typical values:
