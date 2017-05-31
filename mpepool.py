@@ -29,9 +29,12 @@ import subprocess
 
 from multiprocessing import cpu_count
 from multiprocessing import Value
-from subprocess import PIPE
-from subprocess import STDOUT
 
+_ADJUST_WORKERS_BY_RAM = False  # Adjust the number of worker processing depending on the remained free RAM, which is actual when computations should avoid swap usage
+_ADJUST_RAM_MIN = 0.02  # Relative minimal amount of the remained free RAM to readjust workers count or terminate the benchmark, typically 5 .. 1 %
+if _ADJUST_WORKERS_BY_RAM:
+	raise NotImplementedError('Dynamic adjustment of the workers queue for in-RAM processing is not implemented')
+	#import psutil
 
 _AFFINITYBIN = 'taskset'  # System app to set CPU affinity if required, should be preliminarry installed (taskset is present by default on NIX systems)
 DEBUG_TRACE = False  # Trace start / stop and other events to stderr
@@ -45,8 +48,8 @@ def secondsToHms(seconds):
 	return hours, mins, secs
 	"""
 	assert seconds >= 0, 'seconds validation failed'
-	hours = int(seconds / 3600)
-	mins = int((seconds - hours * 3600) / 60)
+	hours = int(seconds // 3600)
+	mins = int((seconds - hours * 3600) // 60)
 	secs = seconds - hours * 3600 - mins * 60
 	return hours, mins, secs
 
@@ -335,7 +338,7 @@ class ExecPool(object):
 	each subsequent job.
 	'''
 
-	def __init__(self, workers=cpu_count(), afnstep=None):
+	def __init__(self, workers=cpu_count(), afnstep=None, inramproc=False):
 		"""Execution Pool constructor
 
 		workers  - number of resident worker processes, >=1. The reasonable value is
@@ -351,6 +354,10 @@ class ExecPool(object):
 				cpucorethreads()  - maximize the dedicated CPU cache (the number of
 					worker processes = CPU cores = CPU units / hardware treads per CPU core).
 			NOTE: specification of the afnstep might cause reduction of the workers.
+		inramproc  - try to perform in-RAM processing adjusting the number of worker
+			processes in case of lack of the free RAM up to them whole pool termination
+			starting from the most memory-heavy processes.
+			NOTE: applicable only if _ADJUST_WORKERS_BY_RAM
 		"""
 		assert workers >= 1, 'At least one worker should be managed by the pool'
 
@@ -373,13 +380,14 @@ class ExecPool(object):
 		self._jobs = collections.deque()  # Scheduled jobs: 'jname': **args
 		self._tstart = None  # Start time of the execution of the first task
 		# Predefined privte attributes
-		self._latency = 1  # 1 sec of sleep on pooling
 		self._killCount = 3  # 3 cycles of self._latency, termination wait time
 		self._afnstep = afnstep  # Affinity step for each worker process
 		self._affinity = None if not self._afnstep else [None]*self._workersLim
 		assert self._workersLim * (self._afnstep if self._afnstep else 1) <= cpu_count(), (
 			'_workersLim or _afnstep is too large')
 		self._numanodes = cpunodes()  # Defines secuence of the CPU ids on affinity table mapping for the crossnodes enumeration
+		self._inramproc = _ADJUST_WORKERS_BY_RAM and inramproc
+		self._latency = 2 + self._inramproc  # Seconds of sleep on pooling
 
 
 	def __clearAffinity(self, job):
@@ -541,6 +549,44 @@ class ExecPool(object):
 		Check for the comleted jobs and their timeous, update corresponding
 		workers and start the jobs if possible
 		"""
+		## Adjust workers depending on the memory consumption if required
+		#if self._inramproc:
+		#	# Check for the low free memory condition
+		#	#assert _ADJUST_WORKERS_BY_RAM, '_inramproc verification failed'
+		#	vmem = psutil.virtual_memory()
+		#	if vmem.free < _ADJUST_RAM_MIN * vmem.total:
+		#		# Find the heaviest worker process to be terminated
+		#		xm = 0  # Largest process memory (VMS - all process memory, not just RSS because we are trying to fit it into the RAM)
+		#		xp = None
+		#		for proc in self._workers:
+		#			pmem = psutil.Process(proc.pid).memory_info().vms
+		#			if pmem > xm:
+		#				xm = pmem
+		#				xp = proc
+		#		# Terminate the process if it has not been completed yet
+		#		xj = self._workers[xp]  # Job of the correespondinf process
+		#		if xp.poll() is None:
+		#			xp.kill()
+		#			#print('WARNING, "{}" #{} is terminated by the timeout ({:.4f} sec): {:.4f} sec ({} h {} m {:.4f} s)'
+		#			#.format(jx.name, px.pid, jx.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
+		#			# Reschedule for the future
+		#			self._jobs.append(xj)
+		#		else:
+		#			xj.complete()
+		#		self.__clearAffinity(xj)
+		#		del self._workers[xp]
+		#		# Reduce the workers limit
+		#		if self._workersLim > len(self._workers):
+		#			self._workersLim = self._workers
+		#		else:
+		#			self._workersLim -= 1
+		#			assert self._workersLim == len(self._workers), '_workersLim verification failed'
+		#
+		#		if not self._workersLim:
+		#			self._terminate()
+		#			return
+
+		# Process completed jobs and check timeouts
 		completed = []  # Completed workers
 		for proc, job in self._workers.items():
 			if proc.poll() is not None:
@@ -562,11 +608,11 @@ class ExecPool(object):
 			print('WARNING, "{}" #{} is terminated by the timeout ({:.4f} sec): {:.4f} sec ({} h {} m {:.4f} s)'
 				.format(job.name, proc.pid, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			# Restart the job if required
+			self.__clearAffinity(job)  # Note: the affinity must be updated before the job restart
 			if job.ontimeout:
 				self.__startJob(job)
 			else:
 				job.complete(False)
-				self.__clearAffinity(job)
 
 		# Process completed jobs: execute callbacks and remove the workers
 		for proc, job in completed:
