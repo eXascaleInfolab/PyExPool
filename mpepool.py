@@ -18,6 +18,28 @@
 """
 
 from __future__ import print_function, division  # Required for stderr output, must be the first import
+
+try:
+	from future.utils import viewitems  # Required to efficiently traverse items of dictionaries in both Python 2 and 3
+except ImportError:
+	def hasMethod(obj, method):
+		"""Whether the object has the specified method
+		Note: no exceptions are raised
+
+		obj  - the object to be checked for the method
+		method  - name of the target method
+
+		return  whether obj.method is callable
+		"""
+		try:
+			ometh = getattr(obj, method, None)
+			return callable(ometh)
+		except Exception:
+			pass
+		return False
+
+	viewitems = lambda dct: dct.items() if not hasMethod(dct, viewitems) else dct.viewitems()
+
 import sys
 import time
 import collections
@@ -34,7 +56,10 @@ _ADJUST_WORKERS_BY_RAM = False  # Adjust the number of worker processing dependi
 _ADJUST_RAM_MIN = 0.02  # Relative minimal amount of the remained free RAM to readjust workers count or terminate the benchmark, typically 5 .. 1 %
 if _ADJUST_WORKERS_BY_RAM:
 	raise NotImplementedError('Dynamic adjustment of the workers queue for in-RAM processing is not implemented')
-	#import psutil
+	#try:
+	#	import psutil
+	#except ImportError:
+	#	_ADJUST_WORKERS_BY_RAM = False
 
 _AFFINITYBIN = 'taskset'  # System app to set CPU affinity if required, should be preliminarry installed (taskset is present by default on NIX systems)
 DEBUG_TRACE = False  # Trace start / stop and other events to stderr
@@ -61,7 +86,7 @@ class Task(object):
 		"""Initialize task, which is a group of jobs to be executed
 
 		name  - task name
-		timeout  - execution timeout. Default: 0, means infinity
+		timeout  - execution timeout in seconds. Default: 0, means infinity
 		onstart  - callback which is executed on the task starting (before the execution
 			started) in the CONTEXT OF THE CALLER (main process) with the single argument,
 			the task. Default: None
@@ -81,6 +106,7 @@ class Task(object):
 		self.name = name
 		self.timeout = timeout
 		self.params = params
+		# Add member handlers if required
 		self.onstart = types.MethodType(onstart, self) if onstart else None
 		self.ondone = types.MethodType(ondone, self) if ondone else None
 		self.stdout = stdout
@@ -115,7 +141,7 @@ class Task(object):
 	def delJob(self, graceful):
 		"""Delete one job from the task
 
-		graceful  - the job is successfully completed or it was terminated
+		graceful  - whether the job is successfully completed or it was terminated
 		return  - None
 		"""
 		final = False
@@ -148,7 +174,7 @@ class Job(object):
 		workdir  - working directory for the corresponding process, None means the dir of the benchmarking
 		args  - execution arguments including the executable itself for the process
 			NOTE: can be None to make make a stub process and execute the callbacks
-		timeout  - execution timeout. Default: 0, means infinity
+		timeout  - execution timeout in seconds. Default: 0, means infinity
 		ontimeout  - action on timeout:
 			False  - terminate the job. Default
 			True  - restart the job
@@ -165,9 +191,11 @@ class Job(object):
 			CONTEXT OF THE CALLER (main process) with the single argument, the job. Default: None
 			ATTENTION: must be lightweight
 		params  - additional parameters to be used in callbacks
-		stdout  - None or file name or PIPE for the buffered output to be APPENDED
+		stdout  - None or file name or PIPE for the buffered output to be APPENDED.
+			The path is interpreted in the CONTEXT of the CALLER
 		stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
-			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited
+			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited.
+			The path is interpreted in the CONTEXT of the CALLER
 		omitafn  - Omit affinity policy of the scheduler, which is actual when the affinity is enabled
 			and the process has multiple treads
 
@@ -205,6 +233,10 @@ class Job(object):
 		self._fstderr = None
 		# Omit scheduler affinity policy (actual when some process is computed on all treads, etc.)
 		self._omitafn = omitafn
+		# Rescheduling data
+		#self.category  # Job name + params
+		#self.weight  # Network size
+		#self.vmem  # Consumed VM on rescheduling,inherited in the dependent heviar tasks of the same category
 
 
 	def complete(self, graceful=True):
@@ -520,7 +552,7 @@ class ExecPool(object):
 				job.proc = subprocess.Popen(job.args, bufsize=-1, cwd=job.workdir, stdout=fstdout, stderr=fstderr)  # bufsize=-1 - use system default IO buffer size
 				if iafn >= 0:
 					self._affinity[iafn] = job.proc.pid
-					print('Affinity {afn} (CPU #{icpu}) is set for the job "{jname}" proc {pid}'
+					print('Affinity {afn} (CPU #{icpu}) of job "{jname}" proc {pid}'
 						.format(afn=iafn, icpu=afnicpu(iafn, self._afnstep, self._numanodes), jname=job.name, pid=job.proc.pid))
 				# Wait a little bit to start the process besides it's scheduling
 				if job.startdelay > 0:
@@ -588,7 +620,7 @@ class ExecPool(object):
 
 		# Process completed jobs and check timeouts
 		completed = []  # Completed workers
-		for proc, job in self._workers.items():
+		for proc, job in viewitems(self._workers):  # .items()  Note: the number of _workers is small
 			if proc.poll() is not None:
 				completed.append((proc, job))
 				continue
@@ -659,7 +691,7 @@ class ExecPool(object):
 		"""Execution cycle
 
 		timeout  - execution timeout in seconds before the workers termination, >= 0.
-			0 means absebse of the timeout. The time is measured SINCE the first job
+			0 means unlimited time. The time is measured SINCE the first job
 			was scheduled UNTIL the completion of all scheduled jobs.
 		return  - True on graceful completion, Flase on termination by the specified timeout
 		"""
