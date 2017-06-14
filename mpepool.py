@@ -258,7 +258,7 @@ class Job(object):
 			if self.ondone:
 				try:
 					self.ondone()
-				except StandardError as err:
+				except Exception as err:
 					print('ERROR in ondone callback of "{}": {}. {}'.format(
 						self.name, err, traceback.format_exc()), file=sys.stderr)
 			# Clean up
@@ -504,7 +504,7 @@ class ExecPool(object):
 			#print('Starting onstart() for job {}: {}'.format(job.name), file=sys.stderr)
 			try:
 				job.onstart()
-			except StandardError as err:
+			except Exception as err:
 				print('ERROR in onstart() callback of "{}": {}. {}'.format(
 					job.name, err, traceback.format_exc()), file=sys.stderr)
 				return -1
@@ -557,7 +557,7 @@ class ExecPool(object):
 				# Wait a little bit to start the process besides it's scheduling
 				if job.startdelay > 0:
 					time.sleep(job.startdelay)
-		except StandardError as err:  # Should not occur: subprocess.CalledProcessError
+		except Exception as err:  # Should not occur: subprocess.CalledProcessError
 			print('ERROR on "{}" execution occurred: {}, skipping the job. {}'.format(
 				job.name, err, traceback.format_exc()), file=sys.stderr)
 			# Note: process-associated file descriptors are closed in complete()
