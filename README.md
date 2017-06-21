@@ -4,19 +4,24 @@ A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-
 
 - automatic CPU affinity management and maximization of the dedicated CPU cache for a worker process
 - minimal amount of RAM per a worker process
-- timeout per each Job (it was the main motivation to implement this module, because this feature is not provided by any Python implementation out of the box)
+- automatic rescheduling of the worker processes and modification of their queue parameters on low memory condition for the in-RAM computations (requires [psutil](https://pypi.python.org/pypi/psutil), can be disabled)
+- timeout per each Job (it was the main initial motivation to implement this module, because this feature is not provided by any Python implementation out of the box)
 - onstart/ondone callbacks, ondone is called only on successful completion (not termination) for both Jobs and Tasks (group of jobs)
 - stdout/err output, which can be redirected to any custom file or PIPE
-- custom parameters for each Job and embracing Task besides the name/id
+- custom parameters for each Job and respective owner Task besides the name/id
 
-Implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/XI-lab/PyCABeM)), not as a separate library.  
-The main purpose of this single-file module is the **asynchronous execution of modules and external executables**. In case asynchronous execution of the Python functions is required and usage of external dependences is not a problem, then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
+> Automatic rescheduling of the workers on low memory condition for the in-RAM computations is an optional and the only feature that requires external package, namely [psutil](https://pypi.python.org/pypi/psutil).
+
+Implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/eXascaleInfolab/PyCABeM)), not as a separate library.  
+The main purpose of this single-file module is the **asynchronous execution of modules and external executables with cache / parallelization tuning and optional automatic rescheduler adjusting for the in-RAM computations**.  
+In case asynchronous execution of the *Python functions* is required and usage of external dependences is not a problem, or automatic jobs scheduling for in-RAM computations is not required, then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
 
 \author: (c) Artem Lutov <artem@exascale.info>  
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
 \date: 2016-01  
 
 ## Content
+- [Dependencies](#dependencies)
 - [API](#api)
 	- [Job](#job)
 	- [Task](#task)
@@ -26,9 +31,17 @@ The main purpose of this single-file module is the **asynchronous execution of m
 	- [Failsafe Termination](#failsafe-termination)
 - [Related Projects](#related-projects)
 
+## Dependencies
+
+[psutil](https://pypi.python.org/pypi/psutil) only in case of dynamic jobs queue adaption is required for the in-RAM computations, otherwise there are no any dependencies.  
+To install `psutil`:
+```
+$ sudo pip install psutil
+```
+
 ## API
 
-Flexible API provides *automatic CPU affinity management, maximization of the dedicated CPU cache and limitation of the minimal dedicated RAM per a worker process*, optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and more...  
+Flexible API provides *automatic CPU affinity management, maximization of the dedicated CPU cache, limitation of the minimal dedicated RAM per a worker process, dynamic rescheduling of the worker processes on low memoty condition and optimization of their queue for the in-RAM computations*, optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and more...  
 `ExecPool` represents a pool of worker processes to execute `Job`s that can be grouped into `Tasks`s for more flexible management.
 
 ### Job
@@ -253,13 +266,22 @@ import signal  # Intercept kill signals
 # and recreated on jobs scheduling
 execpool = None
 
-def terminationHandler(signal, frame):
-	"""Signal termination handler"""
+def terminationHandler(signal=None, frame=None, terminate=True):
+	"""Signal termination handler
+
+	signal  - raised signal
+	frame  - origin stack frame
+	terminate  - whether to terminate the application
+	"""
 	global execpool
 
 	if execpool:
-		del execpool  # Destructors are called later
-	sys.exit(0)
+		del execpool  # Destructors are caled later
+		# Define _execpool to avoid unnessary trash in the error log, which might
+		# be caused by the attempt of subsequent deletion on destruction
+		execpool = None  # Note: otherwise _execpool becomes undefined
+	if terminate:
+		sys.exit()  # exit(0), 0 is the default exit code.
 
 # Set handlers of external signals, which can be the first lines inside
 # if __name__ == '__main__':
@@ -268,7 +290,6 @@ signal.signal(signal.SIGHUP, terminationHandler)
 signal.signal(signal.SIGINT, terminationHandler)
 signal.signal(signal.SIGQUIT, terminationHandler)
 signal.signal(signal.SIGABRT, terminationHandler)
-
 
 # Define execpool to schedule some jobs
 execpool = ExecPool(max(cpu_count() - 1, 1))
@@ -279,10 +300,12 @@ Also it is recommended to register the termination handler for the normal interp
 ```python
 import atexit
 ...
-atexit.register(terminationHandler)
+# Set termination handler for the internal termination
+atexit.register(terminationHandler, terminate=False)
 ```
 
-**Note:** Please, [star this project](//github.com/XI-lab/PyExPool) if you use it.
+**Note:** Please, [star this project](//github.com/eXascaleInfolab/PyExPool) if you use it.
 
 ## Related Projects
 - [ExecTime](https://bitbucket.org/lumais/exectime)  -  *failover* lightweight resource consumption profiler (*timings and memory*), applicable to multiple processes with optional *per-process results labeling* and synchronized *output to the specified file* or `stderr`: https://bitbucket.org/lumais/exectime
+- [PyCABeM](https://github.com/eXascaleInfolab/PyCABeM) - Python Benchmarking Framework for the Clustering Algorithms Evaluation. Uses extrinsic (NMIs) and intrinsic (Q) measures for the clusters quality evaluation considering overlaps (nodes membership by multiple clusters).
