@@ -181,8 +181,8 @@ class Job(object):
 	"""
 	# NOTE: keyword-only arguments are specified after the *, supported only since Python 3
 	def __init__(self, name, workdir=None, args=(), timeout=0, ontimeout=False, task=None #,*
-	, startdelay=0, onstart=None, ondone=None, params=None, stdout=sys.stdout, stderr=sys.stderr
-	, omitafn=False, category=None, size=0, slowdown=1.):
+	, startdelay=0, onstart=None, ondone=None, params=None, category=None, size=0, slowdown=1.
+	, omitafn=False, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize job to be executed
 
 		# Main parameters
@@ -682,6 +682,9 @@ class ExecPool(object):
 			if job.terminates and job.ontimeout:
 				self.__clearAffinity(job)  # Note: the affinity must be updated before the job restart
 				self.__startJob(job)
+				if _DEBUG_TRACE:
+					print('"  {}" #{} is restarted with timeout {:.4f} sec'
+						.format(job.name, proc.pid, job.timeout), file=sys.stderr)
 				if self._vmlimit:
 					vmtotal += job.vmem
 			else:
@@ -732,7 +735,7 @@ class ExecPool(object):
 
 
 
-	def join(self, timeout=0):
+	def join(self, timeout=0.):
 		"""Execution cycle
 
 		timeout  - execution timeout in seconds before the workers termination, >= 0.
@@ -740,7 +743,7 @@ class ExecPool(object):
 			was scheduled UNTIL the completion of all scheduled jobs.
 		return  - True on graceful completion, Flase on termination by the specified timeout
 		"""
-		assert timeout >= 0, 'timeout valiadtion failed'
+		assert timeout >= 0., 'timeout valiadtion failed'
 		if self._tstart is None:
 			assert not self._jobs and not self._workers, \
 				'Start time should be defined for the present jobs'
@@ -760,10 +763,13 @@ class ExecPool(object):
 class TestExecPool(unittest.TestCase):
 	from math import ceil
 
+	#global _DEBUG_TRACE
+	#_DEBUG_TRACE = True
+
 	_WPROCSMAX = max(cpu_count() - 1, 1)  # Maximal number of the worker processes, should be >= 1
 	_AFNSTEP = cpucorethreads()  # Affinity
 	_latency = 0.1  # Approximate minimal latency of ExecPool in seconds
-	# _execpool = None
+	#_execpool = None
 
 
 	#@staticmethod
@@ -803,16 +809,96 @@ class TestExecPool(unittest.TestCase):
 
 
 	def test_jobTimeoutSimple(self):
-		"""Validate termination of a single job by timeout"""
+		"""Validate termination of a single job by timeout and completion of another job"""
 		timeout = TestExecPool._latency * 4  # Note: should be larger than 3*_latency
-		worktime = 1 + (timeout * 2) // 1
+		worktime = max(1, TestExecPool._latency) + (timeout * 2) // 1  # Job work time
 		assert TestExecPool._latency * 3 < timeout < worktime, 'Testcase parameters validation failed'
 
 		tstart = time.time()
-		self._execpool.execute(Job('j1', args=('sleep', str(worktime)), timeout=timeout))
-		self._execpool.join()
-		self.assertLess(time.time() - tstart, worktime)
-		self.assertGreaterEqual(time.time() - tstart, timeout)
+		jterm = Job('j_timeout', args=('sleep', str(worktime)), timeout=timeout)
+		self._execpool.execute(jterm)
+		jcompl = Job('j_complete', args=('sleep', '0'), timeout=timeout)
+		self._execpool.execute(jcompl)
+		# Validate successful completion of the execution pool
+		self.assertTrue(self._execpool.join())
+		etime = time.time() - tstart  # Execution time
+		self.assertFalse(self._execpool._workers)  # Workers shuold be empty
+		# Validate termination time
+		self.assertLess(etime, worktime)
+		self.assertGreaterEqual(etime, timeout)
+		# Validate jobs timings
+		self.assertTrue(tstart < jterm.tstart <= jcompl.tstart <= jcompl.tstop < jterm.tstop)
+		self.assertLessEqual(jterm.tstop - jterm.tstart, etime)
+		self.assertGreaterEqual(jterm.tstop - jterm.tstart, timeout)
+
+
+	def test_epoolTimeoutSimple(self):
+		"""Validate:
+			1. Termination of a single job by timeout of the execution pool
+			2. Restart of the job by request on timeout and execution of the onstart()
+		"""
+		# Execution pool timeout
+		etimeout = TestExecPool._latency * 4  # Note: should be larger than 3*_latency
+		timeout = etimeout * 2  # Job timeout
+		worktime = max(1, TestExecPool._latency) + (timeout * 2) // 1  # Job work time
+		assert TestExecPool._latency * 3 < timeout < worktime, 'Testcase parameters validation failed'
+
+		tstart = time.time()
+		self._execpool.execute(Job('ep_timeout', args=('sleep', str(worktime)), timeout=timeout))
+
+		runsCount={'count': 0}
+		def updateruns(job):
+			job.params['count'] += 1
+
+		jrx = Job('ep_timeout_jrx', args=('sleep', str(worktime)), timeout=etimeout / 2, ontimeout=True
+			, params=runsCount, onstart=updateruns)  # Reexecuting job
+		self._execpool.execute(jrx)
+		# Validate termination of the execution pool
+		self.assertFalse(self._execpool.join(etimeout))
+		etime = time.time() - tstart  # Execution time
+		self.assertFalse(self._execpool._workers)  # Workers shuold be empty
+		# Validate termination time
+		self.assertLess(etime, worktime)
+		self.assertLess(etime, timeout)
+		self.assertGreaterEqual(etime, etimeout)
+		# Validate jrx runsCount and onstart execution
+		self.assertGreaterEqual(runsCount['count'], 2)
+
+
+	@unittest.skipUnless(_CHAINED_CONSTRAINTS, 'Requires _CHAINED_CONSTRAINTS')
+	def test_jobTimeoutChained(self):
+		"""Validate:
+			1. Termination of the dependent larger job on termination of the main job
+			2. Not affecting smaller dependent jobs on termination of the main job
+			3. Not affecting independent jobs (with another category)
+			4. Execution of the ondone() only on the graceful termination
+		"""
+		self.fail('Under development')
+
+		timeout = TestExecPool._latency * 4  # Note: should be larger than 3*_latency
+		worktime = max(1, TestExecPool._latency) + (timeout * 2) // 1  # Job work time
+		etimeout = max(1, TestExecPool._latency) + worktime  # Execution pool timeout
+		assert TestExecPool._latency * 3 < timeout < worktime, 'Testcase parameters validation failed'
+
+		def paramsSetter(val):
+			"""Produces job params setter"""
+			def setparams(job):
+				job.params = val
+			return setparams
+
+		tstart = time.time()
+		self._execpool.execute(Job('jmaster_timeout', args=('sleep', str(worktime))
+			, category='cat1', size=2, timeout=timeout))
+		self._execpool.execute(Job('jslave_smaller', args=('sleep', str(worktime))
+			, category='cat1', size=1, ondone=paramsSetter('completed')))
+		self._execpool.execute(Job('jslave_larger', args=('sleep', str(worktime))
+			, category='cat1', size=3, ondone=paramsSetter('terminated')))
+		self._execpool.execute(Job('job_other', args=('sleep', str(worktime)), category='cat_other'))
+		# Validate exec pool completion
+		self.assertTrue(self._execpool.join(etimeout))
+		etime = time.time() - tstart  # Execution time
+		# Validate timings
+		self.assertGreaterEqual(etime, worktime)
 
 
 if __name__ == '__main__':
@@ -825,4 +911,4 @@ if __name__ == '__main__':
 		print("Doctest FAILED: {} failures out of {} tests".format(failed, total))
 	else:
 		print('Doctest PASSED')
-	unittest.main()
+	unittest.main()  # verbosity=2
