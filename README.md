@@ -3,8 +3,6 @@
 A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying optional execution parameters considering NUMA architecture:
 
 - automatic CPU affinity management and maximization of the dedicated CPU cache for a worker process
-- minimal amount of RAM per a worker process
-- automatic rescheduling of the worker processes and modification of their queue parameters on low memory condition for the in-RAM computations (requires [psutil](https://pypi.python.org/pypi/psutil), can be disabled)
 - timeout per each Job (it was the main initial motivation to implement this module, because this feature is not provided by any Python implementation out of the box)
 - onstart/ondone callbacks, ondone is called only on successful completion (not termination) for both Jobs and Tasks (group of jobs)
 - stdout/err output, which can be redirected to any custom file or PIPE
@@ -13,7 +11,7 @@ A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-
 > Automatic rescheduling of the workers on low memory condition for the in-RAM computations is an optional and the only feature that requires external package, namely [psutil](https://pypi.python.org/pypi/psutil).
 
 Implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/eXascaleInfolab/PyCABeM)), not as a separate library.  
-The main purpose of this single-file module is the **asynchronous execution of modules and external executables with cache / parallelization tuning and optional automatic rescheduler adjusting for the in-RAM computations**.  
+The main purpose of this single-file module is the **asynchronous execution of modules and external executables with cache / parallelization tuning**.  
 In case asynchronous execution of the *Python functions* is required and usage of external dependences is not a problem, or automatic jobs scheduling for in-RAM computations is not required, then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
 
 \author: (c) Artem Lutov <artem@exascale.info>  
@@ -41,7 +39,7 @@ $ sudo pip install psutil
 
 ## API
 
-Flexible API provides *automatic CPU affinity management, maximization of the dedicated CPU cache, limitation of the minimal dedicated RAM per a worker process, dynamic rescheduling of the worker processes on low memoty condition and optimization of their queue for the in-RAM computations*, optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and more...  
+Flexible API provides *automatic CPU affinity management, maximization of the dedicated CPU cache*, optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and more...  
 `ExecPool` represents a pool of worker processes to execute `Job`s that can be grouped into `Tasks`s for more flexible management.
 
 ### Job
