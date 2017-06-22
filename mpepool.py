@@ -36,9 +36,9 @@ import subprocess
 from multiprocessing import cpu_count
 from multiprocessing import Value
 
+# Required to efficiently traverse items of dictionaries in both Python 2 and 3
 try:
-	# Required to efficiently traverse items of dictionaries in both Python 2 and 3
-	from future.utils import viewitems, viewkeys, viewvalues
+	from future.utils import viewitems, viewkeys, viewvalues  # External package: pip install future
 except ImportError:
 	def viewMethod(obj, method):
 		"""Fetch view method of the object
@@ -562,6 +562,7 @@ class ExecPool(object):
 		if _DEBUG_TRACE:
 			print('Starting "{}"{}...'.format(job.name, '' if async else ' in sync mode'), file=sys.stderr)
 		job.terminates = 0  # Reset termination requests counter
+		job.proc = None  # Reset old job process if any
 		job.tstart = time.time()
 		if job.onstart:
 			#print('Starting onstart() for job {}: {}'.format(job.name), file=sys.stderr)
@@ -645,12 +646,13 @@ class ExecPool(object):
 		workers and start the jobs if possible
 		"""
 		# Process completed jobs, check timeouts and memory constraints matching
-		completed = []  # Completed workers:  (proc, job)
+		completed = set()  # Completed workers:  {proc,}
 		vmtotal = 0.  # Consuming virtual memory by workers
-		jtorigs = []  # Timeout caused terminating origins (jobs) for the chained termination
+		jtorigs = {}  # Timeout caused terminating origins (jobs) for the chained termination, {category: smallest_job}
 		for proc, job in viewitems(self._workers):  # .items()  Note: the number of _workers is small
 			if proc.poll() is not None:  # Not None means the process has been terminated / completed
-				completed.append((proc, job))
+				completed.add(job)
+				assert job.proc == proc, 'Job attributes should be synced with the workers'
 				continue
 			# Update memory consumption statistics if applicable
 			if self._vmlimit:
@@ -665,10 +667,11 @@ class ExecPool(object):
 
 			# Terminate the worker
 			job.terminates += 1
-			# Check related heavier workers and jobs, terminate them by timeout
+			# Save the most lighgtweight chain origins for timeouts
 			if _CHAINED_CONSTRAINTS and job.category and job.size:
-				jtorigs.append(job)
-				raise NotImplementedError('Chained termination is not implemented yet')
+				jorg = jtorigs.get(job.category, None)
+				if jorg is None or job.size * job.slowdown < jorg.size * jorg.slowdown:
+					jtorigs[job.category] = job
 
 			# Force killling when termination does not work
 			if job.terminates >= self._killCount:
@@ -679,36 +682,64 @@ class ExecPool(object):
 				print('WARNING, "{}" #{} is killed by the timeout ({:.4f} sec): {:.4f} sec ({} h {} m {:.4f} s)'
 					.format(job.name, proc.pid, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			else:
-				proc.terminate()
+				proc.terminate()  # Schedule the worker completion to the next revise
 		#self.vmtotal = vmtotal
 
-		# Terminated torigs-depended workers and jobs
-		# for job in jtorigs:
-		# 	for proc, job in viewitems(self._workers):
-		# 		if
+		# Terminated chained torigs-depended workers and jobs
+		if _CHAINED_CONSTRAINTS:
+			# Traverse over non-completed workers with defined job category and size
+			for proc, job in viewitems(self._workers):
+				if not job.terminates and job.category and job.size and not job in completed:
+					# Travers over the chain origins and check matches skipping the origins themselves
+					for jorg in jtorigs:
+						# Note: job !== jorg, because jorg terminates and job does not
+						if (job.category == jorg.category  # Skip already terminating items
+						and job.size * job.slowdown >= jorg.size * jorg.slowdown):
+							# Terminate the worker
+							job.terminates += 1
+							proc.terminate()  # Schedule the worker completion to the next revise
+							break  # Switch to the following job
+			# Traverse over non-scheduled jobs with defined job category and size
+			jrot = 0  # Accumulated rotation
+			ij = 0  # Job index
+			while ij < len(self._jobs) - jrot:
+				if job.category and job.size:
+					# Travers over the chain origins and check matches skipping the origins themselves
+					for jorg in jtorigs:
+						if (job.category == jorg.category  # Skip already terminating items
+						and job.size * job.slowdown >= jorg.size * jorg.slowdown):
+							# Remove the item
+							self._jobs.rotate(-ij)
+							jrot += ij
+							self._jobs.popleft()
+							ij = -1  # Later +1 is added, so the index will be 0
+							break
+				ij += 1
+			# Recover initial order of the jobs
+			self._jobs.rotate(jrot)
 
 		# Process completed (and terminated) jobs: execute callbacks and remove the workers
-		for proc, job in completed:
+		for job in completed:
 			if job.terminates:
 				exectime = time.time() - job.tstart
 				print('WARNING, "{}" #{} is terminated by the timeout ({:.4f} sec): {:.4f} sec ({} h {} m {:.4f} s)'
-					.format(job.name, proc.pid, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
+					.format(job.name, job.proc.pid, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			# Restart the job if it was terminated and should be restarted
+			del self._workers[job.proc]
 			if job.terminates and job.ontimeout:
 				self.__clearAffinity(job)  # Note: the affinity must be updated before the job restart
 				self.__startJob(job)
 				if _DEBUG_TRACE:
 					print('"  {}" #{} is restarted with timeout {:.4f} sec'
-						.format(job.name, proc.pid, job.timeout), file=sys.stderr)
+						.format(job.name, job.proc.pid, job.timeout), file=sys.stderr)
 				if self._vmlimit:
 					vmtotal += job.vmem
 			else:
-				del self._workers[proc]
 				job.complete(not job.terminates)  # The completion is graceful only if the termination requests were not recuived
 				self.__clearAffinity(job)
 
 		# Start subsequent job if it is required
-		while self._jobs and len(self._workers) <  self._workersLim:
+		while self._jobs and len(self._workers) < self._workersLim:
 			job = self._jobs.popleft()
 			self.__startJob(job)
 			if self._vmlimit:
@@ -777,6 +808,10 @@ class ExecPool(object):
 
 # Unit Tests -------------------------------------------------------------------
 import unittest
+try:
+	from unittest import mock
+except ImportError:
+	import mock
 #import math
 
 class TestExecPool(unittest.TestCase):
@@ -892,8 +927,6 @@ class TestExecPool(unittest.TestCase):
 			3. Not affecting independent jobs (with another category)
 			4. Execution of the ondone() only on the graceful termination
 		"""
-		self.fail('Under development')
-
 		timeout = TestExecPool._latency * 4  # Note: should be larger than 3*_latency
 		worktime = max(1, TestExecPool._latency) + (timeout * 2) // 1  # Job work time
 		assert TestExecPool._latency * 3 < timeout < worktime, 'Testcase parameters validation failed'
@@ -903,13 +936,13 @@ class TestExecPool(unittest.TestCase):
 			, category='cat1', size=2, timeout=timeout)
 		self._execpool.execute(jm)
 		jss = Job('jslave_smaller', args=('sleep', str(worktime))
-			, category='cat1', size=1, ondone=unittest.mock.MagicMock())
+			, category='cat1', size=1, ondone=mock.MagicMock())
 		self._execpool.execute(jss)  # ondone() should be called for the completed job
 		jsl = Job('jslave_larger', args=('sleep', str(worktime))
-			, category='cat1', size=3, ondone=unittest.mock.MagicMock())
+			, category='cat1', size=3, ondone=mock.MagicMock())
 		self._execpool.execute(jsl)  # ondone() should be skipped for the terminated job
 		jso = Job('job_other', args=('sleep', str(worktime)), category='cat_other'
-			, ondone=unittest.mock.MagicMock())
+			, ondone=mock.MagicMock())
 		self._execpool.execute(jso)  # ondone() should be called for the completed job
 
 		# Execution pool timeout
@@ -928,7 +961,7 @@ class TestExecPool(unittest.TestCase):
 		self.assertLess(jsl.tstop - jsl.tstart, worktime)
 		self.assertGreaterEqual(jso.tstop - jso.tstart, worktime)
 		# Validate ondone() calls
-		jss.ondone.assert_called_once_with(jss)  # Note: fails, becase equality is not defined for the Job
+		jss.ondone.assert_called_once_with(jss)  # Note: fails, becase equality is not defined for the Job ?
 		self.assertTrue(len(jss.ondone.call_args) == 1 and jss.ondone.call_args[0] is jss)
 		jss.ondone.assert_not_called()
 
