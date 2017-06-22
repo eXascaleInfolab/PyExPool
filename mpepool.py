@@ -59,7 +59,8 @@ except ImportError:
 	viewitems = lambda dct: dct.items() if not hasMethod(dct, viewitems) else dct.viewitems()
 
 
-# Bound the amount of virtual memory (<= RAM) used by worker processes
+# Limit the amount of virtual memory (<= RAM) used by worker processes
+# NOTE: requires import of psutils
 _LIMIT_WORKERS_RAM = False
 if _LIMIT_WORKERS_RAM:
 	try:
@@ -67,8 +68,9 @@ if _LIMIT_WORKERS_RAM:
 	except ImportError:
 		_LIMIT_WORKERS_RAM = False
 
-# Use chained constraints (timeout and memory limitation) in jobs so as termination of one job
-# by timeout cases termination of jobs with the same category having the same or heviear weight (size * slowdown)
+# Use chained constraints (timeout and memory limitation) in jobs to terminate
+# also dependent worker processes and/or reschedule jobs, which have the same
+# category and heavier than the origin violating the constraints
 _CHAINED_CONSTRAINTS = False
 
 
@@ -91,7 +93,7 @@ def secondsToHms(seconds):
 
 
 class Task(object):
-	""" Container of Jobs"""
+	"""Task is a managing container for Jobs"""
 	#TODO: Implement timeout support in add/delJob
 	def __init__(self, name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize task, which is a group of jobs to be executed
@@ -433,7 +435,7 @@ class ExecPool(object):
 			NOTE: specification of the afnstep might cause reduction of the workers number.
 		vmlimit  - limit total amount of VM (automatically constrained by the available RAM)
 			in gigabytes that can be used by worker processes to provide in-RAM computations.
-			Dynamially reduce the number of workers to consume total virtual memory
+			Dynamically reduce the number of workers to consume total virtual memory
 			not more than specified. The workers are rescheduled starting from the
 			most memory-heavy processes.
 			NOTE:
@@ -689,7 +691,7 @@ class ExecPool(object):
 					vmtotal += job.vmem
 			else:
 				del self._workers[proc]
-				job.complete()
+				job.complete(not job.terminates)  # The completion is graceful only if the termination requests were not recuived
 				self.__clearAffinity(job)
 
 		# Start subsequent job if it is required
