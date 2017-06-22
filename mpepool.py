@@ -32,31 +32,34 @@ import ctypes  # Required for the multiprocessing Value definition
 import types  # Required for instance methods definition
 import traceback  # Stacktrace
 import subprocess
-import unittest
 
 from multiprocessing import cpu_count
 from multiprocessing import Value
 
 try:
-	from future.utils import viewitems  # Required to efficiently traverse items of dictionaries in both Python 2 and 3
+	# Required to efficiently traverse items of dictionaries in both Python 2 and 3
+	from future.utils import viewitems, viewkeys, viewvalues
 except ImportError:
-	def hasMethod(obj, method):
-		"""Whether the object has the specified method
-		Note: no exceptions are raised
+	def viewMethod(obj, method):
+		"""Fetch view method of the object
 
-		obj  - the object to be checked for the method
-		method  - name of the target method
+		obj  - the object to be processed
+		method  - name of the target method, str
 
-		return  whether obj.method is callable
+		return  target method or AttributeError
+
+		>>> callable(viewMethod(dict(), 'items'))
+		True
 		"""
-		try:
-			ometh = getattr(obj, method, None)
-			return callable(ometh)
-		except Exception:
-			pass
-		return False
+		viewmeth = 'view' + method
+		ometh = getattr(obj, viewmeth, None)
+		if not ometh:
+			ometh = getattr(obj, method)
+		return ometh
 
-	viewitems = lambda dct: dct.items() if not hasMethod(dct, viewitems) else dct.viewitems()
+	viewitems = lambda dct: viewMethod(dct, 'items')()
+	viewkeys = lambda dct: viewMethod(dct, 'keys')()
+	viewvalues = lambda dct: viewMethod(dct, 'values')()
 
 
 # Limit the amount of virtual memory (<= RAM) used by worker processes
@@ -220,6 +223,7 @@ class Job(object):
 			and the process has multiple treads
 		category  - classification category, typically context or part of the name
 		size  - size of the processing data, >= 0
+			0 means undefined size and prevents jobs chaining on constraints violation
 		slowdown  - execution slowdown ratio (inversely to the [estimated] execution speed), E (0, inf)
 
 		# Execution parameters, initialized automatically on execution
@@ -461,8 +465,8 @@ class ExecPool(object):
 				print('WARNING: {afnbin} does not exists in the system to fix affinity: {err}'
 					.format(afnbin=_AFFINITYBIN, err=err))
 		self._workersLim = workers  # Max number of resident workers
-		self._workers = {}  # Current workers (processes, executing jobs): 'jname': <proc>; <proc>: timeout
-		self._jobs = collections.deque()  # Scheduled jobs: 'jname': **args
+		self._workers = {}  # Scheduled jobs that were started, i.e. worker processes:  {process: executing_job}
+		self._jobs = collections.deque()  # Scheduled jobs that have not been started yet:  deque(job)
 		self._tstart = None  # Start time of the execution of the first task
 		# Affinity scheduling attributes
 		self._afnstep = afnstep  # Affinity step for each worker process
@@ -515,7 +519,7 @@ class ExecPool(object):
 			print('  Scheduled "{}" is removed'.format(job.name))
 		self._jobs.clear()
 		while self._workers:
-			procs = self._workers.keys()
+			procs = viewkeys(self._workers)
 			for proc in procs:
 				print('  Terminating "{}" #{} ...'.format(self._workers[proc].name, proc.pid), file=sys.stderr)
 				proc.terminate()
@@ -536,7 +540,7 @@ class ExecPool(object):
 						print('  Killing the worker #{} ...'.format(proc.pid), file=sys.stderr)
 						proc.kill()
 			# Tidy jobs
-			for job in self._workers.values():
+			for job in viewvalues(self._workers):
 				job.complete(False)
 				self.__clearAffinity(job)
 			self._workers.clear()
@@ -643,6 +647,7 @@ class ExecPool(object):
 		# Process completed jobs, check timeouts and memory constraints matching
 		completed = []  # Completed workers:  (proc, job)
 		vmtotal = 0.  # Consuming virtual memory by workers
+		jtorigs = []  # Timeout caused terminating origins (jobs) for the chained termination
 		for proc, job in viewitems(self._workers):  # .items()  Note: the number of _workers is small
 			if proc.poll() is not None:  # Not None means the process has been terminated / completed
 				completed.append((proc, job))
@@ -657,12 +662,15 @@ class ExecPool(object):
 			exectime = time.time() - job.tstart
 			if not job.timeout or exectime < job.timeout:
 				continue
-			# Check related workers and jobs, terminate them
-			if _CHAINED_CONSTRAINTS:
-				raise NotImplementedError('Chained termination is not implemented yet')
 
 			# Terminate the worker
 			job.terminates += 1
+			# Check related heavier workers and jobs, terminate them by timeout
+			if _CHAINED_CONSTRAINTS and job.category and job.size:
+				jtorigs.append(job)
+				raise NotImplementedError('Chained termination is not implemented yet')
+
+			# Force killling when termination does not work
 			if job.terminates >= self._killCount:
 				proc.kill()
 				del self._workers[proc]
@@ -673,6 +681,11 @@ class ExecPool(object):
 			else:
 				proc.terminate()
 		#self.vmtotal = vmtotal
+
+		# Terminated torigs-depended workers and jobs
+		# for job in jtorigs:
+		# 	for proc, job in viewitems(self._workers):
+		# 		if
 
 		# Process completed (and terminated) jobs: execute callbacks and remove the workers
 		for proc, job in completed:
@@ -761,6 +774,10 @@ class ExecPool(object):
 		self._tstart = None  # Be ready for the following execution
 		return True
 
+
+# Unit Tests -------------------------------------------------------------------
+import unittest
+#import math
 
 class TestExecPool(unittest.TestCase):
 	from math import ceil
@@ -879,28 +896,41 @@ class TestExecPool(unittest.TestCase):
 
 		timeout = TestExecPool._latency * 4  # Note: should be larger than 3*_latency
 		worktime = max(1, TestExecPool._latency) + (timeout * 2) // 1  # Job work time
-		etimeout = max(1, TestExecPool._latency) + worktime  # Execution pool timeout
 		assert TestExecPool._latency * 3 < timeout < worktime, 'Testcase parameters validation failed'
 
-		def paramsSetter(val):
-			"""Produces job params setter"""
-			def setparams(job):
-				job.params = val
-			return setparams
-
 		tstart = time.time()
-		self._execpool.execute(Job('jmaster_timeout', args=('sleep', str(worktime))
-			, category='cat1', size=2, timeout=timeout))
-		self._execpool.execute(Job('jslave_smaller', args=('sleep', str(worktime))
-			, category='cat1', size=1, ondone=paramsSetter('completed')))
-		self._execpool.execute(Job('jslave_larger', args=('sleep', str(worktime))
-			, category='cat1', size=3, ondone=paramsSetter('terminated')))
-		self._execpool.execute(Job('job_other', args=('sleep', str(worktime)), category='cat_other'))
+		jm = Job('jmaster_timeout', args=('sleep', str(worktime))
+			, category='cat1', size=2, timeout=timeout)
+		self._execpool.execute(jm)
+		jss = Job('jslave_smaller', args=('sleep', str(worktime))
+			, category='cat1', size=1, ondone=unittest.mock.MagicMock())
+		self._execpool.execute(jss)  # ondone() should be called for the completed job
+		jsl = Job('jslave_larger', args=('sleep', str(worktime))
+			, category='cat1', size=3, ondone=unittest.mock.MagicMock())
+		self._execpool.execute(jsl)  # ondone() should be skipped for the terminated job
+		jso = Job('job_other', args=('sleep', str(worktime)), category='cat_other'
+			, ondone=unittest.mock.MagicMock())
+		self._execpool.execute(jso)  # ondone() should be called for the completed job
+
+		# Execution pool timeout
+		etimeout = max(1, TestExecPool._latency) + worktime * (1 + len(self._execpool._workers) // self._execpool._workersLim)
+		assert etimeout > worktime, 'Additional testcase parameters are invalid'
+
 		# Validate exec pool completion
 		self.assertTrue(self._execpool.join(etimeout))
 		etime = time.time() - tstart  # Execution time
 		# Validate timings
-		self.assertGreaterEqual(etime, worktime)
+		self.assertTrue(worktime <= etime < etimeout)
+		self.assertLess(jm.tstop - jm.tstart, worktime)
+		self.assertLess(jsl.tstop - jsl.tstart, worktime)
+		self.assertGreaterEqual(jsl.tstop - jsl.tstart, jm.tstop - jm.tstart)
+		self.assertGreaterEqual(jss.tstop - jss.tstart, worktime)
+		self.assertLess(jsl.tstop - jsl.tstart, worktime)
+		self.assertGreaterEqual(jso.tstop - jso.tstart, worktime)
+		# Validate ondone() calls
+		jss.ondone.assert_called_once_with(jss)  # Note: fails, becase equality is not defined for the Job
+		self.assertTrue(len(jss.ondone.call_args) == 1 and jss.ondone.call_args[0] is jss)
+		jss.ondone.assert_not_called()
 
 
 if __name__ == '__main__':
