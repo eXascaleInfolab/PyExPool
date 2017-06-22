@@ -36,30 +36,30 @@ import subprocess
 from multiprocessing import cpu_count
 from multiprocessing import Value
 
-# # Required to efficiently traverse items of dictionaries in both Python 2 and 3
-# try:
-# 	from future.utils import viewitems, viewkeys, viewvalues  # External package: pip install future
-# except ImportError:
-# 	def viewMethod(obj, method):
-# 		"""Fetch view method of the object
-#
-# 		obj  - the object to be processed
-# 		method  - name of the target method, str
-#
-# 		return  target method or AttributeError
-#
-# 		>>> callable(viewMethod(dict(), 'items'))
-# 		True
-# 		"""
-# 		viewmeth = 'view' + method
-# 		ometh = getattr(obj, viewmeth, None)
-# 		if not ometh:
-# 			ometh = getattr(obj, method)
-# 		return ometh
-#
-# 	viewitems = lambda dct: viewMethod(dct, 'items')()
-# 	viewkeys = lambda dct: viewMethod(dct, 'keys')()
-# 	viewvalues = lambda dct: viewMethod(dct, 'values')()
+# Required to efficiently traverse items of dictionaries in both Python 2 and 3
+try:
+	from future.utils import viewvalues  #viewitems, viewkeys, viewvalues  # External package: pip install future
+except ImportError:
+	def viewMethod(obj, method):
+		"""Fetch view method of the object
+
+		obj  - the object to be processed
+		method  - name of the target method, str
+
+		return  target method or AttributeError
+
+		>>> callable(viewMethod(dict(), 'items'))
+		True
+		"""
+		viewmeth = 'view' + method
+		ometh = getattr(obj, viewmeth, None)
+		if not ometh:
+			ometh = getattr(obj, method)
+		return ometh
+
+	#viewitems = lambda dct: viewMethod(dct, 'items')()
+	#viewkeys = lambda dct: viewMethod(dct, 'keys')()
+	viewvalues = lambda dct: viewMethod(dct, 'values')()
 
 
 # Limit the amount of virtual memory (<= RAM) used by worker processes
@@ -74,7 +74,7 @@ if _LIMIT_WORKERS_RAM:
 # Use chained constraints (timeout and memory limitation) in jobs to terminate
 # also dependent worker processes and/or reschedule jobs, which have the same
 # category and heavier than the origin violating the constraints
-_CHAINED_CONSTRAINTS = False
+_CHAINED_CONSTRAINTS = True
 
 
 _AFFINITYBIN = 'taskset'  # System app to set CPU affinity if required, should be preliminarry installed (taskset is present by default on NIX systems)
@@ -676,7 +676,7 @@ class ExecPool(object):
 			# Force killling when termination does not work
 			if job.terminates >= self._killCount:
 				job.proc.kill()
-				self._workers.remove[job]
+				self._workers.remove(job)
 				if self._vmlimit:
 					vmtotal -= job.vmem
 				print('WARNING, "{}" #{} is killed by the timeout ({:.4f} sec): {:.4f} sec ({} h {} m {:.4f} s)'
@@ -684,6 +684,7 @@ class ExecPool(object):
 			else:
 				job.proc.terminate()  # Schedule the worker completion to the next revise
 		#self.vmtotal = vmtotal
+		#self._workers = {job for job in self._workers if job not in completed}  # Note: it is more efficient to remove completed items from workers later
 
 		# Terminated chained torigs-depended workers and jobs
 		if _CHAINED_CONSTRAINTS:
@@ -691,7 +692,7 @@ class ExecPool(object):
 			for job in self._workers:
 				if not job.terminates and job.category and job.size and not job in completed:
 					# Travers over the chain origins and check matches skipping the origins themselves
-					for jorg in jtorigs:
+					for jorg in viewvalues(jtorigs):
 						# Note: job !== jorg, because jorg terminates and job does not
 						if (job.category == jorg.category  # Skip already terminating items
 						and job.size * job.slowdown >= jorg.size * jorg.slowdown):
@@ -957,14 +958,14 @@ class TestExecPool(unittest.TestCase):
 		self.assertTrue(worktime <= etime < etimeout)
 		self.assertLess(jm.tstop - jm.tstart, worktime)
 		self.assertLess(jsl.tstop - jsl.tstart, worktime)
-		self.assertGreaterEqual(jsl.tstop - jsl.tstart, jm.tstop - jm.tstart)
+		self.assertGreaterEqual(jsl.tstop - jm.tstart, jm.tstop - jm.tstart)  # Note: measure time from the master start
 		self.assertGreaterEqual(jss.tstop - jss.tstart, worktime)
 		self.assertLess(jsl.tstop - jsl.tstart, worktime)
 		self.assertGreaterEqual(jso.tstop - jso.tstart, worktime)
 		# Validate ondone() calls
-		jss.ondone.assert_called_once_with(jss)  # Note: fails, becase equality is not defined for the Job ?
-		self.assertTrue(len(jss.ondone.call_args) == 1 and jss.ondone.call_args[0] is jss)
-		jss.ondone.assert_not_called()
+		jss.ondone.assert_called_once_with(jss)
+		jsl.ondone.assert_not_called()
+		jso.ondone.assert_called_once_with(jso)
 
 
 if __name__ == '__main__':
