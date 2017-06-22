@@ -36,30 +36,30 @@ import subprocess
 from multiprocessing import cpu_count
 from multiprocessing import Value
 
-# Required to efficiently traverse items of dictionaries in both Python 2 and 3
-try:
-	from future.utils import viewitems, viewkeys, viewvalues  # External package: pip install future
-except ImportError:
-	def viewMethod(obj, method):
-		"""Fetch view method of the object
-
-		obj  - the object to be processed
-		method  - name of the target method, str
-
-		return  target method or AttributeError
-
-		>>> callable(viewMethod(dict(), 'items'))
-		True
-		"""
-		viewmeth = 'view' + method
-		ometh = getattr(obj, viewmeth, None)
-		if not ometh:
-			ometh = getattr(obj, method)
-		return ometh
-
-	viewitems = lambda dct: viewMethod(dct, 'items')()
-	viewkeys = lambda dct: viewMethod(dct, 'keys')()
-	viewvalues = lambda dct: viewMethod(dct, 'values')()
+# # Required to efficiently traverse items of dictionaries in both Python 2 and 3
+# try:
+# 	from future.utils import viewitems, viewkeys, viewvalues  # External package: pip install future
+# except ImportError:
+# 	def viewMethod(obj, method):
+# 		"""Fetch view method of the object
+#
+# 		obj  - the object to be processed
+# 		method  - name of the target method, str
+#
+# 		return  target method or AttributeError
+#
+# 		>>> callable(viewMethod(dict(), 'items'))
+# 		True
+# 		"""
+# 		viewmeth = 'view' + method
+# 		ometh = getattr(obj, viewmeth, None)
+# 		if not ometh:
+# 			ometh = getattr(obj, method)
+# 		return ometh
+#
+# 	viewitems = lambda dct: viewMethod(dct, 'items')()
+# 	viewkeys = lambda dct: viewMethod(dct, 'keys')()
+# 	viewvalues = lambda dct: viewMethod(dct, 'values')()
 
 
 # Limit the amount of virtual memory (<= RAM) used by worker processes
@@ -465,7 +465,7 @@ class ExecPool(object):
 				print('WARNING: {afnbin} does not exists in the system to fix affinity: {err}'
 					.format(afnbin=_AFFINITYBIN, err=err))
 		self._workersLim = workers  # Max number of resident workers
-		self._workers = {}  # Scheduled jobs that were started, i.e. worker processes:  {process: executing_job}
+		self._workers = set()  # Scheduled and started jobs, i.e. worker processes:  {executing_job, }
 		self._jobs = collections.deque()  # Scheduled jobs that have not been started yet:  deque(job)
 		self._tstart = None  # Start time of the execution of the first task
 		# Affinity scheduling attributes
@@ -510,40 +510,41 @@ class ExecPool(object):
 		"""Force termination of the pool"""
 		if not self._jobs and not self._workers:
 			return
-
 		print('WARNING: terminating the execution pool with {} non-scheduled jobs and {} workers...'
 			.format(len(self._jobs), len(self._workers)))
+
+		# Shut down all [non-started] jobs
 		for job in self._jobs:
 			job.complete(False)
 			# Note: only executing jobs, i.e. workers might have activated affinity
 			print('  Scheduled "{}" is removed'.format(job.name))
 		self._jobs.clear()
-		while self._workers:
-			procs = viewkeys(self._workers)
-			for proc in procs:
-				print('  Terminating "{}" #{} ...'.format(self._workers[proc].name, proc.pid), file=sys.stderr)
-				proc.terminate()
-			# Wait a few sec for the successful process termitaion before killing it
-			i = 0
-			active = True
-			while active and i < self._killCount:
-				active = False
-				for proc in procs:
-					if proc.poll() is None:
-						active = True
-						break
-				time.sleep(self._latency)
-			# Kill nonterminated processes
-			if active:
-				for proc in procs:
-					if proc.poll() is None:
-						print('  Killing the worker #{} ...'.format(proc.pid), file=sys.stderr)
-						proc.kill()
-			# Tidy jobs
-			for job in viewvalues(self._workers):
-				job.complete(False)
-				self.__clearAffinity(job)
-			self._workers.clear()
+
+		# Shut down all workers
+		for job in self._workers:
+			print('  Terminating "{}" #{} ...'.format(job.name, job.proc.pid), file=sys.stderr)
+			job.proc.terminate()
+		# Wait a few sec for the successful process termitaion before killing it
+		i = 0
+		active = True
+		while active and i < self._killCount:
+			active = False
+			for job in self._workers:
+				if job.proc.poll() is None:
+					active = True
+					break
+			time.sleep(self._latency)
+		# Kill nonterminated processes
+		if active:
+			for job in self._workers:
+				if job.proc.poll() is None:
+					print('  Killing "{}" #{} ...'.format(job.name, job.proc.pid), file=sys.stderr)
+					job.proc.kill()
+		# Tidy jobs
+		for job in self._workers:
+			job.complete(False)
+			self.__clearAffinity(job)
+		self._workers.clear()
 
 
 	def __startJob(self, job, async=True):
@@ -630,7 +631,7 @@ class ExecPool(object):
 				self.__clearAffinity(job)  # Note: process can both exists here and does not exist, i.e. the process state is undefined
 		else:
 			if async:
-				self._workers[job.proc] = job
+				self._workers.add(job)
 			else:
 				job.proc.wait()
 				job.complete()
@@ -649,16 +650,15 @@ class ExecPool(object):
 		completed = set()  # Completed workers:  {proc,}
 		vmtotal = 0.  # Consuming virtual memory by workers
 		jtorigs = {}  # Timeout caused terminating origins (jobs) for the chained termination, {category: smallest_job}
-		for proc, job in viewitems(self._workers):  # .items()  Note: the number of _workers is small
-			if proc.poll() is not None:  # Not None means the process has been terminated / completed
+		for job in self._workers:  # .items()  Note: the number of _workers is small
+			if job.proc.poll() is not None:  # Not None means the process has been terminated / completed
 				completed.add(job)
-				assert job.proc == proc, 'Job attributes should be synced with the workers'
 				continue
 			# Update memory consumption statistics if applicable
 			if self._vmlimit:
 				#pminf = gigabytes(psutil.Process(proc.pid).memory_info())
 				#vmem += job.updateVmem(pminf.vms)
-				job.vmem = gigabytes(psutil.Process(proc.pid).memory_info().vms)
+				job.vmem = gigabytes(psutil.Process(job.proc.pid).memory_info().vms)
 				vmtotal += job.vmem
 
 			exectime = time.time() - job.tstart
@@ -675,20 +675,20 @@ class ExecPool(object):
 
 			# Force killling when termination does not work
 			if job.terminates >= self._killCount:
-				proc.kill()
-				del self._workers[proc]
+				job.proc.kill()
+				self._workers.remove[job]
 				if self._vmlimit:
 					vmtotal -= job.vmem
 				print('WARNING, "{}" #{} is killed by the timeout ({:.4f} sec): {:.4f} sec ({} h {} m {:.4f} s)'
-					.format(job.name, proc.pid, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
+					.format(job.name, job.proc.pid, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			else:
-				proc.terminate()  # Schedule the worker completion to the next revise
+				job.proc.terminate()  # Schedule the worker completion to the next revise
 		#self.vmtotal = vmtotal
 
 		# Terminated chained torigs-depended workers and jobs
 		if _CHAINED_CONSTRAINTS:
 			# Traverse over non-completed workers with defined job category and size
-			for proc, job in viewitems(self._workers):
+			for job in self._workers:
 				if not job.terminates and job.category and job.size and not job in completed:
 					# Travers over the chain origins and check matches skipping the origins themselves
 					for jorg in jtorigs:
@@ -697,12 +697,13 @@ class ExecPool(object):
 						and job.size * job.slowdown >= jorg.size * jorg.slowdown):
 							# Terminate the worker
 							job.terminates += 1
-							proc.terminate()  # Schedule the worker completion to the next revise
+							job.proc.terminate()  # Schedule the worker completion to the next revise
 							break  # Switch to the following job
 			# Traverse over non-scheduled jobs with defined job category and size
 			jrot = 0  # Accumulated rotation
 			ij = 0  # Job index
 			while ij < len(self._jobs) - jrot:
+				job = self._jobs[ij]
 				if job.category and job.size:
 					# Travers over the chain origins and check matches skipping the origins themselves
 					for jorg in jtorigs:
@@ -725,7 +726,7 @@ class ExecPool(object):
 				print('WARNING, "{}" #{} is terminated by the timeout ({:.4f} sec): {:.4f} sec ({} h {} m {:.4f} s)'
 					.format(job.name, job.proc.pid, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			# Restart the job if it was terminated and should be restarted
-			del self._workers[job.proc]
+			self._workers.remove(job)
 			if job.terminates and job.ontimeout:
 				self.__clearAffinity(job)  # Note: the affinity must be updated before the job restart
 				self.__startJob(job)
