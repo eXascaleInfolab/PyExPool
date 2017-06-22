@@ -3,25 +3,21 @@
 A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying optional execution parameters considering NUMA architecture:
 
 - automatic CPU affinity management and maximization of the dedicated CPU cache for a worker process
-- automatic rescheduling of the worker processes and modification of their queue parameters on parameterized low memory condition for the in-RAM computations (requires [psutil](https://pypi.python.org/pypi/psutil), can be disabled)
 - chained termination of dependent worker processes and jobs rescheduling to satisfy timeout and memory limit constraints
 - timeout per each Job (it was the main initial motivation to implement this module, because this feature is not provided by any Python implementation out of the box)
 - onstart/ondone callbacks, ondone is called only on successful completion (not termination) for both Jobs and Tasks (group of jobs)
 - stdout/err output, which can be redirected to any custom file or PIPE
 - custom parameters for each Job and respective owner Task besides the name/id
 
-> Automatic rescheduling of the workers on low memory condition for the in-RAM computations is an optional and the only feature that requires external package, namely [psutil](https://pypi.python.org/pypi/psutil).
-
 Implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/eXascaleInfolab/PyCABeM)), not as a separate library.  
-The main purpose of this single-file module is the **asynchronous execution of modules and external executables with cache / parallelization tuning and automatic balancing of the worker processes for the in-RAM computations**.  
-In case asynchronous execution of the *Python functions* is required and usage of external dependences is not a problem, or automatic jobs scheduling for in-RAM computations is not required, then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
+The main purpose of this single-file module is the **asynchronous execution of modules and external executables with cache / parallelization tuning**.  
+In case asynchronous execution of the *Python functions* is required and usage of external dependences is not a problem,  then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
 
 \author: (c) Artem Lutov <artem@exascale.info>  
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
 \date: 2016-01  
 
 ## Content
-- [Dependencies](#dependencies)
 - [API](#api)
 	- [Job](#job)
 	- [Task](#task)
@@ -31,36 +27,17 @@ In case asynchronous execution of the *Python functions* is required and usage o
 	- [Failsafe Termination](#failsafe-termination)
 - [Related Projects](#related-projects)
 
-## Dependencies
-
-[psutil](https://pypi.python.org/pypi/psutil) only in case of dynamic jobs queue adaption is required for the in-RAM computations, otherwise there are no any dependencies.  
-To install `psutil`:
-```
-$ sudo pip install psutil
-```
-
 ## API
 
-Flexible API provides *automatic CPU affinity management, maximization of the dedicated CPU cache, limitation of the minimal dedicated RAM per worker process, balancing of the worker processes and rescheduling of chains of dependent jobs on low memory condition for the in-RAM computations*, optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and more...  
+Flexible API provides *automatic CPU affinity management, maximization of the dedicated CPU cache*, optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and more...  
 `ExecPool` represents a pool of worker processes to execute `Job`s that can be grouped into `Tasks`s for more flexible management.
 
 ### Job
 
 ```python
-# Global Parameters
-# Limit the amount of virtual memory (<= RAM) used by worker processes
-# NOTE: requires import of psutils
-_LIMIT_WORKERS_RAM = False
-
-# Use chained constraints (timeout and memory limitation) in jobs to terminate
-# also dependent worker processes and/or reschedule jobs, which have the same
-# category and heavier than the origin violating the constraints
- CHAINED_CONSTRAINTS = False
-
-
 Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
-	, startdelay=0, onstart=None, ondone=None, params=None, category=None, size=0
-	, slowdown=1., omitafn=False, stdout=sys.stdout, stderr=sys.stderr):
+	, startdelay=0, onstart=None, ondone=None, params=None
+	, omitafn=False, stdout=sys.stdout, stderr=sys.stderr):
 	"""Initialize job to be executed
 
 	Job is executed in a separate process via Popen or Process object and is
@@ -97,16 +74,11 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 	# Scheduling parameters
 	omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled
 		and the process has multiple treads
-	category  - classification category, typically context or part of the name
-	size  - size of the processing data, >= 0
-	slowdown  - execution slowdown ratio (inversely to the [estimated] execution speed), E (0, inf)
 
 	# Execution parameters, initialized automatically on execution
 	tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 	tstop  - termination / completion time after ondone
 	proc  - process of the job, can be used in the ondone() to read it's PIPE
-	vmem  - consuming virtual memory (smooth max, not just the current value) or the least expected value
-		inherited from the jobs of the same category having non-smaller size
 	"""
 ```
 ### Task
@@ -136,16 +108,6 @@ Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout,
 ```
 ### ExecPool
 ```python
-def ramfracs(fracsize):
-	"""Evaluate the minimal number of RAM fractions of the specified size in GB
-
-	Used to estimate the reasonable number of processes with the specified minimal
-	dedicated RAM.
-
-	fracsize  - minimal size of each fraction in GB, can be a fractional number
-	return the minimal number of RAM fractions having the specified size in GB
-	"""
-
 def cpucorethreads():
 	"""The number of hardware treads per a CPU core
 
@@ -188,7 +150,7 @@ ExecPool(workers=cpu_count(), afnstep=None)
 	workers  - number of resident worker processes, >=1. The reasonable value is
 		<= NUMA nodes * node CPUs, which is typically returned by cpu_count(),
 		where node CPUs = CPU cores * HW treads per core.
-		To guarantee minimal number of RAM per a process, for example 2.5 GB:
+		To guarantee minimal average RAM per a process, for example 2.5 GB:
 			workers = min(cpu_count(), max(ramfracs(2.5), 1))
 	afnstep  - affinity step, integer if applied. Used to bind worker to the
 		processing units to have warm cache for single thread workers.
@@ -198,14 +160,6 @@ ExecPool(workers=cpu_count(), afnstep=None)
 			cpucorethreads()  - maximize the dedicated CPU cache (the number of
 				worker processes = CPU cores = CPU units / hardware treads per CPU core).
 		NOTE: specification of the afnstep might cause reduction of the workers number.
-	vmlimit  - limit total amount of VM (automatically constrained by the available RAM)
-		in gigabytes that can be used by worker processes to provide in-RAM computations.
-		Dynamically reduce the number of workers to consume total virtual memory
-		not more than specified. The workers are rescheduled starting from the
-		most memory-heavy processes.
-		NOTE:
-			- applicable only if _LIMIT_WORKERS_RAM
-			- 0 means unlimited
 	latency  - approximate minimal latency of the workers monitoring in sec, float >= 0.
 		0 means automatically defined value (recommended, typically 2-3 sec).
 	"""
