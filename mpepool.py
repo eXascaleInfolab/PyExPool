@@ -678,7 +678,7 @@ class ExecPool(object):
 
 			# Terminate the worker
 			job.terminates += 1
-			# Save the most lighgtweight chain origins for timeouts
+			# Save the most lighgtweight terminating chain origins for timeouts
 			if _CHAINED_CONSTRAINTS and job.category and job.size:
 				jorg = jtorigs.get(job.category, None)
 				if jorg is None or job.size * job.slowdown < jorg.size * jorg.slowdown:
@@ -695,7 +695,7 @@ class ExecPool(object):
 		#self.vmtotal = vmtotal
 		#self._workers = {job for job in self._workers if job not in completed}  # Note: it is more efficient to remove completed items from workers later
 
-		# Terminated chained torigs-related workers and jobs
+		# Terminate chained related workers and jobs of torigs
 		if _CHAINED_CONSTRAINTS:
 			# Traverse over non-completed workers with defined job category and size
 			for job in self._workers:
@@ -708,6 +708,11 @@ class ExecPool(object):
 							# Terminate the worker
 							job.terminates += 1
 							job.proc.terminate()  # Schedule the worker completion to the next revise
+							exectime = time.time() - job.tstart
+							print('WARNING, "{}" #{} with weight {} is chain-terminated (by "{}" #{} with weight: {})'
+								' being executed {:.4f} sec ({} h {} m {:.4f} s)'.format(job.name, job.proc.pid
+								, job.size * job.slowdown, jorg.name, jorg.proc.pid, jorg.size * jorg.slowdown
+								, exectime, *secondsToHms(exectime)), file=sys.stderr)
 							break  # Switch to the following job
 			# Traverse over non-scheduled jobs with defined job category and size
 			jrot = 0  # Accumulated rotation
@@ -729,6 +734,11 @@ class ExecPool(object):
 			# Recover initial order of the jobs
 			self._jobs.rotate(jrot)
 
+		# Check memory limitation fulfilling
+		if self._vmlimit and vmtotal >= self._vmlimit:
+			# Terminate some workers and reschedule jobs or reduce workers number
+			raise NotImplementedError('Memory management is not implemented yet')
+
 		# Process completed (and terminated) jobs: execute callbacks and remove the workers
 		for job in completed:
 			if job.terminates:
@@ -739,12 +749,14 @@ class ExecPool(object):
 			self._workers.remove(job)
 			if job.terminates and job.ontimeout:
 				self.__clearAffinity(job)  # Note: the affinity must be updated before the job restart
-				if not self.__startJob(job):
+				if (not self._vmlimit or vmtotal + job.vmem < self._vmlimit) and not self.__startJob(job):
 					if self._vmlimit:
 						vmtotal += job.vmem  # Reuse .vmem from the previous run if exists
 					if _DEBUG_TRACE:
 						print('"  {}" #{} is restarted with timeout {:.4f} sec'
 							.format(job.name, job.proc.pid, job.timeout), file=sys.stderr)
+				elif self._vmlimit and vmtotal + job.vmem >= self._vmlimit:
+					raise NotImplementedError('Workers rescheduling / shrinking is not implemented yet')
 			else:
 				job.complete(not job.terminates)  # The completion is graceful only if the termination requests were not recuived
 				self.__clearAffinity(job)
@@ -752,13 +764,11 @@ class ExecPool(object):
 		# Start subsequent job if it is required
 		while self._jobs and len(self._workers) < self._workersLim:
 			job = self._jobs.popleft()
-			if not self.__startJob(job) and self._vmlimit:
+			if (not self._vmlimit or vmtotal + job.vmem < self._vmlimit) and not self.__startJob(job) and self._vmlimit:
 				vmtotal += job.vmem  # Reuse .vmem from the previous run if exists
+			elif self._vmlimit and vmtotal + job.vmem >= self._vmlimit:
+				raise NotImplementedError('Workers rescheduling / shrinking is not implemented yet')
 
-		# Check memory limitation fulfilling
-		if self._vmlimit and vmtotal >= self._vmlimit:
-			# Terminate some workers and reschedule jobs or reduce workers number
-			raise NotImplementedError('Memory management is not implemented yet')
 
 
 	def execute(self, job, async=True):
@@ -931,7 +941,7 @@ class TestExecPool(unittest.TestCase):
 		# Validate termination of the execution pool
 		self.assertFalse(self._execpool.join(etimeout))
 		etime = time.time() - tstart  # Execution time
-		self.assertFalse(self._execpool._workers)  # Workers shuold be empty
+		self.assertFalse(self._execpool._workers)  # Workers should be empty
 		# Validate termination time
 		self.assertLess(etime, worktime)
 		self.assertLess(etime, timeout)
@@ -957,14 +967,14 @@ class TestExecPool(unittest.TestCase):
 			, category='cat1', size=2, timeout=timeout)
 		self._execpool.execute(jm)
 		jss = Job('jslave_smaller', args=('sleep', str(worktime))
-			, category='cat1', size=1, ondone=mock.MagicMock())
-		self._execpool.execute(jss)  # ondone() should be called for the completed job
+			, category='cat1', size=1, ondone=mock.MagicMock())  # ondone() should be called for the completed job
+		self._execpool.execute(jss)
 		jsl = Job('jslave_larger', args=('sleep', str(worktime))
-			, category='cat1', size=3, ondone=mock.MagicMock())
-		self._execpool.execute(jsl)  # ondone() should be skipped for the terminated job
+			, category='cat1', size=3, ondone=mock.MagicMock())  # ondone() should be skipped for the terminated job
+		self._execpool.execute(jsl)
 		jso = Job('job_other', args=('sleep', str(worktime)), category='cat_other'
-			, ondone=mock.MagicMock())
-		self._execpool.execute(jso)  # ondone() should be called for the completed job
+			, ondone=mock.MagicMock())  # ondone() should be called for the completed job
+		self._execpool.execute(jso)
 
 		# Execution pool timeout
 		etimeout = max(1, TestExecPool._latency) + worktime * (1 + len(self._execpool._workers) // self._execpool._workersLim)
@@ -977,7 +987,7 @@ class TestExecPool(unittest.TestCase):
 		self.assertTrue(worktime <= etime < etimeout)
 		self.assertLess(jm.tstop - jm.tstart, worktime)
 		self.assertLess(jsl.tstop - jsl.tstart, worktime)
-		self.assertGreaterEqual(jsl.tstop - jm.tstart, jm.tstop - jm.tstart)  # Note: measure time from the master start
+		self.assertGreaterEqual(jsl.tstop - jm.tstart, timeout)  # Note: measure time from the master start
 		self.assertGreaterEqual(jss.tstop - jss.tstart, worktime)
 		self.assertLess(jsl.tstop - jsl.tstart, worktime)
 		self.assertGreaterEqual(jso.tstop - jso.tstart, worktime)
@@ -1018,7 +1028,9 @@ class TestExecPool(unittest.TestCase):
 			return """import sys
 import time
 
-buffer = [None] * int({size} / sys.getsizeof(None))
+emptysize = sys.getsizeof([])
+size = max({size}, emptysize)
+buffer = [None] * int((size - emptysize) / (sys.getsizeof([None]) - emptysize))
 time.sleep({duration})
 """.format(size=size, duration=duration)
 
