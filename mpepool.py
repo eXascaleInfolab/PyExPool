@@ -64,7 +64,7 @@ except ImportError:
 
 # Limit the amount of virtual memory (<= RAM) used by worker processes
 # NOTE: requires import of psutils
-_LIMIT_WORKERS_RAM = False
+_LIMIT_WORKERS_RAM = True
 if _LIMIT_WORKERS_RAM:
 	try:
 		import psutil
@@ -260,15 +260,16 @@ class Job(object):
 		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
 		# Internal attributes
 		self.proc = None  # Process of the job, can be used in the ondone() to read it's PIPE
-		self.terminates = 0  # The number of received termination requirests
+		self.terminates = 0  # The number of received termination requirests (generated because of the constraints violation)
 		# Process-related file descriptors to be closed
 		self._fstdout = None
 		self._fstderr = None
 		# Omit scheduler affinity policy (actual when some process is computed on all treads, etc.)
 		self._omitafn = omitafn
-		if _CHAINED_CONSTRAINTS:
+		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
 			self.category = category  # Job name
 			self.size = size  # Size of the processing data
+		if _CHAINED_CONSTRAINTS:
 			self.slowdown = slowdown  # Execution slowdown ratio, ~ 1 / exec_speed
 		if _LIMIT_WORKERS_RAM:
 			# Consumed VM on execution in gigabytes or the least expected (inherited from the
@@ -285,6 +286,17 @@ class Job(object):
 		"""
 		self.vmem = max(curvmem, self.vmem * Job.rtm + curvmem * (1-Job.rtm))
 		return self.vmem
+
+
+	def lessVmem(self, job):
+		"""Whether vmem or estimated vmem is less than in the specified job
+
+		job  - another job for the vmem comparison
+
+		return  - [estimated] vmem is less
+		"""
+		assert self.category == job.category, 'Only jobs of the same category can be compared'
+		return self.vmem < job.vmem if self.vmem and job.vmem else self.size < job.size
 
 
 	def complete(self, graceful=None):
@@ -653,20 +665,24 @@ class ExecPool(object):
 	def __reviseWorkers(self):
 		"""Rewise the workers
 
-		Check for the comleted jobs and their timeous, update corresponding
-		workers and start the jobs if possible
+		Check for the comleted jobs and their timeouts, update corresponding
+		workers and start the non-started jobs if possible.
+		Apply chained termination and rescheduling on tiomeout and memory
+		constraints violation if _CHAINED_CONSTRAINTS.
 		"""
 		# Process completed jobs, check timeouts and memory constraints matching
 		completed = set()  # Completed workers:  {proc,}
 		vmtotal = 0.  # Consuming virtual memory by workers
 		jtorigs = {}  # Timeout caused terminating origins (jobs) for the chained termination, {category: smallest_job}
+		jmorigs = {}  # Memory limit caused terminating origins (jobs) for the chained termination, {category: smallest_job}
 		for job in self._workers:  # .items()  Note: the number of _workers is small
 			if job.proc.poll() is not None:  # Not None means the process has been terminated / completed
 				completed.add(job)
 				continue
 
 			exectime = time.time() - job.tstart
-			if not job.timeout or exectime < job.timeout:
+			if not job.terminates and (not job.timeout or exectime < job.timeout
+			) and (not self._vmlimit or job.vmem <= self._vmlimit):
 				# Update memory consumption statistics if applicable
 				if self._vmlimit:
 					#pminf = psutil.Process(proc.pid).memory_info()
@@ -676,20 +692,31 @@ class ExecPool(object):
 					vmtotal += job.updateVmem(inGigabytes(psutil.Process(job.proc.pid).memory_info().vms))  # Consider vm consumption of past runs if any
 				continue
 
-			# Terminate the worker
+			# Terminate the worker because of the timeout/memory constraints violation
 			job.terminates += 1
 			# Save the most lighgtweight terminating chain origins for timeouts
 			if _CHAINED_CONSTRAINTS and job.category and job.size:
-				jorg = jtorigs.get(job.category, None)
-				if jorg is None or job.size * job.slowdown < jorg.size * jorg.slowdown:
-					jtorigs[job.category] = job
+				if not self._vmlimit or job.vmem <= self._vmlimit:
+					# Timeout constraints
+					jorg = jtorigs.get(job.category, None)
+					if jorg is None or job.size * job.slowdown < jorg.size * jorg.slowdown:
+						jtorigs[job.category] = job
+				else:
+					# Memory limit constraints
+					jorg = jmorigs.get(job.category, None)
+					if jorg is None or job.lessVmem(jorg):
+						jmorigs[job.category] = job
 
 			# Force killling when termination does not work
 			if job.terminates >= self._killCount:
 				job.proc.kill()
 				self._workers.remove(job)
-				print('WARNING, "{}" #{} is killed by the timeout ({:.4f} sec): {:.4f} sec ({} h {} m {:.4f} s)'
-					.format(job.name, job.proc.pid, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
+				print('WARNING, "{}" #{} is killed because of the {} viloation'
+					'consuming {} GB with timeout of {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s) '
+					.format(job.name, job.proc.pid
+					, 'timeout' if not self._vmlimit or job.vmem <= self._vmlimit else 'memory limit'
+					, 0 if not self._vmlimit else job.vmem
+					, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			else:
 				job.proc.terminate()  # Schedule the worker completion to the next revise
 		#self.vmtotal = vmtotal
@@ -701,6 +728,7 @@ class ExecPool(object):
 			for job in self._workers:
 				if not job.terminates and job.category and job.size and not job in completed:
 					# Travers over the chain origins and check matches skipping the origins themselves
+					# Timeout chains
 					for jorg in viewvalues(jtorigs):
 						# Note: job !== jorg, because jorg terminates and job does not
 						if (job.category == jorg.category  # Skip already terminating items
@@ -709,11 +737,18 @@ class ExecPool(object):
 							job.terminates += 1
 							job.proc.terminate()  # Schedule the worker completion to the next revise
 							exectime = time.time() - job.tstart
-							print('WARNING, "{}" #{} with weight {} is chain-terminated (by "{}" #{} with weight: {})'
-								' being executed {:.4f} sec ({} h {} m {:.4f} s)'.format(job.name, job.proc.pid
-								, job.size * job.slowdown, jorg.name, jorg.proc.pid, jorg.size * jorg.slowdown
-								, exectime, *secondsToHms(exectime)), file=sys.stderr)
 							break  # Switch to the following job
+					else:
+						# Memory limit chains
+						for jorg in viewvalues(jmorigs):
+							# Note: job !== jorg, because jorg terminates and job does not
+							if (job.category == jorg.category  # Skip already terminating items
+							and not job.lessVmem(jorg)):
+								# Terminate the worker
+								job.terminates += 1
+								job.proc.terminate()  # Schedule the worker completion to the next revise
+								exectime = time.time() - job.tstart
+								break  # Switch to the following job
 			# Traverse over non-scheduled jobs with defined job category and size
 			jrot = 0  # Accumulated rotation
 			ij = 0  # Job index
@@ -721,6 +756,7 @@ class ExecPool(object):
 				job = self._jobs[ij]
 				if job.category and job.size:
 					# Travers over the chain origins and check matches skipping the origins themselves
+					# Time constraints
 					for jorg in jtorigs:
 						if (job.category == jorg.category  # Skip already terminating items
 						and job.size * job.slowdown >= jorg.size * jorg.slowdown):
@@ -729,34 +765,60 @@ class ExecPool(object):
 							jrot += ij
 							self._jobs.popleft()
 							ij = -1  # Later +1 is added, so the index will be 0
+							#if _DEBUG_TRACE:
+							print('  "{}" #{} with weight {} is timeout chain-terminated (by "{}" #{} with weight: {})'
+								' being executed {:.4f} sec ({} h {} m {:.4f} s)'.format(job.name, job.proc.pid
+								, job.size * job.slowdown, jorg.name, jorg.proc.pid, jorg.size * jorg.slowdown
+								, exectime, *secondsToHms(exectime)), file=sys.stderr)
 							break
+					else:
+						# Memory limit constraints
+						for jorg in jmorigs:
+							if (job.category == jorg.category  # Skip already terminating items
+							and not job.lessVmem(jorg)):
+								# Remove the item
+								self._jobs.rotate(-ij)
+								jrot += ij
+								self._jobs.popleft()
+								ij = -1  # Later +1 is added, so the index will be 0
+								#if _DEBUG_TRACE:
+								print('  "{}" #{} with size {} is memory limit chain-terminated (by "{}" #{} with size: {})'
+									' consuming {} GB and being executed {:.4f} sec ({} h {} m {:.4f} s)'
+									.format(job.name, job.proc.pid, job.size, jorg.name, jorg.proc.pid, jorg.size
+									, job.vmem, exectime, *secondsToHms(exectime)), file=sys.stderr)
+								break
 				ij += 1
 			# Recover initial order of the jobs
 			self._jobs.rotate(jrot)
 
-		# Check memory limitation fulfilling
+		# Check memory limitation fulfilling for all processes
 		if self._vmlimit and vmtotal >= self._vmlimit:
 			# Terminate some workers and reschedule jobs or reduce workers number
 			raise NotImplementedError('Memory management is not implemented yet')
 
 		# Process completed (and terminated) jobs: execute callbacks and remove the workers
 		for job in completed:
+			exectime = time.time() - job.tstart
 			if job.terminates:
-				exectime = time.time() - job.tstart
-				print('WARNING, "{}" #{} is terminated by the timeout ({:.4f} sec): {:.4f} sec ({} h {} m {:.4f} s)'
-					.format(job.name, job.proc.pid, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
+				print('WARNING, "{}" #{} is terminated because of the {} viloation'
+					'consuming {} GB with timeout of {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s) '
+					.format(job.name, job.proc.pid
+					, 'timeout' if not self._vmlimit or job.vmem <= self._vmlimit else 'memory limit'
+					, 0 if not self._vmlimit else job.vmem
+					, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
+				#print('WARNING, "{}" #{} is terminated by the timeout ({:.4f} sec): {:.4f} sec ({} h {} m {:.4f} s)'
+				#	.format(job.name, job.proc.pid, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			# Restart the job if it was terminated and should be restarted
 			self._workers.remove(job)
-			if job.terminates and job.ontimeout:
+			if job.terminates and job.ontimeout and exectime >= job.timeout:  # ATTENTION: restart on timeout only and if required
+				# Note: if the job was terminated by timeout then memory limit was not met
 				self.__clearAffinity(job)  # Note: the affinity must be updated before the job restart
-				if (not self._vmlimit or vmtotal + job.vmem < self._vmlimit) and not self.__startJob(job):
+				if not self.__startJob(job):
 					if self._vmlimit:
 						vmtotal += job.vmem  # Reuse .vmem from the previous run if exists
 					if _DEBUG_TRACE:
 						print('"  {}" #{} is restarted with timeout {:.4f} sec'
 							.format(job.name, job.proc.pid, job.timeout), file=sys.stderr)
-				elif self._vmlimit and vmtotal + job.vmem >= self._vmlimit:
-					raise NotImplementedError('Workers rescheduling / shrinking is not implemented yet')
 			else:
 				job.complete(not job.terminates)  # The completion is graceful only if the termination requests were not recuived
 				self.__clearAffinity(job)
