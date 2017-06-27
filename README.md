@@ -3,7 +3,7 @@
 A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying optional execution parameters considering NUMA architecture:
 
 - automatic CPU affinity management and maximization of the dedicated CPU cache for a worker process
-- automatic rescheduling of the worker processes and modification of their queue parameters on parameterized low memory condition for the in-RAM computations (requires [psutil](https://pypi.python.org/pypi/psutil), can be disabled)
+- automatic rescheduling and balancing (reduction) of the worker processes and on low memory condition for the in-RAM computations (requires [psutil](https://pypi.python.org/pypi/psutil), can be disabled)
 - chained termination of related worker processes and jobs rescheduling to satisfy timeout and memory limit constraints
 - timeout per each Job (it was the main initial motivation to implement this module, because this feature is not provided by any Python implementation out of the box)
 - onstart/ondone callbacks, ondone is called only on successful completion (not termination) for both Jobs and Tasks (group of jobs)
@@ -103,8 +103,9 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 	# Scheduling parameters
 	omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled
 		and the process has multiple treads
-	category  - classification category, typically context or part of the name
-	size  - size of the processing data, >= 0
+	category  - classification category, typically context or part of the name; requires _CHAINED_CONSTRAINTS
+	size  - size of the processing data, >= 0; requires _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS
+		0 means undefined size and prevents jobs chaining on constraints violation
 	slowdown  - execution slowdown ratio (inversely to the [estimated] execution speed), E (0, inf)
 
 	# Execution parameters, initialized automatically on execution
@@ -112,7 +113,7 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 	tstop  - termination / completion time after ondone
 	proc  - process of the job, can be used in the ondone() to read it's PIPE
 	vmem  - consuming virtual memory (smooth max, not just the current value) or the least expected value
-		inherited from the jobs of the same category having non-smaller size
+		inherited from the jobs of the same category having non-smaller size; requires _LIMIT_WORKERS_RAM
 	"""
 ```
 ### Task
@@ -251,6 +252,8 @@ The workflow consists of the following steps:
 1. Create Execution Pool.
 1. Create and schedule Jobs with required parameters, callbacks and optionally packing them into Tasks.
 1. Wait on Execution pool until all the jobs are completed or terminated, or until the global timeout is elapsed.
+
+See [unit tests (TestExecPool)](mpepool.py) for the advanced examples.
 
 ### Usage Example
 ```python
