@@ -986,14 +986,12 @@ class ExecPool(object):
 
 		if not self._wkslim:
 			assert wsreduced and _LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS, '_wkslim can become zero only afer the reduction'
-			print('WARNING, terminating the whole execution pool because the number'
-				' of workers is reduced to zero', file=sys.stderr)
-			self.__terminate()
+			print('WARNING, the number of workers is reduced to zero, the whole execution pool should be terminated', file=sys.stderr)
 			return False
 		# Start subsequent job if it is required
 		while self._jobs and len(self._workers) < self._wkslim:
 			#if _DEBUG_TRACE == 3:
-			print('  "{}" (expected vmem: {:.4f} / {:.4f} GB) is being resheduled of {} jobs: {}'
+			print('  "{}" (expected vmem: {:.4f} / {:.4f} GB) is being resheduled, {} nonstarted jobs: {}'
 				.format(self._jobs[0].name, 0 if not self._vmlimit else vmtotal + job.vmem, self._vmlimit
 				, len(self._jobs), ', '.join([j.name for j in self._jobs])), file=sys.stderr)
 			job = self._jobs.popleft()
@@ -1008,7 +1006,7 @@ class ExecPool(object):
 				vmtotal += job.vmem  # Reuse .vmem from the previous run if exists
 		assert self._workers or not self._jobs, 'Worker processes should always exist if non-started jobs are remained'
 
-		return  True
+		return True
 
 
 
@@ -1068,17 +1066,23 @@ class ExecPool(object):
 		if self._tstart is None:
 			assert not self._jobs and not self._workers, \
 				'Start time should be defined for the present jobs'
-			return
+			return False
 
 		res = self.__reviseWorkers()
-		while res and self._jobs or self._workers:
+		while res and (self._jobs or self._workers):
 			if timeout and time.time() - self._tstart > timeout:
-				self.__terminate()
-				return False
+				print('WARNING, the execution pool should be terminated becaused of the violated timeout', file=sys.stderr)
+				res = False
+				continue
 			time.sleep(self._latency)
 			res = self.__reviseWorkers()
+		# Terminate execution pool if required
+		if not res:
+			self.__terminate()
 		self._tstart = None  # Be ready for the following execution
-		return True
+
+		assert not self._jobs and not self._workers, 'All jobs should be finalized'
+		return res
 
 
 # Unit Tests -------------------------------------------------------------------
@@ -1374,7 +1378,7 @@ time.sleep({duration})
 
 		# Note: we need another execution pool to set vmlimit (10 Mb) there
 		epoolVmem = 0.15  # Execution pool vmem limit, GB
-		msmall = 0.051  # Small amount of memory for a job
+		msmall = inBytes(0.051)  # Small amount of memory for a job
 		# Start not more than 3 simultaneous workers
 		with ExecPool(max(TestExecPool._WPROCSMAX, 3), latency=TestExecPool._latency, vmlimit=epoolVmem) as xpool:  # , _AFNSTEP, vmlimit
 			tstart = time.time()
@@ -1387,7 +1391,7 @@ time.sleep({duration})
 				, size=5, timeout=timeout, onstart=mock.MagicMock(), ondone=mock.MagicMock())
 			jgmsp1 = Job('jgroup_mem_small_postponed_1', args=(PYEXEC, '-c', TestExecPool.allocDelayProg(msmall, worktime))
 				, size=9, timeout=timeout, onstart=mock.MagicMock())
-			jgmsp2 = Job('jgroup_mem_small_postponed_2', args=(PYEXEC, '-c', TestExecPool.allocDelayProg(msmall, worktime))
+			jgmsp2 = Job('jgroup_mem_small_postponed_2_to', args=(PYEXEC, '-c', TestExecPool.allocDelayProg(msmall, worktime))
 				, timeout=worktime/2, ondone=mock.MagicMock())
 
 			xpool.execute(jgms1)
@@ -1398,6 +1402,8 @@ time.sleep({duration})
 
 			# Validate exec pool completion before the timeout
 			self.assertTrue(xpool.join(etimeout))
+			# All jobs should be completed
+			self.assertFalse(self._workers or self._jobs)
 			etime = time.time() - tstart  # Execution time
 
 			# Validate timings, gracefull copletion of all jobs except the last one
@@ -1422,9 +1428,6 @@ time.sleep({duration})
 			jgms3.ondone.assert_called_once_with(jgms3)
 			jgmsp1.onstart.assert_called_once_with(jgmsp1)
 			jgmsp2.ondone.assert_not_called()
-
-			# All jobs should be completed
-			self.assertFalse(self._workers or self._jobs)
 
 
 	@unittest.skipUnless(_LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS, 'Requires _LIMIT_WORKERS_RAM, _CHAINED_CONSTRAINTS')
