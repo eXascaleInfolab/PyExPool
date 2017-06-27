@@ -2,25 +2,45 @@
 # -*- coding: utf-8 -*-
 
 """
-\descr:  Multi-Process Execution Pool to schedule Jobs execution with per-Job timeout,
-	optionally grouping them into Tasks and specifying execution paremeters:
-	- timeout per each Job (it was the main motivation to implemtent this module)
-	- onstart/ondone callbacks, ondone is called only on successful completion (not termination)
-	- stdout/err output, which can be redireted to any custom file or PIPE
-	- custom parameters for each job and task besides the name/id
+\descr:  Multi-Process Execution Pool to schedule Jobs execution with per-job timeout,
+optionally grouping them into Tasks and specifying optional execution parameters
+considering NUMA architecture:
+	- automatic CPU affinity management and maximization of the dedicated CPU cache
+		for a worker process
+	- automatic rescheduling and balancing (reduction) of the worker processes and on
+		low memory condition for the in-RAM computations (requires psutil, can be disabled)
+	- chained termination of related worker processes and jobs rescheduling to satisfy
+		timeout and memory limit constraints
+	- timeout per each Job (it was the main initial motivation to implement this module,
+		because this feature is not provided by any Python implementation out of the box)
+	- onstart/ondone callbacks, ondone is called only on successful completion
+		(not termination) for both Jobs and Tasks (group of jobs)
+	- stdout/err output, which can be redirected to any custom file or PIPE
+	- custom parameters for each Job and respective owner Task besides the name/id
 
 	Flexible API provides optional automatic restart of jobs on timeout, access to job's process,
 	parent task, start and stop execution time and much more...
 
-	Global functionality parameters:
+
+	Core parameters specified as global variables:
 	_LIMIT_WORKERS_RAM  - limit the amount of virtual memory (<= RAM) used by worker processes,
 		requires psutil import
 	_CHAINED_CONSTRAINTS  - terminate related jobs on terminating any job by the execution
 		constraints (timeout or RAM limit)
 
+	The load balancing is enabled when global variables _LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS
+	are set, jobs categories and relative size (if known) specified. The balancing is performed
+	to use as much RAM and CPU resources as possible performing in-RAM computations and meeting
+	timeout, memory limit and CPU cache (processes affinity) constraints.
+	Large executing jobs are rescheduled for the later execution with less number of worker
+	processes after the completion of smaller jobs. The number of workers is reduced automatically
+	(balanced) on the jobs queue processing. It is recommended to add jobs in the order of the
+	increasing memory/time complexity if possible to reduce the number of worker process
+	terminations for the jobs execution postponing on rescheduling.
+
 \author: (c) Artem Lutov <artem@exascale.info>
 \organizations: eXascale Infolab <http://exascale.info/>, Lumais <http://www.lumais.com/>, ScienceWise <http://sciencewise.info/>
-\date: 2015-07
+\date: 2015-07 (v1), 2017-06 (v2)
 """
 
 from __future__ import print_function, division  # Required for stderr output, must be the first import
@@ -279,13 +299,13 @@ class Job(object):
 		self._omitafn = omitafn
 		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
 			self.size = size  # Size of the processing data
+			# Consumed VM on execution in gigabytes or the least expected (inherited from the
+			# related jobs having the same category and non-smaller size)
+			self.vmem = 0.
 		if _CHAINED_CONSTRAINTS:
 			self.category = category  # Job name
 			self.slowdown = slowdown  # Execution slowdown ratio, ~ 1 / exec_speed
 		if _LIMIT_WORKERS_RAM:
-			# Consumed VM on execution in gigabytes or the least expected (inherited from the
-			# related jobs having the same category and non-smaller size)
-			self.vmem = 0.
 			self.wkslim = None  # Worker processes limit (max number) on the job postponing if any
 
 
@@ -516,9 +536,8 @@ class ExecPool(object):
 		# Virtual memory tracing attributes
 		# Dedicate at least 256 Mb for OS using not more than 99% of RAM
 		self._vmlimit =  0. if not _LIMIT_WORKERS_RAM else max(0, min(vmlimit, _RAM_SIZE * 0.99 - 0.25))  # in Gb
-		#self.vmtotal = 0.  # Virtual memory used by all workers in gigabytes
 		# Execution rescheduling attributes
-		self._latency = latency if latency else 2 + (not not self._vmlimit)  # Seconds of sleep on pooling
+		self._latency = latency if latency else 1 + (not not self._vmlimit)  # Seconds of sleep on pooling
 		# Predefined private attributes
 		self._killCount = 3  # 3 cycles of self._latency, termination wait time
 		self.__termlock = Lock()  # Lock for the __terminate() to avoid simultaneous call by the signal and normal execution flow
@@ -653,7 +672,7 @@ class ExecPool(object):
 		# Update limit of the worker processes of the other larger nonstarted jobs of the same category as this job has,
 		# and move jobs with the lowest wkslim to the end.
 		# Note: the update should be made for all nonstarted jobs, not only for the one caused the reduction.
-		if job.category is not None:
+		if _CHAINED_CONSTRAINTS and job.category is not None:
 			jobsnum = len(self._jobs)  # The number of jobs
 			ij = 1 if priority else 0  # Job index
 			while ij < jobsnum:
@@ -1379,10 +1398,11 @@ time.sleep({duration})
 			self.assertGreaterEqual(jmsDvs.tstop - jmsDvs.tstart, worktime)  # Smaller size of the ralted chained job to the vioated origin should not cause termination
 			self.assertGreaterEqual(jms1.tstop - jms1.tstart, worktime)  # Independent job should have graceful completion
 			self.assertFalse(jms1.proc.returncode)  # Errcode code is 0 on the gracefull completion
-			self.assertIsNone(jmsDvl1.tstart)  # Postponed job should be terminated before being started by the chaned relation on the memory-violating origin
+			if _CHAINED_CONSTRAINTS:
+				self.assertIsNone(jmsDvl1.tstart)  # Postponed job should be terminated before being started by the chained relation on the memory-violating origin
+				self.assertIsNone(jmsDvl2.tstart)  # Postponed job should be terminated before being started by the chained relation on the memory-violating origin
 			#self.assertLess(jmsDvl1.tstop - jmsDvl1.tstart, worktime)  # Early termination by the chained retalion to the mem violated origin
 			self.assertGreaterEqual(jms2.tstop - jms2.tstart, worktime)  # Independent job should have graceful completion
-			self.assertIsNone(jmsDvl2.tstart)  # Postponed job should be terminated before being started by the chaned relation on the memory-violating origin
 
 
 	@unittest.skipUnless(_LIMIT_WORKERS_RAM, 'Requires _LIMIT_WORKERS_RAM')

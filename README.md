@@ -1,12 +1,12 @@
 # PyExPool
 
-A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying optional execution parameters considering NUMA architecture:
+A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying optional execution parameters considering NUMA architecture peculiarities:
 
 - automatic CPU affinity management and maximization of the dedicated CPU cache for a worker process
-- automatic rescheduling and balancing (reduction) of the worker processes and on low memory condition for the in-RAM computations (requires [psutil](https://pypi.python.org/pypi/psutil), can be disabled)
-- chained termination of related worker processes and jobs rescheduling to satisfy timeout and memory limit constraints
+- automatic rescheduling and *load balancing* (reduction) of the worker processes and on low memory condition for the *in-RAM computations* (requires [psutil](https://pypi.python.org/pypi/psutil), can be disabled)
+- *chained termination* of related worker processes and jobs rescheduling to satisfy *timeout* and *memory limit* constraints
 - timeout per each Job (it was the main initial motivation to implement this module, because this feature is not provided by any Python implementation out of the box)
-- onstart/ondone callbacks, ondone is called only on successful completion (not termination) for both Jobs and Tasks (group of jobs)
+- onstart/ondone *callbacks*, ondone is called only on successful completion (not termination) for both Jobs and Tasks (group of jobs)
 - stdout/err output, which can be redirected to any custom file or PIPE
 - custom parameters for each Job and respective owner Task besides the name/id
 
@@ -16,9 +16,11 @@ Implemented as a *single-file module* to be *easily included into your project a
 The main purpose of this single-file module is the **asynchronous execution of modules and external executables with cache / parallelization tuning and automatic balancing of the worker processes for the in-RAM computations**.  
 In case asynchronous execution of the *Python functions* is required and usage of external dependences is not a problem, or automatic jobs scheduling for in-RAM computations is not required, then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
 
+The load balancing is enabled when global variables `_LIMIT_WORKERS_RAM` and `_CHAINED_CONSTRAINTS` are set, jobs categories and relative size (if known) specified. The balancing is performed to use as much RAM and CPU resources as possible performing in-RAM computations and meeting timeout, memory limit and CPU cache (processes affinity) constraints.   Large executing jobs are rescheduled for the later execution with less number of worker processes after the completion of smaller jobs. The number of workers is reduced automatically (balanced) on the jobs queue processing. It is recommended to add jobs in the order of the increasing memory/time complexity if possible to reduce the number of worker process terminations for the jobs execution postponing on rescheduling.
+
 \author: (c) Artem Lutov <artem@exascale.info>  
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
-\date: 2016-01  
+\date: 2017-06  
 
 ## Content
 - [Dependencies](#dependencies)
@@ -26,6 +28,7 @@ In case asynchronous execution of the *Python functions* is required and usage o
 	- [Job](#job)
 	- [Task](#task)
 	- [ExecPool](#execpool)
+	- [Accessory Routines](#accessory-routines)
 - [Usage](#usage)
 	- [Usage Example](#usage-example)
 	- [Failsafe Termination](#failsafe-termination)
@@ -47,7 +50,7 @@ $ sudo pip install mock
 
 ## API
 
-Flexible API provides *automatic CPU affinity management, maximization of the dedicated CPU cache, limitation of the minimal dedicated RAM per worker process, balancing of the worker processes and rescheduling of chains of related jobs on low memory condition for the in-RAM computations*, optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and more...  
+Flexible API provides *automatic CPU affinity management, maximization of the dedicated CPU cache, limitation of the minimal dedicated RAM per worker process, balancing of the worker processes and rescheduling of chains of the related jobs on low memory condition for the in-RAM computations*, optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and more...  
 `ExecPool` represents a pool of worker processes to execute `Job`s that can be grouped into `Tasks`s for more flexible management.
 
 ### Job
@@ -143,6 +146,63 @@ Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout,
 ```
 ### ExecPool
 ```python
+ExecPool(wksnum=cpu_count(), afnstep=None, vmlimit=0., latency=0.)
+	"""Multi-process execution pool of jobs
+
+	wksnum  - number of resident worker processes, >=1. The reasonable value is
+			<= NUMA nodes * node CPUs, which is typically returned by cpu_count(),
+			where node CPUs = CPU cores * HW treads per core.
+			To guarantee minimal average RAM per a process, for example 2.5 Gb:
+				wksnum = min(cpu_count(), max(ramfracs(2.5), 1))
+		afnstep  - affinity step, integer if applied. Used to bind worker to the
+			processing units to have warm cache for single thread workers.
+			Typical values:
+				None  - do not use affinity at all (recommended for multi-threaded workers),
+				1  - maximize parallelization (the number of worker processes = CPU units),
+				cpucorethreads()  - maximize the dedicated CPU cache (the number of
+					worker processes = CPU cores = CPU units / hardware treads per CPU core).
+			NOTE: specification of the afnstep might cause reduction of the workers number.
+		vmlimit  - limit total amount of VM (automatically reduced to the amount of physical
+			RAM if the larger value is specified) in gigabytes that can be used by worker
+			processes to provide in-RAM computations.
+			Dynamically reduce the number of workers to consume total virtual memory
+			not more than specified. The workers are rescheduled starting from the
+			most memory-heavy processes. >= 0
+			NOTE:
+				- applicable only if _LIMIT_WORKERS_RAM
+				- 0 means unlimited (some jobs might be [partially] swapped)
+				- value > 0 is automatically limited with total physical RAM to process
+					jobs in RAM almost without the swapping
+		latency  - approximate minimal latency of the workers monitoring in sec, float >= 0.
+			0 means automatically defined value (recommended, typically 2-3 sec).
+	"""
+
+	execute(job, async=True):
+		"""Schedule the job for the execution
+
+		job  - the job to be executed, instance of Job
+		async  - async execution or wait until execution completed
+		  NOTE: sync tasks are started at once
+		return  - 0 on successful execution, process return code otherwise
+		"""
+
+	join(timeout=0):
+		"""Execution cycle
+
+		timeout  - execution timeout in seconds before the workers termination, >= 0.
+			0 means absence of the timeout. The time is measured SINCE the first job
+			was scheduled UNTIL the completion of all scheduled jobs.
+		return  - True on graceful completion, False on termination by the specified timeout
+		"""
+
+	__del__():
+		"""Force termination of the pool"""
+
+	__finalize__():
+		"""Force termination of the pool"""
+```
+### Accessory Routines
+```
 def ramfracs(fracsize):
 	"""Evaluate the minimal number of RAM fractions of the specified size in GB
 
@@ -186,62 +246,7 @@ def afnicpu(iafn, corethreads=1, nodes=1, crossnodes=True):
 	return CPU index respective to the specified index in the affinity table
 	"""
 
-ExecPool(workers=cpu_count(), afnstep=None, vmlimit=0., latency=0.)
-	"""Multi-process execution pool of jobs
-
-	workers  - number of resident worker processes, >=1. The reasonable value is
-		<= NUMA nodes * node CPUs, which is typically returned by cpu_count(),
-		where node CPUs = CPU cores * HW treads per core.
-		To guarantee minimal average RAM per a process, for example 2.5 GB:
-			workers = min(cpu_count(), max(ramfracs(2.5), 1))
-	afnstep  - affinity step, integer if applied. Used to bind worker to the
-		processing units to have warm cache for single thread workers.
-		Typical values:
-			None  - do not use affinity at all (recommended for multi-threaded workers),
-			1  - maximize parallelization (the number of worker processes = CPU units),
-			cpucorethreads()  - maximize the dedicated CPU cache (the number of
-				worker processes = CPU cores = CPU units / hardware treads per CPU core).
-		NOTE: specification of the afnstep might cause reduction of the workers number.
-	vmlimit  - limit total amount of VM (automatically reduced to the amount of physical
-		RAM if the larger value is specified) in gigabytes that can be used by worker
-		processes to provide in-RAM computations.
-		Dynamically reduce the number of workers to consume total virtual memory
-		not more than specified. The workers are rescheduled starting from the
-		most memory-heavy processes. >= 0
-		NOTE:
-			- applicable only if _LIMIT_WORKERS_RAM
-			- 0 means unlimited (some jobs might be [partially] swapped)
-			- value > 0 is automatically limited with total physical RAM to process
-				jobs in RAM almost without the swapping
-	latency  - approximate minimal latency of the workers monitoring in sec, float >= 0.
-		0 means automatically defined value (recommended, typically 2-3 sec).
-	"""
-
-	execute(job, async=True):
-		"""Schedule the job for the execution
-
-		job  - the job to be executed, instance of Job
-		async  - async execution or wait until execution completed
-		  NOTE: sync tasks are started at once
-		return  - 0 on successful execution, process return code otherwise
-		"""
-
-	join(timeout=0):
-		"""Execution cycle
-
-		timeout  - execution timeout in seconds before the workers termination, >= 0.
-			0 means absence of the timeout. The time is measured SINCE the first job
-			was scheduled UNTIL the completion of all scheduled jobs.
-		return  - True on graceful completion, False on termination by the specified timeout
-		"""
-
-	__del__():
-		"""Force termination of the pool"""
-
-	__finalize__():
-		"""Force termination of the pool"""
 ```
-
 
 ## Usage
 
