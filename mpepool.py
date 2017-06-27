@@ -492,12 +492,12 @@ class ExecPool(object):
 				cpucorethreads()  - maximize the dedicated CPU cache (the number of
 					worker processes = CPU cores = CPU units / hardware treads per CPU core).
 			NOTE: specification of the afnstep might cause reduction of the workers number.
-		vmlimit  - limit total amount of VM (automatically reduced to the amount of physical
-			RAM if the larger value is specified) in gigabytes that can be used by worker
-			processes to provide in-RAM computations.
-			Dynamically reduce the number of workers to consume total virtual memory
+		vmlimit  - limit total amount of Virtual Memory (automatically reduced to
+			the amount of physical RAM if the larger value is specified) in gigabytes
+			that can be used by worker processes to provide in-RAM computations, >= 0.
+			Dynamically reduces the number of workers to consume total virtual memory
 			not more than specified. The workers are rescheduled starting from the
-			most memory-heavy processes. >= 0
+			most memory-heavy processes.
 			NOTE:
 				- applicable only if _LIMIT_WORKERS_RAM
 				- 0 means unlimited (some jobs might be [partially] swapped)
@@ -541,6 +541,10 @@ class ExecPool(object):
 		# Predefined private attributes
 		self._killCount = 3  # 3 cycles of self._latency, termination wait time
 		self.__termlock = Lock()  # Lock for the __terminate() to avoid simultaneous call by the signal and normal execution flow
+
+		if self._vmlimit != vmlimit:
+			print('WARNING, total memory limit is reduced to guarantee the in-RAM'
+				' computations: {} -> {} Gb'.format(vmlimit, self._vmlimit), file=sys.stderr)
 
 
 	def __enter__(self):
