@@ -308,8 +308,9 @@ class Job(object):
 
 		return  - [estimated] vmem is less
 		"""
-		assert self.category == job.category, 'Only jobs of the same category can be compared'
-		return self.vmem < job.vmem if self.vmem and job.vmem else self.size < job.size
+		assert self.category is not None and self.category == job.category, (
+			'Only jobs of the same initialized category can be compared')
+		return self.size < job.size if not self.vmem or not job.vmem else self.vmem < job.vmem
 
 
 	def complete(self, graceful=None):
@@ -455,14 +456,14 @@ class ExecPool(object):
 	each subsequent job.
 	'''
 
-	def __init__(self, workers=cpu_count(), afnstep=None, vmlimit=0., latency=0.):
+	def __init__(self, wksnum=cpu_count(), afnstep=None, vmlimit=0., latency=0.):
 		"""Execution Pool constructor
 
-		workers  - number of resident worker processes, >=1. The reasonable value is
+		wksnum  - number of resident worker processes, >=1. The reasonable value is
 			<= NUMA nodes * node CPUs, which is typically returned by cpu_count(),
 			where node CPUs = CPU cores * HW treads per core.
 			To guarantee minimal average RAM per a process, for example 2.5 GB:
-				workers = min(cpu_count(), max(ramfracs(2.5), 1))
+				wksnum = min(cpu_count(), max(ramfracs(2.5), 1))
 		afnstep  - affinity step, integer if applied. Used to bind worker to the
 			processing units to have warm cache for single thread workers.
 			Typical values:
@@ -485,24 +486,24 @@ class ExecPool(object):
 		latency  - approximate minimal latency of the workers monitoring in sec, float >= 0.
 			0 means automatically defined value (recommended, typically 2-3 sec).
 		"""
-		assert workers >= 1 and (afnstep is None or afnstep <= cpu_count()
+		assert wksnum >= 1 and (afnstep is None or afnstep <= cpu_count()
 			) and vmlimit >= 0 and latency >= 0, 'Input parameters are invalid'
 
-		# Verify and update workers and afnstep if required
+		# Verify and update wksnum and afnstep if required
 		if afnstep:
 			# Check whether _AFFINITYBIN exists in the system
 			try:
 				subprocess.call([_AFFINITYBIN, '-V'])
-				if afnstep > cpu_count() / workers:
+				if afnstep > cpu_count() / wksnum:
 					print('WARNING, the number of worker processes is reduced'
 						' ({wlim0} -> {wlim} to satisfy the affinity step'
-						.format(wlim0=workers, wlim=cpu_count() // afnstep), file=sys.stderr)
-					workers = cpu_count() // afnstep
+						.format(wlim0=wksnum, wlim=cpu_count() // afnstep), file=sys.stderr)
+					wksnum = cpu_count() // afnstep
 			except OSError as err:
 				afnstep = None
 				print('WARNING, {afnbin} does not exists in the system to fix affinity: {err}'
 					.format(afnbin=_AFFINITYBIN, err=err), file=sys.stderr)
-		self._wkslim = workers  # Max number of resident workers
+		self._wkslim = wksnum  # Max number of resident workers
 		self._workers = set()  # Scheduled and started jobs, i.e. worker processes:  {executing_job, }
 		self._jobs = collections.deque()  # Scheduled jobs that have not been started yet:  deque(job)
 		self._tstart = None  # Start time of the execution of the first task
@@ -627,41 +628,48 @@ class ExecPool(object):
 		return  whether worker processes has been reduced (or were already reduced)
 		"""
 		# Note: postponing jobs are terminated jobs only, can be called for !_CHAINED_CONSTRAINTS
-		assert (job.terminates and job.wkslim >= self._wkslim and (not priority or self._workers)
+		assert (job.terminates and (not priority or self._workers)
 			and (not self._vmlimit or job.vmem < self._vmlimit) and (not job.timeout
-			or not (job.tstop if job.tstop is not None else time.time()) - job.tstart < job.timeout)
+			or (job.tstop if job.tstop is not None else time.time())
+			- (job.tstart if job.tstart is not None else 0) < job.timeout)
 			), (  #  and _LIMIT_WORKERS_RAM and not job in self._workers and not job in self._jobs  # Note: self._jobs scanning is time-consuming
 			'A terminated non-rescheduled job is expected that doest not violate constraints.'
-			' "{}" terminates: {}, wkslim: {} vs {} pwl'.format(job.name, job.terminates, job.wkslim, self._wkslim))
+			' "{}" terminates: {}, wkslim: {} vs {} pwl, pripority: {}, {} workers, vmem: {:.4f} / {:.4f} GB'
+			', exectime: {:.4f} / {:.4f} sec'.format(job.name, job.terminates, job.wkslim, self._wkslim
+			, priority, len(self._workers), 0 if not not self._vmlimit else job.vmem, self._vmlimit
+			, (job.tstop if job.tstop is not None else time.time())
+			- (job.tstart if job.tstart is not None else 0), job.timeout))
 		# Postpone only the goup-terminated jobs by memory limit, not a single worker that exceeds the (time/memory) constraints
 		# Note: job wkslim should be updated before adding to the _jobs to handle correctly the case when _jobs were empty
 		if priority:
-			job.wkslim = len(self._workers)
 			self._jobs.appendleft(job)  # Now _jobs contain at least one job
 		else:
-			job.wkslim = len(self._workers) - 1
 			self._jobs.append(job)  # Now _jobs contain at least one job
 
+		print('>>> Postponing-initial non-scheduled jobs ({} workers): {}'
+			.format(len(self._workers), ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs])))
 		# Update limit of the worker processes of the other larger non-started jobs of the same category as this job has,
 		# and move jobs with the lowest wkslim to the end.
 		# Note: the update should be made for all non-started jobs, not only for the one caused the reduction.
-		jobsnum = len(self._jobs)  # The number of jobs
-		ij = 1 if priority else 0  # Job index
-		while ij < jobsnum:
-			pj = self._jobs[ij]  # Processing job
-			# Update wkslim of the other larger non-started jobs of the same category
-			if pj.category == job.category and not pj.lessVmem(job):
-				# Set vmem in for the related non-started heavier jobs
-				if not pj.vmem:
-					pj.vmem = job.vmem
-				if job.wkslim < pj.wkslim:
-					pj.wkslim = job.wkslim
-			# Move jobs with the lowest wkslim to the end
-			ijc = ij
-			while ij >= 1 and self._jobs[ij].wkslim > self._jobs[ij-1].wkslim:
-				self._jobs[ij-1], self._jobs[ij] = self._jobs[ij], self._jobs[ij-1]
-				ij -= 1
-			ij = ijc + 1
+		if job.category is not None:
+			jobsnum = len(self._jobs)  # The number of jobs
+			ij = 1 if priority else 0  # Job index
+			while ij < jobsnum:
+				pj = self._jobs[ij]  # Processing job
+				# Update wkslim of the other larger non-started jobs of the same category
+				if pj.category == job.category and not pj.lessVmem(job):
+					# Set vmem in for the related non-started heavier jobs
+					if not pj.vmem:
+						pj.vmem = job.vmem
+					if job.wkslim < pj.wkslim:
+						pj.wkslim = job.wkslim
+				# Move jobs with the lowest wkslim to the end
+				ijc = ij
+				while ij >= 1 and self._jobs[ij].wkslim > self._jobs[ij-1].wkslim:
+					self._jobs[ij-1], self._jobs[ij] = self._jobs[ij], self._jobs[ij-1]
+					ij -= 1
+				ij = ijc + 1
+		print('>>> Postponing-updated non-scheduled jobs: ' + ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs]))
 
 		# Reduce workers size if the first non-started job was rescheduled (and current job has been rescheduled)
 		if not reduced and self._jobs[0].terminates and self._jobs[0].wkslim < self._wkslim:
@@ -817,7 +825,7 @@ class ExecPool(object):
 			# Terminate the worker because of the timeout/memory constraints violation
 			job.terminates += 1
 			# Save the most lighgtweight terminating chain origins for timeouts and memory overusage by the single process
-			if _CHAINED_CONSTRAINTS and job.category and job.size:
+			if _CHAINED_CONSTRAINTS and job.category is not None and job.size:
 				if job.timeout and exectime >= job.timeout:
 					# Timeout constraints
 					jorg = jtorigs.get(job.category, None)
@@ -857,7 +865,7 @@ class ExecPool(object):
 		if _CHAINED_CONSTRAINTS and (jtorigs or jmorigs):
 			# Traverse over the workers with defined job category and size
 			for job in self._workers:
-				if not job.terminates and job.category and job.size:
+				if not job.terminates and job.category is not None and job.size:
 					# Travers over the chain origins and check matches skipping the origins themselves
 					# Timeout chains
 					for jorg in viewvalues(jtorigs):
@@ -881,11 +889,13 @@ class ExecPool(object):
 								vmtotal -= job.vmem  # Reduce total memory consumed by the active workers
 								break  # Switch to the following job
 			# Traverse over the non-started jobs with defined job category and size
+			if _DEBUG_TRACE == 2:
+				print('  Updating chained constraints in non-scheduled jobs: ' + ', '.join([job.name for job in self._jobs]))
 			jrot = 0  # Accumulated rotation
 			ij = 0  # Job index
 			while ij < len(self._jobs) - jrot:
 				job = self._jobs[ij]
-				if job.category and job.size:
+				if job.category is not None and job.size:
 					# Travers over the chain origins and check matches skipping the origins themselves
 					# Time constraints
 					for jorg in jtorigs:
@@ -939,12 +949,15 @@ class ExecPool(object):
 					pjobs.add(job)
 					memov -= job.vmem
 			# Terminate and remove worker processes of the postponing jobs
+			wkslim = self._wkslim - len(pjobs)  # New workers limit for the postponing job
 			while pjobs:
 				job = pjobs.pop()
 				# Terminate the worker
 				job.terminates += 1
 				# Schedule the worker completion (including removement from the workers) to the next revise
 				job.proc.terminate()
+				# Upate wkslim
+				job.wkslim = wkslim
 			# Update amount of estimated vmtotal
 			vmtotal = self._vmlimit + memov  # Note: memov is negative here
 
@@ -958,11 +971,11 @@ class ExecPool(object):
 			if not job.terminates:
 				continue
 			print('WARNING, "{}" #{} is terminated because of the {} violation'
-				' consuming {:.4f} GB with timeout of {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
+				' consuming {:.4f} / {:.4f} GB with timeout of {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 				.format(job.name, job.proc.pid
 				, 'timeout' if job.timeout and exectime >= job.timeout else (
 					('' if job.vmem >= self._vmlimit else 'group ') + 'memory limit')
-				, 0 if not self._vmlimit else job.vmem
+				, 0 if not self._vmlimit else job.vmem, self._vmlimit
 				, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			# Reschedule job having the group violation of the memory limit
 			# if timeout is not violated or restart on timeout is requested
@@ -989,6 +1002,8 @@ class ExecPool(object):
 			print('WARNING, the number of workers is reduced to zero, the whole execution pool should be terminated', file=sys.stderr)
 			return False
 		# Start subsequent job if it is required
+		if _DEBUG_TRACE == 2:
+			print('  Non-scheduled jobs: ' + ', '.join(['{} ({})'.format(job.name, job.wkslim) for pj in self._jobs]))
 		while self._jobs and len(self._workers) < self._wkslim:
 			#if _DEBUG_TRACE == 3:
 			print('  "{}" (expected vmem: {:.4f} / {:.4f} GB) is being resheduled, {} nonstarted jobs: {}'
