@@ -1263,25 +1263,24 @@ class TestExecPool(unittest.TestCase):
 
 
 	def test_jobTimeoutSimple(self):
-		"""Validate termination of a single job by timeout and completion of independent another job"""
+		"""Verify termination of a single job by timeout and completion of independent another job"""
 		timeout = TestExecPool._latency * 4  # Note: should be larger than 3*_latency
 		worktime = max(1, TestExecPool._latency) + (timeout * 2) // 1  # Job work time
 		assert TestExecPool._latency * 3 < timeout < worktime, 'Testcase parameters validation failed'
 
 		tstart = time.time()
 		jterm = Job('j_timeout', args=('sleep', str(worktime)), timeout=timeout)
-		self.assertRaises(AttributeError, jterm._updateVmem)  # Check that non-started job raises exception on memory update request
 		self._execpool.execute(jterm)
 		jcompl = Job('j_complete', args=('sleep', '0'), timeout=timeout)
 		self._execpool.execute(jcompl)
-		# Validate successful completion of the execution pool
+		# Verify successful completion of the execution pool
 		self.assertTrue(self._execpool.join())
 		etime = time.time() - tstart  # Execution time
 		self.assertFalse(self._execpool._workers)  # Workers shuold be empty
-		# Validate termination time
+		# Verify termination time
 		self.assertLess(etime, worktime)
 		self.assertGreaterEqual(etime, timeout)
-		# Validate jobs timings
+		# Verify jobs timings
 		self.assertTrue(tstart < jterm.tstart <= jcompl.tstart <= jcompl.tstop < jterm.tstop)
 		self.assertLessEqual(jterm.tstop - jterm.tstart, etime)
 		self.assertGreaterEqual(jterm.tstop - jterm.tstart, timeout)
@@ -1308,21 +1307,21 @@ class TestExecPool(unittest.TestCase):
 		jrx = Job('ep_timeout_jrx', args=('sleep', str(worktime)), timeout=etimeout / 2, ontimeout=True
 			, params=runsCount, onstart=updateruns)  # Reexecuting job
 		self._execpool.execute(jrx)
-		# Validate termination of the execution pool
+		# Verify termination of the execution pool
 		self.assertFalse(self._execpool.join(etimeout))
 		etime = time.time() - tstart  # Execution time
 		self.assertFalse(self._execpool._workers)  # Workers should be empty
-		# Validate termination time
+		# Verify termination time
 		self.assertLess(etime, worktime)
 		self.assertLess(etime, timeout)
 		self.assertGreaterEqual(etime, etimeout)
-		# Validate jrx runsCount and onstart execution
+		# Verify jrx runsCount and onstart execution
 		self.assertGreaterEqual(runsCount['count'], 2)
 
 
 	@unittest.skipUnless(_CHAINED_CONSTRAINTS, 'Requires _CHAINED_CONSTRAINTS')
 	def test_jobTimeoutChained(self):
-		"""Validate chained termination by timeout:
+		"""Verify chained termination by timeout:
 			1. Termination of the related non-smaller job on termination of the main job
 			2. Not affecting smaller related jobs on termination of the main job
 			3. Not affecting non-related jobs (with another category)
@@ -1355,10 +1354,10 @@ class TestExecPool(unittest.TestCase):
 		assert etimeout > worktime, 'Additional testcase parameters are invalid'
 		print('jobTimeoutChained() started wth worktime: {}, etimeout: {}'.format(worktime, etimeout))
 
-		# Validate exec pool completion
+		# Verify exec pool completion
 		self.assertTrue(self._execpool.join(etimeout))
 		etime = time.time() - tstart  # Execution time
-		# Validate timings
+		# Verify timings
 		self.assertTrue(worktime <= etime < etimeout)
 		self.assertLess(jm.tstop - jm.tstart, worktime)
 		self.assertLess(jsl.tstop - jsl.tstart, worktime)
@@ -1367,7 +1366,7 @@ class TestExecPool(unittest.TestCase):
 		self.assertLess(jsl.tstop - jsl.tstart, worktime)
 		self.assertGreaterEqual(jso.tstop - jso.tstart, worktime)
 		self.assertLess(jsf.tstop - jsl.tstart, worktime)
-		# Validate ondone() calls
+		# Verify ondone() calls
 		jss.ondone.assert_called_once_with(jss)
 		jsl.ondone.assert_not_called()
 		jso.ondone.assert_called_once_with(jso)
@@ -1376,7 +1375,7 @@ class TestExecPool(unittest.TestCase):
 
 	@unittest.skipUnless(_LIMIT_WORKERS_RAM, 'Requires _LIMIT_WORKERS_RAM')
 	def test_jobMemlimSimple(self):
-		"""Validate memory violations caused by the single worker:
+		"""Verify memory violations caused by the single worker:
 		1. Absence of side effects on the remained jobs after bad_alloc
 			(exception of the external app) caused termination of the worker process
 		2. Termination of the worker process that exceeds limit of the dedicated virtual memory
@@ -1425,11 +1424,11 @@ class TestExecPool(unittest.TestCase):
 			xpool.execute(jms2)
 			xpool.execute(jmsDvl2)
 
-			# Validate exec pool completion before the timeout
+			# Verify exec pool completion before the timeout
 			self.assertTrue(xpool.join(etimeout))
 			etime = time.time() - tstart  # Execution time
 
-			# Validate timings
+			# Verify timings
 			self.assertLess(etime, etimeout)
 			self.assertGreaterEqual(jmsDb.tstop - jmsDb.tstart, worktime)  # Note: internal errors in the external processes should not effect related jobs
 			self.assertTrue(jmb.proc.returncode)  # bad_alloc causes non zero termintion code
@@ -1448,14 +1447,14 @@ class TestExecPool(unittest.TestCase):
 
 	@unittest.skipUnless(_LIMIT_WORKERS_RAM, 'Requires _LIMIT_WORKERS_RAM')
 	def test_jobMemlimGroupSimple(self):
-		"""Validate memory violations caused by group of workers but without chained jobs
+		"""Verify memory violations caused by group of workers but without chained jobs
 
 		Reduction of the number of worker processes when their total memory consumption
 		exceeds the dedicated limit and there are
 			1) either no any nonstarted jobs
 			2) or the nonstarted jobs were already rescheduled by the related worker (absence of chained constraints)
 		"""
-		worktime = TestExecPool._latency * 5  # Note: should be larger than 3*_latency
+		worktime = TestExecPool._latency * 6  # Note: should be larger than 3*_latency
 		timeout = worktime * 2  # Note: should be larger than 3*_latency
 		#etimeout = max(1, TestExecPool._latency) + (worktime * 2) // 1  # Job work time
 		etimeout = (max(1, TestExecPool._latency) + timeout) * 3  # Execution pool timeout; Note: *3 because nonstarted jobs exist here nad postponed twice
@@ -1484,12 +1483,12 @@ class TestExecPool(unittest.TestCase):
 			xpool.execute(jgmsp1)
 			xpool.execute(jgmsp2)
 
-			# Validate exec pool completion before the timeout
+			# Verify exec pool completion before the timeout
 			self.assertTrue(xpool.join(etimeout))
 			# All jobs should be completed
 			etime = time.time() - tstart  # Execution time
 
-			# Validate timings, gracefull copletion of all jobs except the last one
+			# Verify timings, gracefull copletion of all jobs except the last one
 			self.assertLess(etime, etimeout)
 			self.assertGreaterEqual(jgms1.tstop - jgms1.tstart, worktime)
 			self.assertFalse(jgms1.proc.returncode)
@@ -1504,7 +1503,7 @@ class TestExecPool(unittest.TestCase):
 			# Check the last comleted job
 			self.assertTrue(jgms3.tstop <= tstart + etime)
 
-			# Validate handlers calls
+			# Verify handlers calls
 			jgms1.onstart.assert_called_once_with(jgms1)
 			jgms3.onstart.assert_called_with(jgms3)
 			self.assertTrue(2 <= jgms3.onstart.call_count <= 3)
@@ -1516,7 +1515,7 @@ class TestExecPool(unittest.TestCase):
 
 	@unittest.skipUnless(_LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS, 'Requires _LIMIT_WORKERS_RAM, _CHAINED_CONSTRAINTS')
 	def test_jobMemlimGroupChained(self):
-		"""Validate memory violations caused by group of workers having chained jobs
+		"""Verify memory violations caused by group of workers having chained jobs
 		Rescheduling of the worker processes when their total memory consumption
 		exceeds the dedicated limit and there are some nonstarted jobs of smaller
 		size and the same category that
@@ -1557,11 +1556,11 @@ class TestExecPool(unittest.TestCase):
 			xpool.execute(jgmsp2)
 			xpool.execute(jgmsp3)
 
-			# Validate exec pool completion before the timeout
+			# Verify exec pool completion before the timeout
 			self.assertTrue(xpool.join(etimeout))
 			etime = time.time() - tstart  # Execution time
 
-			# Validate timings, gracefull copletion of all jobs except the last one
+			# Verify timings, gracefull copletion of all jobs except the last one
 			self.assertLess(etime, etimeout)
 			self.assertGreaterEqual(jgms1.tstop - jgms1.tstart, worktime)
 			self.assertFalse(jgms1.proc.returncode)
@@ -1579,7 +1578,7 @@ class TestExecPool(unittest.TestCase):
 			## Check the last comleted job
 			#self.assertTrue(jgms3.tstop < jgmsp1.tstop < tstart + etime)  # Note: heavier job is rescheduled after the more lightweight one
 
-			# Validate handlers calls
+			# Verify handlers calls
 			jgms2.onstart.assert_called_once_with(jgms2)
 			jgms3.onstart.assert_called_with(jgms3)
 			self.assertEqual(jgms3.onstart.call_count, 2)
@@ -1605,11 +1604,13 @@ class TestProcMemTree(unittest.TestCase):
 		"""
 		return """{mprog}
 import subprocess
+import os
 from sys import executable as PYEXEC
 
-subprocess.call(args=('./exectime', PYEXEC, '-c', '''{cprog}'''))
+fnull = open(os.devnull, 'w')
+subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 """.format(mprog=mprog, cprog=cprog)
-#subprocess.call(args=(PYEXEC, '-c', '''{cprog}'''))
+#subprocess.call(args=('./exectime', PYEXEC, '-c', '''{cprog}'''))
 
 
 	@unittest.skip('Used to understand what is included into the reported process memory by "psutil"')
@@ -1675,6 +1676,52 @@ subprocess.call(args=('./exectime', PYEXEC, '-c', '''{cprog}'''))
 			, vmem=vmem, rmem=rmem, uvmem=uvmem, urmem=urmem
 			, cnum=cnum, cxpid=cxpid, cxvmem=cxvmem, cxrmem=cxrmem, cxuvmem=cxuvmem, cxurmem=cxurmem
 			, avmem=avmem, armem=armem, auvmem=auvmem, aurmem=aurmem))
+
+
+	def test_jobVmem(self):
+		"""Test job virual memory evaluation
+		"""
+		worktime = TestExecPool._latency * 6  # Note: should be larger than 3*_latency
+		timeout = worktime * 2  # Note: should be larger than 3*_latency
+		#etimeout = max(1, TestExecPool._latency) + (worktime * 2) // 1  # Job work time
+		etimeout = (max(1, TestExecPool._latency) + timeout) * 3  # Execution pool timeout; Note: *3 because nonstarted jobs exist here nad postponed twice
+		assert TestExecPool._latency * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
+
+		# Start not more than 3 simultaneous workers
+		with ExecPool(max(TestExecPool._WPROCSMAX, 3), latency=TestExecPool._latency) as xpool:  # , _AFNSTEP, vmlimit
+			amem = 0.02  # Direct allocating memory in the process
+			camem = 0.07  # Allocatinf memory in the child process
+			duration = worktime / 3  # Duration in sec
+			job =  Job('jvmem_proc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
+				, timeout=timeout, ondone=mock.MagicMock())
+			jobtr =  Job('jvmem_tree', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
+				, timeout=timeout, ondone=mock.MagicMock())
+			jobx =  Job('jvmem_max-subproc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
+				, timeout=timeout, ondone=mock.MagicMock())
+
+			# Verify that non-started job raises exception on memory update request
+			self.assertRaises(AttributeError, job._updateVmem)
+
+			tstart = time.time()
+			xpool.execute(job)
+			xpool.execute(jobtr)
+			xpool.execute(jobx)
+			time.sleep(duration*2)
+			pvmem = job._updateVmem()
+			tvmem = jobtr._updateVmem(True)
+			xvmem = jobx._updateVmem(True, True)
+			# Verify memory consumption
+			self.assertTrue(pvmem < xvmem < tvmem)
+			print('Memory consumption in Mb,  proc_vmem: {pvmem:.3g}, max_procInTree_vmem: {xvmem:.3g}, procTree_vmem: {tvmem:.3g}'
+				.format(pvmem=pvmem*1000, xvmem=xvmem*1000, tvmem=tvmem*1000))
+			# Verify exec pool completion before the timeout
+			self.assertTrue(xpool.join(etimeout))
+			etime = time.time() - tstart  # Execution time
+			# Verify jobs execution time
+			self.assertLessEqual(jobtr.tstop - jobtr.tstart, etime)
 
 
 if __name__ == '__main__':
