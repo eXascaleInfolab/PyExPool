@@ -70,7 +70,7 @@ _LIMIT_WORKERS_RAM = True
 
 Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 	, startdelay=0, onstart=None, ondone=None, params=None, category=None, size=0
-	, slowdown=1., omitafn=False, stdout=sys.stdout, stderr=sys.stderr):
+	, slowdown=1., omitafn=False, vmemkind=1, stdout=sys.stdout, stderr=sys.stderr):
 	"""Initialize job to be executed
 
 	Job is executed in a separate process via Popen or Process object and is
@@ -111,6 +111,11 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 	size  - size of the processing data, >= 0; requires _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS
 		0 means undefined size and prevents jobs chaining on constraints violation
 	slowdown  - execution slowdown ratio (inversely to the [estimated] execution speed), E (0, inf)
+	vmemkind  - kind of virtual memory to be evaluated:
+		0  - vmem for the process itself omitting the spawned sub-processes (if any)
+		1  - vmem for the heaviest process of the process tree spawned by the original process
+			(including the origin itself)
+		2  - vmem for the whole spawned process tree including the origin process
 
 	# Execution parameters, initialized automatically on execution
 	tstart  - start time is filled automatically on the execution start (before onstart). Default: None
@@ -319,18 +324,19 @@ In case the execution pool is required locally then it can be used in the follow
 # Limit of the virtual memory for the all worker processes with max(32 GB, RAM)
 # and provide latency of 1.5 sec for the jobs rescheduling
 with ExecPool(max(cpu_count()-1, 1), vmlimit=32, latency=1.5) as xpool:
-	job =  Job('jvmem_proc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+	job = Job('jvmem_proc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
 		allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-		, timeout=timeout, ondone=mock.MagicMock())
-	jobtr =  Job('jvmem_tree', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+		, timeout=timeout, vmemkind=0, ondone=mock.MagicMock())
+	jobx = Job('jvmem_max-subproc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
 		allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-		, timeout=timeout, ondone=mock.MagicMock())
+		, timeout=timeout, vmemkind=1, ondone=mock.MagicMock())
 	...
 	xpool.execute(job)
-	xpool.execute(jobtr)
+	xpool.execute(jobx)
 	...
 	xpool.join(10)  # Timeout for the execution of all jobs is 10 sec [+latency]
 ```
+The code shown above is fetched from the `TestProcMemTree` unit test available in the end of the [source file](mpepool.py).
 
 ### Failsafe Termination
 To perform *graceful termination* of the Jobs in case of external termination of your program, signal handlers can be set:

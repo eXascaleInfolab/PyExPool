@@ -219,7 +219,7 @@ class Job(object):
 	# NOTE: keyword-only arguments are specified after the *, supported only since Python 3
 	def __init__(self, name, workdir=None, args=(), timeout=0, ontimeout=False, task=None #,*
 	, startdelay=0, onstart=None, ondone=None, params=None, category=None, size=0, slowdown=1.
-	, omitafn=False, stdout=sys.stdout, stderr=sys.stderr):
+	, omitafn=False, vmemkind=1, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize job to be executed
 
 		# Main parameters
@@ -257,6 +257,11 @@ class Job(object):
 		size  - size of the processing data, >= 0; requires _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS
 			0 means undefined size and prevents jobs chaining on constraints violation
 		slowdown  - execution slowdown ratio (inversely to the [estimated] execution speed), E (0, inf)
+		vmemkind  - kind of virtual memory to be evaluated:
+			0  - vmem for the process itself omitting the spawned sub-processes (if any)
+			1  - vmem for the heaviest process of the process tree spawned by the original process
+				(including the origin itself)
+			2  - vmem for the whole spawned process tree including the origin process
 
 		# Execution parameters, initialized automatically on execution
 		tstart  - start time is filled automatically on the execution start (before onstart). Default: None
@@ -267,7 +272,7 @@ class Job(object):
 			inherited from the jobs of the same category having non-smaller size; requires _LIMIT_WORKERS_RAM
 		"""
 		assert isinstance(name, str) and timeout >= 0 and (task is None or isinstance(task, Task)
-			) and size >= 0 and slowdown > 0, 'Parameters validaiton failed'
+			) and size >= 0 and slowdown > 0 and 0 <= vmemkind <= 2, 'Parameters validaiton failed'
 		#if not args:
 		#	args = ("false")  # Create an empty process to schedule it's execution
 
@@ -298,6 +303,7 @@ class Job(object):
 		self._fstderr = None
 		# Omit scheduler affinity policy (actual when some process is computed on all treads, etc.)
 		self._omitafn = omitafn
+		self.vmemkind = vmemkind
 		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
 			self.size = size  # Size of the processing data
 			# Consumed VM on execution in gigabytes or the least expected (inherited from the
@@ -310,20 +316,21 @@ class Job(object):
 			self.wkslim = None  # Worker processes limit (max number) on the job postponing if any
 
 
-	def _updateVmem(self, tree=False, heaviest=False):
+	def _updateVmem(self):
 		"""Update virtual memory consumption using smooth max
 
 		Actual virtual memory (not the historical max) is retrieved and updated
 		using:
 		a) smoothing filter in case of the decreasing consumption and
-		b) direct update in case of the increasing consumption
+		b) direct update in case of the increasing consumption.
 
 		Prerequisites: job must have defined proc and psutil should be available
 
-		tree  - evaluate virtual memory consumption for the whole process tree
-			spawned by the current process
-		maxchild  - evaluate virtual memory consumption only for the heaviest in
-			the process tree. Actual only for the enabled 'tree' option.
+		self.vmemkind defines the kind of virtual memory to be evaluated:
+			0  - vmem for the process itself omitting the spawned sub-processes (if any)
+			1  - vmem for the heaviest process of the process tree spawned by the original process
+				(including the origin)
+			2  - vmem for the whole spawned process tree including the origin process
 
 		return  - smooth max of job vmem
 		"""
@@ -332,16 +339,15 @@ class Job(object):
 		try:
 			up = psutil.Process(self.proc.pid)
 			curvmem = up.memory_info().vms
-			if tree:
+			if self.vmemkind:
 				avmem = curvmem  # Memory consumption of the whole process tree
-				if heaviest:
-					xvmem = curvmem  # Memory consumption of the heaviest process in the tree
+				xvmem = curvmem  # Memory consumption of the heaviest process in the tree
 				for ucp in up.children(recursive=True):  # Note: fetches only children procs
 					vmem = ucp.memory_info().vms  # Mb; Resident Set Size
 					avmem += vmem
-					if heaviest and xvmem < vmem:
+					if xvmem < vmem:
 						xvmem = vmem
-				curvmem = avmem if not heaviest else xvmem
+				curvmem = avmem if self.vmemkind == 2 else xvmem
 			# Check also
 		except psutil.Error as err:
 			# The process is finished and such pid does not exist
@@ -873,7 +879,7 @@ class ExecPool(object):
 					# NOTE: Evaluate memory consuption for the heaviest process in the process tree
 					# of the origin job process to allow additional intermediate apps for the evaluations like:
 					# ./exectime ./clsalg ca_prm1 ca_prm2
-					job._updateVmem(True, True)  # Consider vm consumption of past runs if any
+					job._updateVmem()  # Consider vm consumption of the past runs if any
 					if job.vmem < self._vmlimit:
 						vmtotal += job.vmem  # Consider vm consumption of past runs if any
 						#if _DEBUG_TRACE == 3:
@@ -1692,27 +1698,27 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 			amem = 0.02  # Direct allocating memory in the process
 			camem = 0.07  # Allocatinf memory in the child process
 			duration = worktime / 3  # Duration in sec
-			job =  Job('jvmem_proc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+			job = Job('jvmem_proc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
 				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-				, timeout=timeout, ondone=mock.MagicMock())
-			jobtr =  Job('jvmem_tree', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+				, timeout=timeout, vmemkind=0, ondone=mock.MagicMock())
+			jobx = Job('jvmem_max-subproc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
 				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-				, timeout=timeout, ondone=mock.MagicMock())
-			jobx =  Job('jvmem_max-subproc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+				, timeout=timeout, vmemkind=1, ondone=mock.MagicMock())
+			jobtr = Job('jvmem_tree', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
 				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-				, timeout=timeout, ondone=mock.MagicMock())
+				, timeout=timeout, vmemkind=2, ondone=mock.MagicMock())
 
 			# Verify that non-started job raises exception on memory update request
 			self.assertRaises(AttributeError, job._updateVmem)
 
 			tstart = time.time()
 			xpool.execute(job)
-			xpool.execute(jobtr)
 			xpool.execute(jobx)
+			xpool.execute(jobtr)
 			time.sleep(duration*2)
 			pvmem = job._updateVmem()
-			tvmem = jobtr._updateVmem(True)
-			xvmem = jobx._updateVmem(True, True)
+			xvmem = jobx._updateVmem()
+			tvmem = jobtr._updateVmem()
 			# Verify memory consumption
 			self.assertTrue(pvmem < xvmem < tvmem)
 			print('Memory consumption in Mb,  proc_vmem: {pvmem:.3g}, max_procInTree_vmem: {xvmem:.3g}, procTree_vmem: {tvmem:.3g}'
