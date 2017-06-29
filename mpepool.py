@@ -1270,6 +1270,7 @@ class TestExecPool(unittest.TestCase):
 
 		tstart = time.time()
 		jterm = Job('j_timeout', args=('sleep', str(worktime)), timeout=timeout)
+		self.assertRaises(AttributeError, jterm._updateVmem)  # Check that non-started job raises exception on memory update request
 		self._execpool.execute(jterm)
 		jcompl = Job('j_complete', args=('sleep', '0'), timeout=timeout)
 		self._execpool.execute(jcompl)
@@ -1665,11 +1666,11 @@ subprocess.call(args=('./exectime', PYEXEC, '-c', '''{cprog}'''))
 		camem *= 1000  # Mb
 		proc.wait()  # Wait for the process termination
 
-		print('Memory in Mb:\n\tallocated for the proc #{pid}: {amem}, child: {camem}, total: {tamem}'
-			'\n\tpsutil proc #{pid} (vmem: {vmem:.2f}, rmem: {rmem:.2f}, uvmem: {uvmem:.2f}, urmem: {urmem:.2f})'
-			'\n\tpsutil proc #{pid} tree ({cnum} subprocs) heaviest child #{cxpid}'
+		print('Memory in Mb:\n  allocated for the proc #{pid}: {amem}, child: {camem}, total: {tamem}'
+			'\n  psutil proc #{pid} (vmem: {vmem:.2f}, rmem: {rmem:.2f}, uvmem: {uvmem:.2f}, urmem: {urmem:.2f})'
+			'\n  psutil proc #{pid} tree ({cnum} subprocs) heaviest child #{cxpid}'
 			' (vmem: {cxvmem:.2f}, rmem: {cxrmem:.2f}, uvmem: {cxuvmem:.2f}, urmem: {cxurmem:.2f})'
-			'\n\tpsutil proc #{pid} tree (vmem: {avmem:.2f}, rmem: {armem:.2f}, uvmem: {auvmem:.2f}, urmem: {aurmem:.2f})'
+			'\n  psutil proc #{pid} tree (vmem: {avmem:.2f}, rmem: {armem:.2f}, uvmem: {auvmem:.2f}, urmem: {aurmem:.2f})'
 			''.format(pid=proc.pid, amem=amem, camem=camem, tamem=amem+camem
 			, vmem=vmem, rmem=rmem, uvmem=uvmem, urmem=urmem
 			, cnum=cnum, cxpid=cxpid, cxvmem=cxvmem, cxrmem=cxrmem, cxuvmem=cxuvmem, cxurmem=cxurmem
