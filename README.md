@@ -16,9 +16,11 @@ Implemented as a *single-file module* to be *easily included into your project a
 The main purpose of this single-file module is the **asynchronous execution of modules and external executables with cache / parallelization tuning and automatic balancing of the worker processes for the in-RAM computations**.  
 In case asynchronous execution of the *Python functions* is required and usage of external dependences is not a problem, or automatic jobs scheduling for in-RAM computations is not required, then more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
 
-The load balancing is enabled when global variables `_LIMIT_WORKERS_RAM` and `_CHAINED_CONSTRAINTS` are set, jobs categories and relative size (if known) specified. The balancing is performed to use as much RAM and CPU resources as possible performing in-RAM computations and meeting timeout, memory limit and CPU cache (processes affinity) constraints.   Large executing jobs are rescheduled for the later execution with less number of worker processes after the completion of smaller jobs. The number of workers is reduced automatically (balanced) on the jobs queue processing. It is recommended to add jobs in the order of the increasing memory/time complexity if possible to reduce the number of worker process terminations for the jobs execution postponing on rescheduling.
+The **load balancing** is enabled when global variables `_LIMIT_WORKERS_RAM` and `_CHAINED_CONSTRAINTS` are set, jobs `.category` and relative `.size` (if known) specified. The balancing is performed to use as much RAM and CPU resources as possible performing in-RAM computations and meeting the specified timeout, memory limit and CPU cache (processes affinity) constraints.  
+Large executing jobs are rescheduled for the later execution with less number of worker processes after completion of the smaller jobs. The number of workers is reduced automatically (balanced) on the jobs queue processing. It is recommended to add jobs in the order of the increasing memory/time complexity if possible to reduce the number of worker processes terminations on jobs execution postponing (rescheduling).
 
 \author: (c) Artem Lutov <artem@exascale.info>  
+\license:  Apache License, Version 2.0  
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
 \date: 2017-06  
 
@@ -36,17 +38,16 @@ The load balancing is enabled when global variables `_LIMIT_WORKERS_RAM` and `_C
 
 ## Dependencies
 
-[psutil](https://pypi.python.org/pypi/psutil) only in case of dynamic jobs balancing is required for the in-RAM computations (`_LIMIT_WORKERS_RAM = True`), otherwise there are no any dependencies.  
+[psutil](https://pypi.python.org/pypi/psutil) is required only in case of dynamic jobs balancing for the in-RAM computations (`_LIMIT_WORKERS_RAM = True`), otherwise there are no any dependencies.  
 To install `psutil`:
 ```
 $ sudo pip install psutil
 ```
-[mock](https://pypi.python.org/pypi/mock) exclusively for the unit testing under Python2, `mock` is included in the standard lib of Python3.  
+[mock](https://pypi.python.org/pypi/mock) is required exclusively for the unit testing under Python2, `mock` is included in the standard lib of Python3.  
 To install `mock`:
 ```
 $ sudo pip install mock
 ```
-
 
 ## API
 
@@ -59,12 +60,12 @@ Flexible API provides *automatic CPU affinity management, maximization of the de
 # Global Parameters
 # Limit the amount of virtual memory (<= RAM) used by worker processes
 # NOTE: requires import of psutils
-_LIMIT_WORKERS_RAM = False
+_LIMIT_WORKERS_RAM = True
 
 # Use chained constraints (timeout and memory limitation) in jobs to terminate
 # also related worker processes and/or reschedule jobs, which have the same
 # category and heavier than the origin violating the constraints
- CHAINED_CONSTRAINTS = False
+ CHAINED_CONSTRAINTS = True
 
 
 Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
@@ -202,7 +203,7 @@ ExecPool(wksnum=cpu_count(), afnstep=None, vmlimit=0., latency=0.)
 		"""Force termination of the pool"""
 ```
 ### Accessory Routines
-```
+```python
 def ramfracs(fracsize):
 	"""Evaluate the minimal number of RAM fractions of the specified size in GB
 
@@ -310,6 +311,25 @@ execpool.execute(Job(name=jobname, workdir='this_sub_dir', args=args, timeout=jo
 
 # 3. Wait for the jobs execution for the specified timeout at most
 execpool.join(global_timeout)  # 30 min
+```
+
+In case the execution pool is required locally then it can be used in the following way:
+```python
+...
+# Limit of the virtual memory for the all worker processes with max(32 GB, RAM)
+# and provide latency of 1.5 sec for the jobs rescheduling
+with ExecPool(max(cpu_count()-1, 1), vmlimit=32, latency=1.5) as xpool:
+	job =  Job('jvmem_proc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+		allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
+		, timeout=timeout, ondone=mock.MagicMock())
+	jobtr =  Job('jvmem_tree', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+		allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
+		, timeout=timeout, ondone=mock.MagicMock())
+	...
+	xpool.execute(job)
+	xpool.execute(jobtr)
+	...
+	xpool.join(10)  # Timeout for the execution of all jobs is 10 sec [+latency]
 ```
 
 ### Failsafe Termination
