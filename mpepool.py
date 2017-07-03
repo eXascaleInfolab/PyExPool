@@ -404,12 +404,14 @@ class Job(object):
 			tpaths = []  # Base dir of the output
 			if (self.stdout and isinstance(self.stdout, str) and self.stdout != os.devnull
 			and os.path.exists(self.stdout) and os.path.getsize(self.stdout) == 0):
-				tpaths.append(os.path.split(self.stdout)[0])
+				tpath = os.path.split(self.stdout)[0]
+				if tpath:
+					tpaths.append(tpath)
 				os.remove(self.stdout)
 			if (self.stderr and isinstance(self.stderr, str) and self.stderr != os.devnull
 			and os.path.exists(self.stderr) and os.path.getsize(self.stderr) == 0):
 				tpath = os.path.split(self.stderr)[0]
-				if not tpaths or tpath not in tpaths:
+				if tpath and (not tpaths or tpath not in tpaths):
 					tpaths.append(tpath)
 				os.remove(self.stderr)
 			# Also remove the directory if it is empty
@@ -788,7 +790,7 @@ class ExecPool(object):
 			for joutp in (job.stdout, job.stderr):
 				if joutp and isinstance(joutp, str):
 					basedir = os.path.split(joutp)[0]
-					if not os.path.exists(basedir):
+					if basedir and not os.path.exists(basedir):
 						os.makedirs(basedir)
 					try:
 						if joutp == job.stdout:
