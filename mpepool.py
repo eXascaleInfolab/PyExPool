@@ -925,6 +925,8 @@ class ExecPool(object):
 		# Remove completed jobs from worker processes
 		for job in completed:
 			self._workers.remove(job)
+		# Memory threshold ratio to free a bit more memory than necessary to rescheduler less, recommended value: 1.1 .. 1.25
+		memtr = 1.15
 
 		# Terminate chained related workers and jobs of the single jobs that violate timeout/memory constraints
 		if _CHAINED_CONSTRAINTS and (jtorigs or jmorigs):
@@ -994,7 +996,7 @@ class ExecPool(object):
 		# Check memory limitation fulfilling for all processes
 		if self._vmlimit and vmtotal >= self._vmlimit:  # Jobs should use less memory than the limit
 			# Terminate the largest workers and reschedule jobs or reduce the workers number
-			memov = vmtotal - self._vmlimit  # Overused memory to be released by worker(s) termination
+			memov = vmtotal * memtr - self._vmlimit  # Overused memory to be released by worker(s) termination
 			pjobs = set()  # The heaviest jobs to be postponed to satisfy the memory limit constraint
 			# Remove the heaviest workers until the memory limit constraints are sutisfied
 			hws = []  # Heavy workers
@@ -1006,7 +1008,7 @@ class ExecPool(object):
 						break
 				assert self._workers and hws, 'Non-terminated worker processes must exist here'
 				for job in self._workers:
-					# Note: use some treshold for vmem evaluation and consider starting time on scheduling
+					# Note: use some threshold for vmem evaluation and consider starting time on scheduling
 					# to terminate first the least worked processes (for approximately the same memory consumption)
 					dr = 0.1  # Threshold parameter ratio, recommended value: 0.05 - 0.15; 0.1 means delta of 10%
 					if not job.terminates and (job.vmem * (1 - dr) >= hws[-1].vmem or
@@ -1052,7 +1054,7 @@ class ExecPool(object):
 				continue
 			# Reschedule job having the group violation of the memory limit
 			# if timeout is not violated or restart on timeout is requested
-			if self._vmlimit and vmtotal + job.vmem >= self._vmlimit and (
+			if self._vmlimit and (vmtotal + job.vmem) * memtr >= self._vmlimit and (
 			not job.timeout or exectime < job.timeout or job.ontimeout):
 				wsreduced = self.__postpone(job, wsreduced)
 			# Restart the job on timeout if requested
@@ -1064,7 +1066,7 @@ class ExecPool(object):
 				#		.format(job.name, len(self._workers), self._wkslim, vmtotal + job.vmem, self._vmlimit)
 				#		, file=sys.stderr)
 				assert len(self._workers) < self._wkslim, 'Completed job formed from the reduced workers'
-				assert not self._vmlimit or vmtotal + job.vmem < self._vmlimit, (
+				assert not self._vmlimit or (vmtotal + job.vmem) * memtr < self._vmlimit, (
 					'Group exceeding of the memory limit should be already processed')
 				if not self.__start(job) and self._vmlimit:
 					vmtotal += job.vmem  # Reuse .vmem from the previous run if exists
@@ -1090,7 +1092,7 @@ class ExecPool(object):
 			#		, len(self._jobs), ', '.join([j.name for j in self._jobs])), file=sys.stderr)
 			job = self._jobs.popleft()
 			# Jobs should use less memory than the limit, a worker process violating (time/memory) constaints are already filtered out
-			if self._vmlimit and vmtotal + job.vmem >= self._vmlimit:
+			if self._vmlimit and (vmtotal + job.vmem) * memtr >= self._vmlimit:
 				# Note: only restarted jobs have defined vmem
 				# Postpone the job updating it's workers limit
 				assert job.vmem < self._vmlimit, 'The workers exceeding memory constraints were already filtered out'
