@@ -1181,7 +1181,11 @@ from sys import executable as PYEXEC  # Full path to the current Python interpre
 try:
 	from unittest import mock
 except ImportError:
-	import mock
+	try:
+		# Note: mock is not available under default Python2 / pypy installation
+		import mock
+	except ImportError:
+		mock = None  # Skip the unittests if the mock module is not installed
 
 
 # Accessory Funcitons
@@ -1744,5 +1748,7 @@ if __name__ == '__main__':
 		print('Doctest PASSED')
 	# Note: to check specific testcase use:
 	# $ python -m unittest mpepool.TestExecPool.test_jobTimeoutChained
-	if unittest.main().result:  # verbosity=2
+	if mock is not None and unittest.main().result:  # verbosity=2
 		print('Try to reexecute the tests using x2-3 larger TestExecPool._latency (especially for the first run)')
+	else:
+		print('WARNING, the unit tests are skipped because the mock module is not installed', file=sys.stderr)
