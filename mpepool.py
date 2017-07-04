@@ -587,7 +587,7 @@ class ExecPool(object):
 
 		if self._vmlimit != vmlimit:
 			print('WARNING, total memory limit is reduced to guarantee the in-RAM'
-				' computations: {} -> {} Gb'.format(vmlimit, self._vmlimit), file=sys.stderr)
+				' computations: {:.6f} -> {:.6f} Gb'.format(vmlimit, self._vmlimit), file=sys.stderr)
 
 
 	def __enter__(self):
