@@ -351,7 +351,6 @@ class Job(object):
 					if xvmem < vmem:
 						xvmem = vmem
 				curvmem = avmem if self.vmemkind == 2 else xvmem
-			# Check also
 		except psutil.Error as err:
 			# The process is finished and such pid does not exist
 			print('WARNING, _updateVmem() failed, current proc vmem set to 0: ', err, file=sys.stderr)
@@ -730,12 +729,18 @@ class ExecPool(object):
 						pj.vmem = job.vmem
 					if job.wkslim < pj.wkslim:
 						pj.wkslim = job.wkslim
-				# Move jobs with the lowest wkslim to the end
-				ijc = ij
-				while ij >= 1 and self._jobs[ij].wkslim > self._jobs[ij-1].wkslim:
-					self._jobs[ij-1], self._jobs[ij] = self._jobs[ij], self._jobs[ij-1]
-					ij -= 1
-				ij = ijc + 1
+				# Move jobs with the highest wkslim to the begin
+				ijs = ij - 1
+				while ijs >= 0 and self._jobs[ij].wkslim > self._jobs[ijs].wkslim:
+					ijs -= 1
+				ijs += 1
+				if ijs != ij:
+					self._jobs.rotate(-ij)
+					self._jobs.popleft()  # == pj
+					self._jobs.rotate(ij-ijs)
+					self._jobs.appendleft(pj)
+					self._jobs.rotate(ijs)
+				ij += 1
 		if _DEBUG_TRACE == 2:
 			print('  Postponing-updated non-scheduled jobs: ', ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs]))
 
