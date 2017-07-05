@@ -91,6 +91,9 @@ if _LIMIT_WORKERS_RAM:
 		import psutil
 	except ImportError as err:
 		_LIMIT_WORKERS_RAM = False
+		# Note: import occurs before the execution of the main application, so show
+		# the timestamp to outline when the error occurred and separate reexecutions
+		print(time.strftime('%Y-%m-%d %H:%M:%S ' + '-'*32, time.gmtime()), file=sys.stderr)
 		print('WARNING, RAM constraints are disabled because the psutil module import failed: ', err, file=sys.stderr)
 
 # Use chained constraints (timeout and memory limitation) in jobs to terminate
@@ -584,7 +587,7 @@ class ExecPool(object):
 		self._killCount = 3  # 3 cycles of self._latency, termination wait time
 		self.__termlock = Lock()  # Lock for the __terminate() to avoid simultaneous call by the signal and normal execution flow
 
-		if self._vmlimit != vmlimit:
+		if self._vmlimit and self._vmlimit != vmlimit:
 			print('WARNING, total memory limit is reduced to guarantee the in-RAM'
 				' computations: {:.6f} -> {:.6f} Gb'.format(vmlimit, self._vmlimit), file=sys.stderr)
 
