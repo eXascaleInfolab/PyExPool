@@ -705,47 +705,59 @@ class ExecPool(object):
 			, priority, wksnum, 0 if not self._vmlimit else job.vmem, self._vmlimit
 			, 0 if job.tstop is None else job.tstop - job.tstart, job.tstart, job.tstop, job.timeout))
 		# Postpone only the goup-terminated jobs by memory limit, not a single worker that exceeds the (time/memory) constraints
+		# (except the explicitly requirested restart via ontimeout, which results the priority rescheduling)
 		# Note: job wkslim should be updated before adding to the _jobs to handle correctly the case when _jobs were empty
-		if priority:
-			self._jobs.appendleft(job)  # Now _jobs contain at least one job
-		else:
-			self._jobs.append(job)  # Now _jobs contain at least one job
-
 		if _DEBUG_TRACE == 2:
-			print('  Postponing-initial non-scheduled jobs ({} workers): {}'
-				.format(wksnum, ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs])))
-		# Update limit of the worker processes of the other larger nonstarted jobs of the same category as this job has,
-		# and move jobs with the lowest wkslim to the end.
-		# Note: the update should be made for all nonstarted jobs, not only for the one caused the reduction.
+			print('  Nonstarted initial jobs: ', ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs]))
+		jobsnum = len(self._jobs)
+		i = 0
+		if priority:
+			# Add to the begin of jobs with the same wkslim
+			while i < jobsnum and self._jobs[i].wkslim > job.wkslim:
+				i += 1
+		else:
+			# Add to the end of jobs with the same wkslim
+			i = jobsnum - 1
+			while i >= 0 and self._jobs[i].wkslim < job.wkslim:
+				i -= 1
+			i += 1
+		if i != jobsnum:
+			self._jobs.rotate(-i)
+			self._jobs.appendleft(job)
+			self._jobs.rotate(i)
+		else:
+			self._jobs.append(job)
+
+		# Update limit of the worker processes of the other larger nonstarted jobs
+		# of the same category as the added job has
 		if _CHAINED_CONSTRAINTS and job.category is not None:
-			jobsnum = len(self._jobs)  # The number of jobs
-			ij = 1 if priority else 0  # Job index
-			while ij < jobsnum:
-				pj = self._jobs[ij]  # Processing job
-				# Update wkslim of the other larger nonstarted jobs of the same category
+			k = 0
+			kend = i
+			while k < kend:
+				pj = self._jobs[k]
 				if pj.category == job.category and not pj.lessVmem(job):
 					# Set vmem in for the related nonstarted heavier jobs
 					if not pj.vmem:
 						pj.vmem = job.vmem
 					if job.wkslim < pj.wkslim:
 						pj.wkslim = job.wkslim
-				# Move jobs with the highest wkslim to the begin
-				ijs = ij - 1
-				while ijs >= 0 and self._jobs[ij].wkslim > self._jobs[ijs].wkslim:
-					ijs -= 1
-				ijs += 1
-				if ijs != ij:
-					self._jobs.rotate(-ij)
-					self._jobs.popleft()  # == pj
-					self._jobs.rotate(ij-ijs)
-					self._jobs.appendleft(pj)
-					self._jobs.rotate(ijs)
-				ij += 1
+						# Update location of the jobs in the queue, move the updated
+						# job to the place before the origin
+						if kend - k >= 2:  # There is no sence to reschedule pair of subsequent jobs
+							self._jobs.rotate(-k)
+							self._jobs.popleft()  # == pj; -1
+							self._jobs.rotate(1 + k-i)  # Note: 1+ because one job is removed
+							self._jobs.appendleft(pj)  # +1
+							self._jobs.rotate(i-1)
+							kend -= 1  # One more job is added before i
+							k -= 1  # Note: k is incremented below
+				k += 1
 		if _DEBUG_TRACE == 2:
-			print('  Postponing-updated non-scheduled jobs: ', ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs]))
+			print('  Nonstarted updated jobs: ', ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs]))
 
-		# Reduce workers size if the first nonstarted job was rescheduled (and current job has been rescheduled)
-		if not reduced and self._jobs[0].terminates and self._jobs[0].wkslim < self._wkslim:
+		# Reduce workers size if the first nonstarted job was rescheduled
+		# (and current job has been rescheduled without the priority)
+		if not reduced and not priority and self._jobs[0].terminates and self._jobs[0].wkslim < self._wkslim:
 			print('  _wkslim is reduced to {} from {} on "{}" (vmem: {:.4f} / {:.4f} Gb) postponing'
 				', total exectime: {} h {} m {:.4f} s'
 				.format(self._jobs[0].wkslim, self._wkslim, job.name, job.vmem, self._vmlimit
@@ -881,7 +893,7 @@ class ExecPool(object):
 				continue
 
 			exectime = time.time() - job.tstart
-			# Update memory statistics (if required) an skip jobs that do not exceed the specified time/memory constraints
+			# Update memory statistics (if required) and skip jobs that do not exceed the specified time/memory constraints
 			if not job.terminates and (not job.timeout or exectime < job.timeout
 			) and (not self._vmlimit or job.vmem < self._vmlimit):
 				# Update memory consumption statistics if applicable
@@ -903,7 +915,10 @@ class ExecPool(object):
 			job.terminates += 1
 			# Save the most lighgtweight terminating chain origins for timeouts and memory overusage by the single process
 			if _CHAINED_CONSTRAINTS and job.category is not None and job.size:
-				if job.timeout and exectime >= job.timeout:
+				# ATTENTION: do not terminate related jobs of the process that should be restarted by timeout,
+				# because such processes often have non-deterministic behavior and specially scheduled to be
+				# rexecuted until success
+				if job.timeout and exectime >= job.timeout and not job.ontimeout:
 					# Timeout constraints
 					jorg = jtorigs.get(job.category, None)
 					if jorg is None or job.size * job.slowdown < jorg.size * jorg.slowdown:
@@ -972,7 +987,7 @@ class ExecPool(object):
 								break  # Switch to the following job
 			# Traverse over the nonstarted jobs with defined job category and size
 			if _DEBUG_TRACE == 2:
-				print('  Updating chained constraints in non-scheduled jobs: ', ', '.join([job.name for job in self._jobs]))
+				print('  Updating chained constraints in nonstarted jobs: ', ', '.join([job.name for job in self._jobs]))
 			jrot = 0  # Accumulated rotation
 			ij = 0  # Job index
 			while ij < len(self._jobs) - jrot:
@@ -1013,7 +1028,7 @@ class ExecPool(object):
 		for job in completed:
 			self._workers.remove(job)
 
-		# Check memory limitation fulfilling for all processes
+		# Check memory limitation fulfilling for all remained processes
 		if self._vmlimit and vmtotal >= self._vmlimit:  # Jobs should use less memory than the limit
 			# Terminate the largest workers and reschedule jobs or reduce the workers number
 			wksnum = len(self._workers)
@@ -1114,7 +1129,7 @@ class ExecPool(object):
 
 		# Start subsequent job if it is required
 		if _DEBUG_TRACE == 2:
-			print('  Non-scheduled jobs: ', ', '.join(['{} ({})'.format(job.name, job.wkslim) for pj in self._jobs]))
+			print('  Nonstarted jobs: ', ', '.join(['{} ({})'.format(job.name, job.wkslim) for pj in self._jobs]))
 		while self._jobs and len(self._workers) < self._wkslim:
 			#if _DEBUG_TRACE == 3:
 			#	print('  "{}" (expected totvmem: {:.4f} / {:.4f} Gb) is being resheduled, {} nonstarted jobs: {}'
@@ -1616,8 +1631,9 @@ class TestExecPool(unittest.TestCase):
 			self.assertFalse(jgms2.proc.returncode)
 			self.assertGreaterEqual(jgms3.tstop - jgms3.tstart, worktime)
 			self.assertFalse(jgms3.proc.returncode)
-			self.assertTrue(jgmsp1.proc.returncode)
-			self.assertLessEqual(jgmsp1.tstop - jgmsp1.tstart, worktime*1.25 + TestExecPool._latency * 3)  # Canceled by chained timeout
+			if jgmsp1.tstop > jgmsp2.tstop + TestExecPool._latency:
+				self.assertLessEqual(jgmsp1.tstop - jgmsp1.tstart, worktime*1.25 + TestExecPool._latency * 3)  # Canceled by chained timeout
+				self.assertTrue(jgmsp1.proc.returncode)
 			self.assertLessEqual(jgmsp2.tstop - jgmsp2.tstart, worktime)
 			self.assertTrue(jgmsp2.proc.returncode)
 			self.assertGreaterEqual(jgmsp3.tstop - jgmsp3.tstart, worktime)  # Execution time a bit exceeds te timeout
