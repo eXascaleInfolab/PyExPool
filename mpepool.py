@@ -93,7 +93,7 @@ if _LIMIT_WORKERS_RAM:
 		_LIMIT_WORKERS_RAM = False
 		# Note: import occurs before the execution of the main application, so show
 		# the timestamp to outline when the error occurred and separate reexecutions
-		print(time.strftime('%Y-%m-%d %H:%M:%S ' + '-'*32, time.gmtime()), file=sys.stderr)
+		print(time.strftime('-- %Y-%m-%d %H:%M:%S ' + '-'*29, time.gmtime()), file=sys.stderr)
 		print('WARNING, RAM constraints are disabled because the psutil module import failed: ', err, file=sys.stderr)
 
 # Use chained constraints (timeout and memory limitation) in jobs to terminate
