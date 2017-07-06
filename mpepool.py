@@ -768,9 +768,10 @@ class ExecPool(object):
 		# Reduce workers size if the first nonstarted job was rescheduled
 		# (and current job has been rescheduled without the priority)
 		if not reduced and not priority and self._jobs[0].terminates and self._jobs[0].wkslim < self._wkslim:
-			print('  _wkslim is reduced to {} from {} on "{}" (vmem: {:.4f} / {:.4f} Gb) postponing'
+			# Note: wksnum is at most self._wkslim - 1
+			print('  _wkslim is reduced from {} to max({}, {} wksnum) on "{}" (vmem: {:.4f} / {:.4f} Gb) postponing'
 				', total exectime: {} h {} m {:.4f} s'
-				.format(self._jobs[0].wkslim, self._wkslim, job.name, job.vmem, self._vmlimit
+				.format(self._wkslim, self._jobs[0].wkslim, wksnum, job.name, job.vmem, self._vmlimit
 				, *secondsToHms(time.time() - self._tstart))
 				, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 			self._wkslim = max(self._jobs[0].wkslim, wksnum)
@@ -1107,7 +1108,7 @@ class ExecPool(object):
 			and job.chtermtime is not None) or (self._vmlimit and job.vmem >= self._vmlimit):
 				continue
 			# Reschedule job having the group violation of the memory limit
-			# if timeout is not violated or restart on timeout is requested
+			# if timeout is not violated or restart on timeout if requested
 			# Note: vmtotal to not postpone the single existing job
 			if self._vmlimit and vmtotal and vmtotal + job.vmem * memtr >= self._vmlimit and (
 			not job.timeout or exectime < job.timeout or job.ontimeout):
