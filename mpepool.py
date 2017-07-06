@@ -698,11 +698,13 @@ class ExecPool(object):
 
 		return  whether worker processes has been reduced (or were already reduced)
 		"""
-		# Note: postponing jobs are terminated jobs only, can be called for !_CHAINED_CONSTRAINTS
+		# Note:
+		# - postponing jobs are terminated jobs only, can be called for !_CHAINED_CONSTRAINTS;
+		# - wksnum < self._wkslim
 		wksnum = len(self._workers)  # The current number of worker processes
 		assert ((job.terminates or job.tstart is None) and (priority or self._workers)
 			# and _LIMIT_WORKERS_RAM and not job in self._workers and not job in self._jobs  # Note: self._jobs scanning is time-consuming
-			and (not self._vmlimit or job.vmem < self._vmlimit)
+			and (not self._vmlimit or job.vmem < self._vmlimit)  # and wksnum < self._wkslim
 			and (job.tstart is None) == (job.tstop is None) and (not job.timeout
 			or (True if job.tstart is None else job.tstop - job.tstart < job.timeout)
 			) and (not self._jobs or self._jobs[0].wkslim >= self._jobs[-1].wkslim)), (
@@ -745,9 +747,9 @@ class ExecPool(object):
 			kend = i
 			while k < kend:
 				pj = self._jobs[k]
-				if pj.category == job.category and not pj.lessVmem(job):
+				if pj.category == job.category and pj.size >= job.size:
 					# Set vmem in for the related nonstarted heavier jobs
-					if not pj.vmem:
+					if pj.vmem < job.vmem:
 						pj.vmem = job.vmem
 					if job.wkslim < pj.wkslim:
 						pj.wkslim = job.wkslim
@@ -768,13 +770,12 @@ class ExecPool(object):
 		# Reduce workers size if the first nonstarted job was rescheduled
 		# (and current job has been rescheduled without the priority)
 		if not reduced and not priority and self._jobs[0].terminates and self._jobs[0].wkslim < self._wkslim:
-			print('  _wkslim is reduced from {} to max({}, {} wksnum) on "{}" (vmem: {:.4f} / {:.4f} Gb) postponing'
-				', total exectime: {} h {} m {:.4f} s'
-				.format(self._wkslim, self._jobs[0].wkslim, wksnum, job.name, job.vmem, self._vmlimit
-				, *secondsToHms(time.time() - self._tstart))
+			print('  _wkslim is reduced on "{}" postponing from {} to {}, wksnum: {}'
+				', vmem: {:.4f} / {:.4f} Gb, total exectime: {} h {} m {:.4f} s'
+				.format(job.name, self._wkslim, self._jobs[0].wkslim, wksnum
+				, job.vmem, self._vmlimit, *secondsToHms(time.time() - self._tstart))
 				, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-			# Note: wksnum <= self._wkslim
-			self._wkslim = max(self._jobs[0].wkslim, wksnum-1)
+			self._wkslim = self._jobs[0].wkslim
 			reduced = True
 			assert self._wkslim >= 0, '_wkslim should be non-negative'
 		return reduced
@@ -937,7 +938,7 @@ class ExecPool(object):
 				elif self._vmlimit and job.vmem >= self._vmlimit:
 					# Memory limit constraints
 					jorg = jmorigs.get(job.category, None)
-					if jorg is None or job.lessVmem(jorg):
+					if jorg is None or job.size < jorg.size:
 						jmorigs[job.category] = job
 				# Otherwise this job is terminated because of multiple processes together overused memory,
 				# it should be reschedulted, but not removed completely
