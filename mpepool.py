@@ -768,13 +768,13 @@ class ExecPool(object):
 		# Reduce workers size if the first nonstarted job was rescheduled
 		# (and current job has been rescheduled without the priority)
 		if not reduced and not priority and self._jobs[0].terminates and self._jobs[0].wkslim < self._wkslim:
-			# Note: wksnum is at most self._wkslim - 1
 			print('  _wkslim is reduced from {} to max({}, {} wksnum) on "{}" (vmem: {:.4f} / {:.4f} Gb) postponing'
 				', total exectime: {} h {} m {:.4f} s'
 				.format(self._wkslim, self._jobs[0].wkslim, wksnum, job.name, job.vmem, self._vmlimit
 				, *secondsToHms(time.time() - self._tstart))
 				, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-			self._wkslim = max(self._jobs[0].wkslim, wksnum)
+			# Note: wksnum <= self._wkslim
+			self._wkslim = max(self._jobs[0].wkslim, wksnum-1)
 			reduced = True
 			assert self._wkslim >= 0, '_wkslim should be non-negative'
 		return reduced
@@ -1121,7 +1121,7 @@ class ExecPool(object):
 				#	print('  "{}" is being rescheduled, workers: {} / {}, estimated vmem: {:.4f} / {:.4f} Gb'
 				#		.format(job.name, len(self._workers), self._wkslim, vmtotal + job.vmem, self._vmlimit)
 				#		, file=sys.stderr)
-				assert len(self._workers) < self._wkslim, 'Completed job formed from the reduced workers'
+				assert len(self._workers) < self._wkslim, 'Completed jobs formed from the reduced workers'
 				#assert not self._vmlimit or vmtotal + job.vmem * memtr < self._vmlimit, (
 				#	'Group exceeding of the memory limit should be already processed')
 				if not self.__start(job) and self._vmlimit:
@@ -1170,19 +1170,11 @@ class ExecPool(object):
 		return  - 0 on successful execution, process return code otherwise
 		"""
 		assert isinstance(job, Job), 'job type is invalid'
-		assert len(self._workers) <= self._wkslim, 'Number of workers exceeds the limit'
+		assert len(self._workers) <= self._wkslim and self._wkslim >= 1, 'Number of workers exceeds the limit'
 		assert job.name, 'Job parameters must be defined'  #  and job.workdir and job.args
 
 		if _DEBUG_TRACE:
 			print('Scheduling the job "{}" with timeout {}'.format(job.name, job.timeout))
-		# Consider the case when the number of workers processes is reduced to 0 and then new jobs are added
-		if not self._wkslim:
-			assert _LIMIT_WORKERS_RAM, 'The number of workers could be reduced only on _LIMIT_WORKERS_RAM'
-			# Note: it is not possible to estimate whether the new job can be executed because all former jobs with
-			# their categories and sizes are removed
-			print('WARNING, "{}" (vmem: {:.4f} / {:.4f} Gb, size: {}, timeout: {}) is cancelled because the executors do not exist'
-				.format(job.name, job.vmem, self._vmlimit, job.size, job.timeout), file=sys.stderr)
-			return 1
 		errcode = 0
 		# Initialize the [latest] value of job workers limit
 		if _LIMIT_WORKERS_RAM:
