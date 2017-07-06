@@ -344,12 +344,15 @@ class Job(object):
 		curvmem = 0  # Evaluating virtual memory
 		try:
 			up = psutil.Process(self.proc.pid)
-			curvmem = up.memory_info().vms
+			pmem = up.memory_info()
+			# Note: take average of vmem and rss to not over reserve RAM especially for Java apps
+			curvmem = (pmem.vms + pmem.rss) / 2
 			if self.vmemkind:
 				avmem = curvmem  # Memory consumption of the whole process tree
 				xvmem = curvmem  # Memory consumption of the heaviest process in the tree
 				for ucp in up.children(recursive=True):  # Note: fetches only children procs
-					vmem = ucp.memory_info().vms  # Mb; Resident Set Size
+					pmem = ucp.memory_info()
+					vmem = (pmem.vms + pmem.rss) / 2  # Mb
 					avmem += vmem
 					if xvmem < vmem:
 						xvmem = vmem
@@ -698,14 +701,18 @@ class ExecPool(object):
 		# Note: postponing jobs are terminated jobs only, can be called for !_CHAINED_CONSTRAINTS
 		wksnum = len(self._workers)  # The current number of worker processes
 		assert ((job.terminates or job.tstart is None) and (priority or self._workers)
+			# and _LIMIT_WORKERS_RAM and not job in self._workers and not job in self._jobs  # Note: self._jobs scanning is time-consuming
 			and (not self._vmlimit or job.vmem < self._vmlimit)
 			and (job.tstart is None) == (job.tstop is None) and (not job.timeout
 			or (True if job.tstart is None else job.tstop - job.tstart < job.timeout)
-			)), (  #  and _LIMIT_WORKERS_RAM and not job in self._workers and not job in self._jobs  # Note: self._jobs scanning is time-consuming
+			) and (not self._jobs or self._jobs[0].wkslim >= self._jobs[-1].wkslim)), (
 			'A terminated non-rescheduled job is expected that doest not violate constraints.'
-			' "{}" terminates: {}, jwkslim: {} vs {} pwkslim, pripority: {}, {} workers, vmem: {:.4f} / {:.4f} Gb'
-			', exectime: {:.4f} ({} .. {}) / {:.4f} sec'.format(job.name, job.terminates, job.wkslim, self._wkslim
-			, priority, wksnum, 0 if not self._vmlimit else job.vmem, self._vmlimit
+			' "{}" terminates: {}, jwkslim: {} vs {} pwkslim, pripority: {}, {} workers, {} jobs: {};'
+			'\nvmem: {:.4f} / {:.4f} Gb, exectime: {:.4f} ({} .. {}) / {:.4f} sec'.format(
+			job.name, job.terminates, job.wkslim, self._wkslim
+			, priority, wksnum, len(self._jobs)
+			, ', '.join(['#{} {}: {}'.format(ij, j.name, j.wkslim) for ij, j in enumerate(self._jobs)])
+			, 0 if not self._vmlimit else job.vmem, self._vmlimit
 			, 0 if job.tstop is None else job.tstop - job.tstart, job.tstart, job.tstop, job.timeout))
 		# Postpone only the goup-terminated jobs by memory limit, not a single worker that exceeds the (time/memory) constraints
 		# (except the explicitly requirested restart via ontimeout, which results the priority rescheduling)
@@ -750,7 +757,7 @@ class ExecPool(object):
 							self._jobs.rotate(-k)
 							self._jobs.popleft()  # == pj; -1
 							self._jobs.rotate(1 + k-i)  # Note: 1+ because one job is removed
-							self._jobs.appendleft(pj)  # +1
+							self._jobs.appendleft(pj)
 							self._jobs.rotate(i-1)
 							kend -= 1  # One more job is added before i
 							k -= 1  # Note: k is incremented below
@@ -1185,7 +1192,16 @@ class ExecPool(object):
 				self._tstart = time.time()
 			# Schedule the job, postpone it if already nonstarted jobs exist or there are no any free workers
 			if self._jobs or len(self._workers) >= self._wkslim:
-				self._jobs.append(job)
+				if not _LIMIT_WORKERS_RAM or not self._jobs or self._jobs[-1].wkslim >= job.wkslim:
+					self._jobs.append(job)
+				else:
+					jnum = len(self._jobs)
+					i = 0
+					while i < jnum and self._jobs[i].wkslim >= job.wkslim:
+						i += 1
+					self._jobs.rotate(-i)
+					self._jobs.appendleft(job)
+					self._jobs.rotate(i)
 				#self.__reviseWorkers()  # Anyway the workers are revised if exist in the working cycle
 			else:
 				errcode = self.__start(job)
@@ -1569,8 +1585,7 @@ class TestExecPool(unittest.TestCase):
 
 			# Verify handlers calls
 			jgms1.onstart.assert_called_once_with(jgms1)
-			jgms3.onstart.assert_called_with(jgms3)
-			self.assertTrue(2 <= jgms3.onstart.call_count <= 3)
+			jgms3.onstart.assert_called_once_with(jgms3)
 			jgms3.ondone.assert_called_once_with(jgms3)
 			jgmsp1.onstart.assert_called_with(jgmsp1)
 			self.assertTrue(1 <= jgmsp1.onstart.call_count <= 2)
@@ -1781,14 +1796,14 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 			xpool.execute(job)
 			xpool.execute(jobx)
 			xpool.execute(jobtr)
-			time.sleep(duration*2)
+			time.sleep(duration*1.9)
 			pvmem = job._updateVmem()
 			xvmem = jobx._updateVmem()
 			tvmem = jobtr._updateVmem()
 			# Verify memory consumption
-			self.assertTrue(pvmem < xvmem < tvmem)
 			print('Memory consumption in Mb,  proc_vmem: {pvmem:.3g}, max_procInTree_vmem: {xvmem:.3g}, procTree_vmem: {tvmem:.3g}'
 				.format(pvmem=pvmem*1000, xvmem=xvmem*1000, tvmem=tvmem*1000))
+			self.assertTrue(pvmem < xvmem < tvmem)
 			# Verify exec pool completion before the timeout
 			time.sleep(worktime / 3)  # Wait for the Job starting and memory allocation
 			self.assertTrue(xpool.join(etimeout))
