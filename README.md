@@ -107,9 +107,10 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 	# Scheduling parameters
 	omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled
 		and the process has multiple treads
-	category  - classification category, typically context or part of the name; requires _CHAINED_CONSTRAINTS
-	size  - size of the processing data, >= 0; requires _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS
-		0 means undefined size and prevents jobs chaining on constraints violation
+	category  - classification category, typically semantic context or part of the name;
+		used for _CHAINED_CONSTRAINTS to identify related jobs
+	size  - size of the processing data, >= 0, where 0 means undefined size and prevents
+		jobs chaining on constraints violation; used for _LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS
 	slowdown  - execution slowdown ratio (inversely to the [estimated] execution speed), E (0, inf)
 	vmemkind  - kind of virtual memory to be evaluated:
 		0  - vmem for the process itself omitting the spawned sub-processes (if any)
