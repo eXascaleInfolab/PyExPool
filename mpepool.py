@@ -322,6 +322,8 @@ class Job(object):
 			self.slowdown = slowdown  # Execution slowdown ratio, ~ 1 / exec_speed
 			self.chtermtime = None  # Chained termination by time: None, False - by memory, True - by time
 		if _LIMIT_WORKERS_RAM:
+			# Note: wkslim is used only internally for the cross-category ordering
+			# of the jobs queue by reducing resource consumption
 			self.wkslim = None  # Worker processes limit (max number) on the job postponing if any
 
 
