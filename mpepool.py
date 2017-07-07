@@ -262,7 +262,8 @@ class Job(object):
 		size  - size of the processing data, >= 0, where 0 means undefined size and prevents
 			jobs chaining on constraints violation; used for _LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS
 		slowdown  - execution slowdown ratio (inversely to the [estimated] execution speed), E (0, inf)
-		vmemkind  - kind of virtual memory to be evaluated:
+		vmemkind  - kind of virtual memory to be evaluated (actually, the average of virtual and
+			resident memory to not overestimate the instant potential consumption of RAM):
 			0  - vmem for the process itself omitting the spawned sub-processes (if any)
 			1  - vmem for the heaviest process of the process tree spawned by the original process
 				(including the origin itself)
