@@ -5,15 +5,16 @@
 \descr:  Multi-Process Execution Pool to schedule Jobs execution with per-job timeout,
 optionally grouping them into Tasks and specifying optional execution parameters
 considering NUMA architecture:
+	- automatic rescheduling and *load balancing* (reduction) of the worker processes
+		and on low memory condition for the *in-RAM computations* (requires
+		[psutil](https://pypi.python.org/pypi/psutil), can be disabled)
+	- *chained termination* of the related worker processes (started jobs) and
+		non-started jobs rescheduling to satisfy *timeout* and *memory limit* constraints
 	- automatic CPU affinity management and maximization of the dedicated CPU cache
-		for a worker process
-	- automatic rescheduling and balancing (reduction) of the worker processes and on
-		low memory condition for the in-RAM computations (requires psutil, can be disabled)
-	- chained termination of related worker processes and jobs rescheduling to satisfy
-		timeout and memory limit constraints
-	- timeout per each Job (it was the main initial motivation to implement this module,
-		because this feature is not provided by any Python implementation out of the box)
-	- onstart/ondone callbacks, ondone is called only on successful completion
+		vs parallelization for a worker process
+	- *timeout per each Job* (it was the main initial motivation to implement this
+		module, because this feature is not provided by any Python implementation out of the box)
+	- onstart/ondone *callbacks*, ondone is called only on successful completion
 		(not termination) for both Jobs and Tasks (group of jobs)
 	- stdout/err output, which can be redirected to any custom file or PIPE
 	- custom parameters for each Job and respective owner Task besides the name/id
@@ -23,7 +24,7 @@ considering NUMA architecture:
 
 
 	Core parameters specified as global variables:
-	_LIMIT_WORKERS_RAM  - limit the amount of virtual memory (<= RAM) used by worker processes,
+	_LIMIT_WORKERS_RAM  - limit the amount of memory consumption (<= RAM) by worker processes,
 		requires psutil import
 	_CHAINED_CONSTRAINTS  - terminate related jobs on terminating any job by the execution
 		constraints (timeout or RAM limit)
@@ -40,7 +41,7 @@ considering NUMA architecture:
 
 \author: (c) Artem Lutov <artem@exascale.info>
 \organizations: eXascale Infolab <http://exascale.info/>, Lumais <http://www.lumais.com/>, ScienceWise <http://sciencewise.info/>
-\date: 2015-07 (v1), 2017-06 (v2)
+\date: 2015-07 v1, 2017-06 v2
 """
 
 from __future__ import print_function, division  # Required for stderr output, must be the first import
@@ -81,7 +82,7 @@ except ImportError:
 	viewvalues = lambda dct: viewMethod(dct, 'values')()
 
 
-# Limit the amount of virtual memory used by worker processes.
+# Limit the amount of memory consumption by worker processes.
 # NOTE:
 #  - requires import of psutils
 #  - automatically reduced to the RAM size if the specidied limit is larger
@@ -225,7 +226,7 @@ class Job(object):
 	# NOTE: keyword-only arguments are specified after the *, supported only since Python 3
 	def __init__(self, name, workdir=None, args=(), timeout=0, ontimeout=False, task=None #,*
 	, startdelay=0, onstart=None, ondone=None, params=None, category=None, size=0, slowdown=1.
-	, omitafn=False, vmemkind=1, stdout=sys.stdout, stderr=sys.stderr):
+	, omitafn=False, memkind=1, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize job to be executed
 
 		# Main parameters
@@ -261,26 +262,30 @@ class Job(object):
 			and the process has multiple treads
 		category  - classification category, typically semantic context or part of the name;
 			used for _CHAINED_CONSTRAINTS to identify related jobs
-		size  - size of the processing data, >= 0, where 0 means undefined size and prevents
-			jobs chaining on constraints violation; used for _LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS
-		slowdown  - execution slowdown ratio (inversely to the [estimated] execution speed), E (0, inf)
-		vmemkind  - kind of virtual memory to be evaluated (actually, the average of virtual and
-			resident memory to not overestimate the instant potential consumption of RAM):
-			0  - vmem for the process itself omitting the spawned sub-processes (if any)
-			1  - vmem for the heaviest process of the process tree spawned by the original process
+		size  - expected relative memory complexity of the jobs of the same category,
+			typically it is size of the processing data, >= 0, 0 means undefined size
+			and prevents jobs chaining on constraints violation;
+			used on _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS
+		slowdown  - execution slowdown ratio, >= 0, where (0, 1) - speedup, > 1 - slowdown; 1 by default;
+			used for the accurate timeout estimation of the jobs having the same .category and .size.
+		memkind  - kind of memory to be evaluated (average of virtual and resident memory
+			to not overestimate the instant potential consumption of RAM):
+			0  - mem for the process itself omitting the spawned sub-processes (if any)
+			1  - mem for the heaviest process of the process tree spawned by the original process
 				(including the origin itself)
-			2  - vmem for the whole spawned process tree including the origin process
+			2  - mem for the whole spawned process tree including the origin process
 
 		# Execution parameters, initialized automatically on execution
 		tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 		tstop  - termination / completion time after ondone
 			NOTE: onstart() and ondone() callbacks execution is included in the job execution time
 		proc  - process of the job, can be used in the ondone() to read it's PIPE
-		vmem  - consuming virtual memory (smooth max, not just the current value) or the least expected value
-			inherited from the jobs of the same category having non-smaller size; requires _LIMIT_WORKERS_RAM
+		mem  - consuming memory (smooth max of average of vms and rss, not just the current value)
+			or the least expected value inherited from the jobs of the same category having non-smaller size;
+			requires _LIMIT_WORKERS_RAM
 		"""
 		assert isinstance(name, str) and timeout >= 0 and (task is None or isinstance(task, Task)
-			) and size >= 0 and slowdown > 0 and 0 <= vmemkind <= 2, 'Parameters validaiton failed'
+			) and size >= 0 and slowdown > 0 and 0 <= memkind <= 2, 'Parameters validaiton failed'
 		#if not args:
 		#	args = ("false")  # Create an empty process to schedule it's execution
 
@@ -311,15 +316,15 @@ class Job(object):
 		self._fstderr = None
 		# Omit scheduler affinity policy (actual when some process is computed on all treads, etc.)
 		self._omitafn = omitafn
-		self.vmemkind = vmemkind
+		self.memkind = memkind
 		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
-			self.size = size  # Size of the processing data
-			# Consumed VM on execution in gigabytes or the least expected (inherited from the
-			# related jobs having the same category and non-smaller size)
-			self.vmem = 0.
+			self.size = size  # Expected memory complexity of the job, typcally it's size of the processing data
+			# Consumed implementation-defined type of memory on execution in gigabytes or the least expected
+			# (inherited from the related jobs having the same category and non-smaller size)
+			self.mem = 0.
 		if _CHAINED_CONSTRAINTS:
 			self.category = category  # Job name
-			self.slowdown = slowdown  # Execution slowdown ratio, ~ 1 / exec_speed
+			self.slowdown = slowdown  # Execution slowdown ratio, >= 0, where (0, 1) - speedup, > 1 - slowdown
 			self.chtermtime = None  # Chained termination by time: None, False - by memory, True - by time
 		if _LIMIT_WORKERS_RAM:
 			# Note: wkslim is used only internally for the cross-category ordering
@@ -327,10 +332,10 @@ class Job(object):
 			self.wkslim = None  # Worker processes limit (max number) on the job postponing if any
 
 
-	def _updateVmem(self):
-		"""Update virtual memory consumption using smooth max
+	def _updateMem(self):
+		"""Update memory consumption (implementation-defined type) using smooth max
 
-		Actual virtual memory (not the historical max) is retrieved and updated
+		Actual memory (not the historical max) is retrieved and updated
 		using:
 		a) smoothing filter in case of the decreasing consumption and
 		b) direct update in case of the increasing consumption.
@@ -338,51 +343,51 @@ class Job(object):
 		Prerequisites: job must have defined proc (otherwise AttributeError is raised)
 			and psutil should be available (otherwise NameError is raised)
 
-		self.vmemkind defines the kind of virtual memory to be evaluated:
-			0  - vmem for the process itself omitting the spawned sub-processes (if any)
-			1  - vmem for the heaviest process of the process tree spawned by the original process
+		self.memkind defines the kind of memory to be evaluated:
+			0  - mem for the process itself omitting the spawned sub-processes (if any)
+			1  - mem for the heaviest process of the process tree spawned by the original process
 				(including the origin)
-			2  - vmem for the whole spawned process tree including the origin process
+			2  - mem for the whole spawned process tree including the origin process
 
-		return  - smooth max of job vmem
+		return  - smooth max of job mem
 		"""
-		# Current consumption of virtual memory (vms) by the job
-		curvmem = 0  # Evaluating virtual memory
+		# Current consumption of memory by the job
+		curmem = 0  # Evaluating memory
 		try:
 			up = psutil.Process(self.proc.pid)
 			pmem = up.memory_info()
-			# Note: take average of vmem and rss to not over reserve RAM especially for Java apps
-			curvmem = (pmem.vms + pmem.rss) / 2
-			if self.vmemkind:
-				avmem = curvmem  # Memory consumption of the whole process tree
-				xvmem = curvmem  # Memory consumption of the heaviest process in the tree
+			# Note: take average of mem and rss to not over reserve RAM especially for Java apps
+			curmem = (pmem.vms + pmem.rss) / 2
+			if self.memkind:
+				amem = curmem  # Memory consumption of the whole process tree
+				xmem = curmem  # Memory consumption of the heaviest process in the tree
 				for ucp in up.children(recursive=True):  # Note: fetches only children procs
 					pmem = ucp.memory_info()
-					vmem = (pmem.vms + pmem.rss) / 2  # Mb
-					avmem += vmem
-					if xvmem < vmem:
-						xvmem = vmem
-				curvmem = avmem if self.vmemkind == 2 else xvmem
+					mem = (pmem.vms + pmem.rss) / 2  # Mb
+					amem += mem
+					if xmem < mem:
+						xmem = mem
+				curmem = amem if self.memkind == 2 else xmem
 		except psutil.Error as err:
 			# The process is finished and such pid does not exist
-			print('WARNING, _updateVmem() failed, current proc vmem set to 0: ', err, file=sys.stderr)
-		# Note: even if curvmem = 0 updte vmem smoothly to avoid issues on internal
+			print('WARNING, _updateMem() failed, current proc mem set to 0: ', err, file=sys.stderr)
+		# Note: even if curmem = 0 updte mem smoothly to avoid issues on internal
 		# fails of psutil even thought they should not happen
-		curvmem = inGigabytes(curvmem)
-		self.vmem = max(curvmem, self.vmem * Job.rtm + curvmem * (1-Job.rtm))
-		return self.vmem
+		curmem = inGigabytes(curmem)
+		self.mem = max(curmem, self.mem * Job.rtm + curmem * (1-Job.rtm))
+		return self.mem
 
 
-	def lessVmem(self, job):
-		"""Whether vmem or estimated vmem is less than in the specified job
+	def lessmem(self, job):
+		"""Whether the [estimated] memory consumption is less than in the specified job
 
-		job  - another job for the vmem comparison
+		job  - another job for the .mem or .size comparison
 
-		return  - [estimated] vmem is less
+		return  - [estimated] mem is less
 		"""
 		assert self.category is not None and self.category == job.category, (
 			'Only jobs of the same initialized category can be compared')
-		return self.size < job.size if not self.vmem or not job.vmem else self.vmem < job.vmem
+		return self.size < job.size if not self.mem or not job.mem else self.mem < job.mem
 
 
 	def complete(self, graceful=None):
@@ -534,7 +539,7 @@ class ExecPool(object):
 	jmemtrr = 1.5  # Memory threshold ratio, multiplier for the job to have a gap and reduce the number of reschedulings, reccommended value: 1.2 .. 1.6
 	assert jmemtrr >= 1, 'Memory threshold retio should be >= 1'
 
-	def __init__(self, wksnum=cpu_count(), afnstep=None, vmlimit=0., latency=0.):
+	def __init__(self, wksnum=cpu_count(), afnstep=None, memlimit=0., latency=0., name=None):
 		"""Execution Pool constructor
 
 		wksnum  - number of resident worker processes, >=1. The reasonable value is
@@ -550,11 +555,11 @@ class ExecPool(object):
 				cpucorethreads()  - maximize the dedicated CPU cache (the number of
 					worker processes = CPU cores = CPU units / hardware treads per CPU core).
 			NOTE: specification of the afnstep might cause reduction of the workers number.
-		vmlimit  - limit total amount of Virtual Memory (automatically reduced to
+		memlimit  - limit total amount of Memory (automatically reduced to
 			the amount of physical RAM if the larger value is specified) in gigabytes
 			that can be used by worker processes to provide in-RAM computations, >= 0.
-			Dynamically reduces the number of workers to consume total virtual memory
-			not more than specified. The workers are rescheduled starting from the
+			Dynamically reduces the number of workers to consume not more memory
+			than specified. The workers are rescheduled starting from the
 			most memory-heavy processes.
 			NOTE:
 				- applicable only if _LIMIT_WORKERS_RAM
@@ -563,9 +568,12 @@ class ExecPool(object):
 					jobs in RAM almost without the swapping
 		latency  - approximate minimal latency of the workers monitoring in sec, float >= 0.
 			0 means automatically defined value (recommended, typically 2-3 sec).
+		name  - name of the execution pool to distinuguish traces from subsequently
+			created execution pools (only on creation or termination)
 		"""
 		assert wksnum >= 1 and (afnstep is None or afnstep <= cpu_count()
-			) and vmlimit >= 0 and latency >= 0, 'Input parameters are invalid'
+			) and memlimit >= 0 and latency >= 0, 'Input parameters are invalid'
+		self.name = name
 
 		# Verify and update wksnum and afnstep if required
 		if afnstep:
@@ -573,14 +581,16 @@ class ExecPool(object):
 			try:
 				subprocess.call([_AFFINITYBIN, '-V'])
 				if afnstep > cpu_count() / wksnum:
-					print('WARNING, the number of worker processes is reduced'
+					print('WARNING{}, the number of worker processes is reduced'
 						' ({wlim0} -> {wlim} to satisfy the affinity step'
-						.format(wlim0=wksnum, wlim=cpu_count() // afnstep), file=sys.stderr)
+						.format('' if not self.name else ' ' + self.name
+						,wlim0=wksnum, wlim=cpu_count() // afnstep), file=sys.stderr)
 					wksnum = cpu_count() // afnstep
 			except OSError as err:
 				afnstep = None
-				print('WARNING, {afnbin} does not exists in the system to fix affinity: {err}'
-					.format(afnbin=_AFFINITYBIN, err=err), file=sys.stderr)
+				print('WARNING{}, {afnbin} does not exists in the system to fix affinity: {err}'
+					.format('' if not self.name else ' ' + self.name
+					, afnbin=_AFFINITYBIN, err=err), file=sys.stderr)
 		self._wkslim = wksnum  # Max number of resident workers
 		self._workers = set()  # Scheduled and started jobs, i.e. worker processes:  {executing_job, }
 		self._jobs = collections.deque()  # Scheduled jobs that have not been started yet:  deque(job)
@@ -591,17 +601,17 @@ class ExecPool(object):
 		assert self._wkslim * (self._afnstep if self._afnstep else 1) <= cpu_count(), (
 			'_wkslim or _afnstep is too large')
 		self._numanodes = cpunodes()  # Defines sequence of the CPU ids on affinity table mapping for the crossnodes enumeration
-		# Virtual memory tracing attributes
-		self._vmlimit =  0. if not _LIMIT_WORKERS_RAM else max(0, min(vmlimit, _RAM_LIMIT))  # in Gb
 		# Execution rescheduling attributes
-		self._latency = latency if latency else 1 + (not not self._vmlimit)  # Seconds of sleep on pooling
+		self._latency = latency if latency else 1 + (not not self._memlimit)  # Seconds of sleep on pooling
+		self._memlimit =  0. if not _LIMIT_WORKERS_RAM else max(0, min(memlimit, _RAM_LIMIT))  # in Gb
 		# Predefined private attributes
 		self._killCount = 3  # 3 cycles of self._latency, termination wait time
 		self.__termlock = Lock()  # Lock for the __terminate() to avoid simultaneous call by the signal and normal execution flow
 
-		if self._vmlimit and self._vmlimit != vmlimit:
-			print('WARNING, total memory limit is reduced to guarantee the in-RAM'
-				' computations: {:.6f} -> {:.6f} Gb'.format(vmlimit, self._vmlimit), file=sys.stderr)
+		if self._memlimit and self._memlimit != memlimit:
+			print('WARNING{}, total memory limit is reduced to guarantee the in-RAM'
+				' computations: {:.6f} -> {:.6f} Gb'.format('' if not self.name else ' ' + self.name
+				, memlimit, self._memlimit), file=sys.stderr)
 
 
 	def __enter__(self):
@@ -648,10 +658,10 @@ class ExecPool(object):
 		# # Note: On python3 del might already release the objects
 		# if not hasattr(self, '_jobs') or not hasattr(self, '_workers') or (not self._jobs and not self._workers):
 		# 	return
-		print('WARNING, terminating the execution pool with {} nonstarted jobs and {} workers'
+		print('WARNING{}, terminating the execution pool with {} nonstarted jobs and {} workers'
 			', executed {} h {} m {:.4f} s, callstack fragment:'
-			.format(len(self._jobs), len(self._workers), *secondsToHms(
-			0 if self._tstart is None else time.time() - self._tstart)), file=sys.stderr)
+			.format('' if not self.name else ' ' + self.name, len(self._jobs), len(self._workers)
+			, *secondsToHms(0 if self._tstart is None else time.time() - self._tstart)), file=sys.stderr)
 		traceback.print_stack(limit=5, file=sys.stderr)
 
 		# Shut down all [nonstarted] jobs
@@ -707,17 +717,17 @@ class ExecPool(object):
 		wksnum = len(self._workers)  # The current number of worker processes
 		assert ((job.terminates or job.tstart is None) and (priority or self._workers)
 			# and _LIMIT_WORKERS_RAM and not job in self._workers and not job in self._jobs  # Note: self._jobs scanning is time-consuming
-			and (not self._vmlimit or job.vmem < self._vmlimit)  # and wksnum < self._wkslim
+			and (not self._memlimit or job.mem < self._memlimit)  # and wksnum < self._wkslim
 			and (job.tstart is None) == (job.tstop is None) and (not job.timeout
 			or (True if job.tstart is None else job.tstop - job.tstart < job.timeout)
 			) and (not self._jobs or self._jobs[0].wkslim >= self._jobs[-1].wkslim)), (
 			'A terminated non-rescheduled job is expected that doest not violate constraints.'
 			' "{}" terminates: {}, started: {} jwkslim: {} vs {} pwkslim, pripority: {}, {} workers, {} jobs: {};'
-			'\nvmem: {:.4f} / {:.4f} Gb, exectime: {:.4f} ({} .. {}) / {:.4f} sec'.format(
+			'\nmem: {:.4f} / {:.4f} Gb, exectime: {:.4f} ({} .. {}) / {:.4f} sec'.format(
 			job.name, job.terminates, job.tstart is not None, job.wkslim, self._wkslim
 			, priority, wksnum, len(self._jobs)
 			, ', '.join(['#{} {}: {}'.format(ij, j.name, j.wkslim) for ij, j in enumerate(self._jobs)])
-			, 0 if not self._vmlimit else job.vmem, self._vmlimit
+			, 0 if not self._memlimit else job.mem, self._memlimit
 			, 0 if job.tstop is None else job.tstop - job.tstart, job.tstart, job.tstop, job.timeout))
 		# Postpone only the goup-terminated jobs by memory limit, not a single worker that exceeds the (time/memory) constraints
 		# (except the explicitly requirested restart via ontimeout, which results the priority rescheduling)
@@ -751,9 +761,9 @@ class ExecPool(object):
 			while k < kend:
 				pj = self._jobs[k]
 				if pj.category == job.category and pj.size >= job.size:
-					# Set vmem in for the related nonstarted heavier jobs
-					if pj.vmem < job.vmem:
-						pj.vmem = job.vmem
+					# Set mem in for the related nonstarted heavier jobs
+					if pj.mem < job.mem:
+						pj.mem = job.mem
 					if job.wkslim < pj.wkslim:
 						pj.wkslim = job.wkslim
 						# Update location of the jobs in the queue, move the updated
@@ -793,7 +803,7 @@ class ExecPool(object):
 			job.terminates = 0  # Reset termination requests counter
 			job.proc = None  # Reset old job process if any
 			job.tstop = None  # Reset the completion / termination time
-			# Note: retain previous value of vmem for better scheduling, it is the valid value for the same job
+			# Note: retain previous value of mem for better scheduling, it is the valid value for the same job
 		job.tstart = time.time()
 		if job.onstart:
 			if _DEBUG_TRACE >= 2:
@@ -886,7 +896,7 @@ class ExecPool(object):
 		"""
 		# Process completed jobs, check timeouts and memory constraints matching
 		completed = set()  # Completed workers:  {proc,}
-		vmtotal = 0.  # Consuming virtual memory by workers
+		memall = 0.  # Consuming memory by workers
 		jtorigs = {}  # Timeout caused terminating origins (jobs) for the chained termination, {category: lightweightest_job}
 		jmorigs = {}  # Memory limit caused terminating origins (jobs) for the chained termination, {category: smallest_job}
 		for job in self._workers:  # .items()  Note: the number of _workers is small
@@ -897,17 +907,17 @@ class ExecPool(object):
 			exectime = time.time() - job.tstart
 			# Update memory statistics (if required) and skip jobs that do not exceed the specified time/memory constraints
 			if not job.terminates and (not job.timeout or exectime < job.timeout
-			) and (not self._vmlimit or job.vmem < self._vmlimit):
+			) and (not self._memlimit or job.mem < self._memlimit):
 				# Update memory consumption statistics if applicable
-				if self._vmlimit:
+				if self._memlimit:
 					# NOTE: Evaluate memory consuption for the heaviest process in the process tree
 					# of the origin job process to allow additional intermediate apps for the evaluations like:
 					# ./exectime ./clsalg ca_prm1 ca_prm2
-					job._updateVmem()  # Consider vm consumption of the past runs if any
-					if job.vmem < self._vmlimit:
-						vmtotal += job.vmem  # Consider vm consumption of past runs if any
+					job._updateMem()  # Consider mem consumption of the past runs if any
+					if job.mem < self._memlimit:
+						memall += job.mem  # Consider mem consumption of past runs if any
 						#if _DEBUG_TRACE >= 3:
-						#	print('  "{}" consumes {:.4f} Gb, vmtotal: {:.4f} Gb'.format(job.name, job.vmem, vmtotal), file=sys.stderr)
+						#	print('  "{}" consumes {:.4f} Gb, memall: {:.4f} Gb'.format(job.name, job.mem, memall), file=sys.stderr)
 						continue
 					# The memory limits violating worker will be terminated
 				else:
@@ -925,7 +935,7 @@ class ExecPool(object):
 					jorg = jtorigs.get(job.category, None)
 					if jorg is None or job.size * job.slowdown < jorg.size * jorg.slowdown:
 						jtorigs[job.category] = job
-				elif self._vmlimit and job.vmem >= self._vmlimit:
+				elif self._memlimit and job.mem >= self._memlimit:
 					# Memory limit constraints
 					jorg = jmorigs.get(job.category, None)
 					if jorg is None or job.size < jorg.size:
@@ -943,12 +953,12 @@ class ExecPool(object):
 						' consuming {:.4f} Gb with timeout of {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 						.format(job.name, job.proc.pid
 						, 'timeout' if job.timeout and exectime >= job.timeout else (
-							('' if job.vmem >= self._vmlimit else 'group ') + 'memory limit')
-						, 0 if not self._vmlimit else job.vmem
+							('' if job.mem >= self._memlimit else 'group ') + 'memory limit')
+						, 0 if not self._memlimit else job.mem
 						, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			else:
 				job.proc.terminate()  # Schedule the worker completion to the next revise
-		#self.vmtotal = vmtotal
+		#self.memall = memall
 
 		# Terminate chained related workers and jobs of the single jobs that violate timeout/memory constraints
 		if _CHAINED_CONSTRAINTS and (jtorigs or jmorigs):
@@ -970,7 +980,7 @@ class ExecPool(object):
 							# Terminate the worker
 							job.terminates += 1
 							job.proc.terminate()  # Schedule the worker completion to the next revise
-							vmtotal -= job.vmem  # Reduce total memory consumed by the active workers
+							memall -= job.mem  # Reduce total memory consumed by the active workers
 							break  # Switch to the following job
 					else:
 						# Memory limit chains
@@ -978,14 +988,14 @@ class ExecPool(object):
 							# Note: job !== jorg, because jorg terminates and job does not
 							if (job.category == jorg.category  # Skip already terminating items
 							and job is not jorg
-							and not job.lessVmem(jorg)):
+							and not job.lessmem(jorg)):
 								job.chtermtime = False  # Chained termination by memory
 								if job.terminates:
 									break  # Switch to the following job
 								# Terminate the worker
 								job.terminates += 1
 								job.proc.terminate()  # Schedule the worker completion to the next revise
-								vmtotal -= job.vmem  # Reduce total memory consumed by the active workers
+								memall -= job.mem  # Reduce total memory consumed by the active workers
 								break  # Switch to the following job
 			# Traverse over the nonstarted jobs with defined job category and size
 			if _DEBUG_TRACE >= 2:
@@ -1012,14 +1022,14 @@ class ExecPool(object):
 						# Memory limit constraints
 						for jorg in viewvalues(jmorigs):
 							if (job.category == jorg.category  # Skip already terminating items
-							and not job.lessVmem(jorg)):
+							and not job.lessmem(jorg)):
 								# Remove the item
 								self._jobs.rotate(-ij)
 								jrot += ij
 								self._jobs.popleft()  # == job
 								ij = -1  # Later +1 is added, so the index will be 0
 								print('WARNING, nonstarted "{}" with size {} is cancelled by memory limit chain from "{}" with size {}'
-									' and vmem {:.4f}'.format(job.name, job.size, jorg.name, jorg.size, jorg.vmem), file=sys.stderr)
+									' and mem {:.4f}'.format(job.name, job.size, jorg.name, jorg.size, jorg.mem), file=sys.stderr)
 								break
 				ij += 1
 			# Recover initial order of the jobs
@@ -1034,13 +1044,13 @@ class ExecPool(object):
 		# self._workers = [w for w in self._workers if w not in completed]
 
 		# Check memory limitation fulfilling for all remained processes
-		if self._vmlimit:
-			memfree = inGigabytes(psutil.virtual_memory().available)  # Amount of free RAM (RSS) in Gb; skip it if vmlimit is not requested
-		if self._vmlimit and (vmtotal >= self._vmlimit or memfree <= self.memlow):  # Jobs should use less memory than the limit
+		if self._memlimit:
+			memfree = inGigabytes(psutil.virtual_memory().available)  # Amount of free RAM (RSS) in Gb; skip it if memlimit is not requested
+		if self._memlimit and (memall >= self._memlimit or memfree <= self.memlow):  # Jobs should use less memory than the limit
 			# Terminate the largest workers and reschedule jobs or reduce the workers number
 			wksnum = len(self._workers)
 			# Overused memory with some gap (to reschedule less) to be released by worker(s) termination
-			memov = vmtotal - self._vmlimit * (wksnum / (wksnum + 1.)) if vmtotal >= self._vmlimit else (self.memlow + self._vmlimit / (wksnum + 1.))
+			memov = memall - self._memlimit * (wksnum / (wksnum + 1.)) if memall >= self._memlimit else (self.memlow + self._memlimit / (wksnum + 1.))
 			pjobs = set()  # The heaviest jobs to be postponed to satisfy the memory limit constraint
 			# Remove the heaviest workers until the memory limit constraints are sutisfied
 			hws = []  # Heavy workers
@@ -1054,17 +1064,17 @@ class ExecPool(object):
 						break
 				assert self._workers and hws, 'Non-terminated worker processes must exist here'
 				for job in self._workers:
-					# Note: use some threshold for vmem evaluation and consider starting time on scheduling
+					# Note: use some threshold for mem evaluation and consider starting time on scheduling
 					# to terminate first the least worked processes (for approximately the same memory consumption)
 					dr = 0.1  # Threshold parameter ratio, recommended value: 0.05 - 0.15; 0.1 means delta of 10%
-					if not job.terminates and (job.vmem * (1 - dr) >= hws[-1].vmem or
-					(job.vmem * (1 + dr/2) >= hws[-1].vmem and job.tstart > hws[-1].tstart)) and job not in pjobs:
+					if not job.terminates and (job.mem * (1 - dr) >= hws[-1].mem or
+					(job.mem * (1 + dr/2) >= hws[-1].mem and job.tstart > hws[-1].tstart)) and job not in pjobs:
 						hws.append(job)
 				# Move the largest jobs to postponed until memov is negative
 				while memov >= 0 and hws and wksnum - len(pjobs) > 1:  # Retain at least a single worker
 					job = hws.pop()
 					pjobs.add(job)
-					memov -= job.vmem
+					memov -= job.mem
 				if _DEBUG_TRACE >= 2:
 					print('  Group mem limit violation removing jobs: {}, remained: {} (from the end)'
 						.format(', '.join([j.name for j in pjobs]), ', '.join([j.name for j in hws])))
@@ -1079,8 +1089,8 @@ class ExecPool(object):
 				job.proc.terminate()
 				# Upate wkslim
 				job.wkslim = wkslim
-			# Update amount of estimated vmtotal
-			vmtotal = self._vmlimit + memov  # Note: memov is negative here
+			# Update amount of estimated memall
+			memall = self._memlimit + memov  # Note: memov is negative here
 
 		# Process completed (and terminated) jobs: execute callbacks and remove the workers
 		for job in completed:
@@ -1094,34 +1104,34 @@ class ExecPool(object):
 				', chtermtime: {}, consumes {:.4f} / {:.4f} Gb, timeout {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 				.format(job.name, job.proc.pid
 				, 'timeout' if job.timeout and exectime >= job.timeout else (
-					('' if job.vmem >= self._vmlimit else 'group ') + 'memory limit')
+					('' if job.mem >= self._memlimit else 'group ') + 'memory limit')
 				, None if not _CHAINED_CONSTRAINTS else job.chtermtime
-				, 0 if not self._vmlimit else job.vmem, self._vmlimit
+				, 0 if not self._memlimit else job.mem, self._memlimit
 				, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			# Skip memory limit and timeout violating jobs that do not require autorestart (applicable only for the timeout)
 			if (exectime >= job.timeout and not job.ontimeout) or (_CHAINED_CONSTRAINTS
-			and job.chtermtime is not None) or (self._vmlimit and job.vmem >= self._vmlimit):
+			and job.chtermtime is not None) or (self._memlimit and job.mem >= self._memlimit):
 				continue
 			# Reschedule job having the group violation of the memory limit
 			# if timeout is not violated or restart on timeout if requested
-			# Note: vmtotal to not postpone the single existing job
-			if self._vmlimit and ((vmtotal and vmtotal + job.vmem * self.jmemtrr >= self._vmlimit)
-			or memfree - job.vmem * self.jmemtrr <= self.memlow) and (
+			# Note: memall to not postpone the single existing job
+			if self._memlimit and ((memall and memall + job.mem * self.jmemtrr >= self._memlimit)
+			or memfree - job.mem * self.jmemtrr <= self.memlow) and (
 			not job.timeout or exectime < job.timeout or job.ontimeout):
 				self.__postpone(job)
 			# Restart the job on timeout if requested
 			elif exectime >= job.timeout and job.ontimeout:  # ATTENTION: restart on timeout only and if required
 				# Note: if the job was terminated by timeout then memory limit was not met
-				# Note: earlier executed job might not fit into the RAM now because of the inreasing vmem consumption by the workers
+				# Note: earlier executed job might not fit into the RAM now because of the inreasing mem consumption by the workers
 				#if _DEBUG_TRACE >= 3:
-				#	print('  "{}" is being rescheduled, workers: {} / {}, estimated vmem: {:.4f} / {:.4f} Gb'
-				#		.format(job.name, len(self._workers), self._wkslim, vmtotal + job.vmem, self._vmlimit)
+				#	print('  "{}" is being rescheduled, workers: {} / {}, estimated mem: {:.4f} / {:.4f} Gb'
+				#		.format(job.name, len(self._workers), self._wkslim, memall + job.mem, self._memlimit)
 				#		, file=sys.stderr)
 				assert len(self._workers) < self._wkslim, 'Completed jobs formed from the reduced workers'
-				#assert not self._vmlimit or vmtotal + job.vmem * self.jmemtrr < self._vmlimit, (
+				#assert not self._memlimit or memall + job.mem * self.jmemtrr < self._memlimit, (
 				#	'Group exceeding of the memory limit should be already processed')
-				if not self.__start(job) and self._vmlimit:
-					vmtotal += job.vmem  # Reuse .vmem from the previous run if exists
+				if not self.__start(job) and self._memlimit:
+					memall += job.mem  # Reuse .mem from the previous run if exists
 				# Note: do not call complete() on failed restart
 			else:
 				assert exectime < job.timeout, 'Timeout violating jobs should be already skipped'
@@ -1135,24 +1145,24 @@ class ExecPool(object):
 			print('  Nonstarted jobs: ', ', '.join(['{} ({})'.format(job.name, job.wkslim) for pj in self._jobs]))
 		while self._jobs and len(self._workers) < self._wkslim:
 			#if _DEBUG_TRACE >= 3:
-			#	print('  "{}" (expected totvmem: {:.4f} / {:.4f} Gb) is being resheduled, {} nonstarted jobs: {}'
-			#		.format(self._jobs[0].name, 0 if not self._vmlimit else vmtotal + job.vmem, self._vmlimit
+			#	print('  "{}" (expected totmem: {:.4f} / {:.4f} Gb) is being resheduled, {} nonstarted jobs: {}'
+			#		.format(self._jobs[0].name, 0 if not self._memlimit else memall + job.mem, self._memlimit
 			#		, len(self._jobs), ', '.join([j.name for j in self._jobs])), file=sys.stderr)
 			job = self._jobs.popleft()
 			# Jobs should use less memory than the limit, a worker process violating (time/memory) constaints are already filtered out
-			# Note: vmtotal to not postpone the single existing job
-			if self._vmlimit:
-				jvmemx = (job.vmem if job.vmem else vmtotal / (1 + len(self._workers))) * self.jmemtrr  # Extended estimated job vmem
-			if self._vmlimit and ((vmtotal and vmtotal + jvmemx >= self._vmlimit
+			# Note: memall to not postpone the single existing job
+			if self._memlimit:
+				jmemx = (job.mem if job.mem else memall / (1 + len(self._workers))) * self.jmemtrr  # Extended estimated job mem
+			if self._memlimit and ((memall and memall + jmemx >= self._memlimit
 			# Note: omit the low memory condition for a single worker, otherwise the pool can't be executed
-			) or (memfree - jvmemx <= self.memlow and self._workers)):
-				# Note: only restarted jobs have defined vmem
+			) or (memfree - jmemx <= self.memlow and self._workers)):
+				# Note: only restarted jobs have defined mem
 				# Postpone the job updating it's workers limit
-				assert job.vmem < self._vmlimit, 'The workers exceeding memory constraints were already filtered out'
+				assert job.mem < self._memlimit, 'The workers exceeding memory constraints were already filtered out'
 				self.__postpone(job)
 				break
-			elif not self.__start(job) and self._vmlimit:
-				vmtotal += job.vmem  # Reuse .vmem from the previous run if exists
+			elif not self.__start(job) and self._memlimit:
+				memall += job.mem  # Reuse .mem from the previous run if exists
 		assert (self._workers or not self._jobs) and self._wkslim, 'Worker processes should always exist if nonstarted jobs are remained'
 
 
@@ -1172,31 +1182,31 @@ class ExecPool(object):
 			print('Scheduling the job "{}" with timeout {}'.format(job.name, job.timeout))
 		errcode = 0
 		# Initialize the [latest] value of job workers limit
-		if self._vmlimit:
+		if self._memlimit:
 			job.wkslim = self._wkslim
 		if async:
 			# Start the execution timer
 			if self._tstart is None:
 				self._tstart = time.time()
 			# Evaluate total memory consumed by the worker processes
-			if self._vmlimit:
-				vmtotal = 0.
+			if self._memlimit:
+				memall = 0.
 				for wj in self._workers:
-					vmtotal += wj.vmem
-				memfree = inGigabytes(psutil.virtual_memory().available)  # Amount of free RAM (RSS) in Gb; skip it if vmlimit is not requested
-				jvmemx = (job.vmem if job.vmem else vmtotal / (1 + len(self._workers))) * self.jmemtrr  # Extended estimated job vmem
+					memall += wj.mem
+				memfree = inGigabytes(psutil.virtual_memory().available)  # Amount of free RAM (RSS) in Gb; skip it if memlimit is not requested
+				jmemx = (job.mem if job.mem else memall / (1 + len(self._workers))) * self.jmemtrr  # Extended estimated job mem
 			# Schedule the job, postpone it if already nonstarted jobs exist or there are no any free workers
 			if self._jobs or len(self._workers) >= self._wkslim or (
-			self._vmlimit and ((vmtotal and vmtotal + jvmemx >= self._vmlimit
+			self._memlimit and ((memall and memall + jmemx >= self._memlimit
 			# Note: omit the low memory condition for a single worker, otherwise the pool can't be executed
-			) or (memfree - jvmemx <= self.memlow and self._workers))):
+			) or (memfree - jmemx <= self.memlow and self._workers))):
 				if _DEBUG_TRACE >= 2:
 					print('  Postponing "{}", {} jobs, {} workers, {} wkslim'
-						', group vmemlim violation: {}, lowmem: {}'.format(job.name, len(self._jobs)
-						, len(self._workers), self._wkslim, self._vmlimit and (vmtotal and vmtotal + (job.vmem if job.vmem else
-						vmtotal / (1 + len(self._workers))) * self.jmemtrr >= self._vmlimit)
-						, self._vmlimit and (memfree - jvmemx <= self.memlow and self._workers)))
-				if not self._vmlimit or not self._jobs or self._jobs[-1].wkslim >= job.wkslim:
+						', group memlim violation: {}, lowmem: {}'.format(job.name, len(self._jobs)
+						, len(self._workers), self._wkslim, self._memlimit and (memall and memall + (job.mem if job.mem else
+						memall / (1 + len(self._workers))) * self.jmemtrr >= self._memlimit)
+						, self._memlimit and (memfree - jmemx <= self.memlow and self._workers)))
+				if not self._memlimit or not self._jobs or self._jobs[-1].wkslim >= job.wkslim:
 					self._jobs.append(job)
 				else:
 					jnum = len(self._jobs)
@@ -1214,7 +1224,7 @@ class ExecPool(object):
 				errcode = self.__start(job)
 		else:
 			errcode = self.__start(job, False)
-			# Note: sync job is completed automatically on fails
+			# Note: sync job is completed automatically on any fails
 		return errcode
 
 
@@ -1324,7 +1334,7 @@ class TestExecPool(unittest.TestCase):
 
 	@classmethod
 	def setUpClass(cls):
-		cls._execpool = ExecPool(TestExecPool._WPROCSMAX, latency=TestExecPool._latency)  # , _AFNSTEP, vmlimit
+		cls._execpool = ExecPool(TestExecPool._WPROCSMAX, latency=TestExecPool._latency)  # , _AFNSTEP, memlimit
 
 
 	@classmethod
@@ -1463,8 +1473,8 @@ class TestExecPool(unittest.TestCase):
 		"""Verify memory violations caused by the single worker:
 		1. Absence of side effects on the remained jobs after bad_alloc
 			(exception of the external app) caused termination of the worker process
-		2. Termination of the worker process that exceeds limit of the dedicated virtual memory
-	 	3. Termination of the worker process that exceeds limit of the dedicated virtual memory
+		2. Termination of the worker process that exceeds limit of the dedicated memory
+		3. Termination of the worker process that exceeds limit of the dedicated memory
 	 		or had bad_alloc and termination of all related non-smaller jobs
 		"""
 		worktime = TestExecPool._latency * 5  # Note: should be larger than 3*_latency; 400 ms can be insufficient for the Python 3
@@ -1473,11 +1483,11 @@ class TestExecPool(unittest.TestCase):
 		etimeout = (max(1, TestExecPool._latency) + timeout) * 3  # Execution pool timeout; Note: *3 because nonstarted jobs exist here
 		assert TestExecPool._latency * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
-		# Note: we need another execution pool to set vmlimit (10 Mb) there
-		epoolVmem = 0.2  # Execution pool vmem limit, Gb
+		# Note: we need another execution pool to set memlimit (10 Mb) there
+		epoolMem = 0.2  # Execution pool mem limit, Gb
 		msmall = 256  # Small amount of memory for a job, bytes
 		# Start not more than 3 simultaneous workers
-		with ExecPool(max(TestExecPool._WPROCSMAX, 3), latency=TestExecPool._latency, vmlimit=epoolVmem) as xpool:  # , _AFNSTEP, vmlimit
+		with ExecPool(max(TestExecPool._WPROCSMAX, 3), latency=TestExecPool._latency, memlimit=epoolMem) as xpool:  # , _AFNSTEP, memlimit
 			tstart = time.time()
 
 			jmsDb = Job('jmem_small_ba', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
@@ -1486,7 +1496,7 @@ class TestExecPool(unittest.TestCase):
 				, category='cat1', size=9, timeout=timeout)
 
 			jmvsize = 5  # Size of the task violating memory contraints
-			jmv = Job('jmem_violate', args=(PYEXEC, '-c', allocDelayProg(inBytes(epoolVmem * 2), worktime))
+			jmv = Job('jmem_violate', args=(PYEXEC, '-c', allocDelayProg(inBytes(epoolMem * 2), worktime))
 				, category='cat2', size=jmvsize, timeout=timeout)
 			jmsDvs = Job('jmem_small_v1', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
 				, category='cat2', size=jmvsize-1, timeout=timeout)
@@ -1546,11 +1556,11 @@ class TestExecPool(unittest.TestCase):
 		etimeout = (max(1, TestExecPool._latency) + timeout) * 3  # Execution pool timeout; Note: *3 because nonstarted jobs exist here nad postponed twice
 		assert TestExecPool._latency * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
-		# Note: we need another execution pool to set vmlimit (10 Mb) there
-		epoolVmem = 0.15  # Execution pool vmem limit, Gb
+		# Note: we need another execution pool to set memlimit (10 Mb) there
+		epoolMem = 0.15  # Execution pool mem limit, Gb
 		msmall = inBytes(0.025)  # Small amount of memory for a job; Note: actual Python app consumes ~51 Mb for the allocated ~25 Mb
 		# Start not more than 3 simultaneous workers
-		with ExecPool(max(TestExecPool._WPROCSMAX, 3), latency=TestExecPool._latency, vmlimit=epoolVmem) as xpool:  # , _AFNSTEP, vmlimit
+		with ExecPool(max(TestExecPool._WPROCSMAX, 3), latency=TestExecPool._latency, memlimit=epoolMem) as xpool:  # , _AFNSTEP, memlimit
 			tstart = time.time()
 			jgms1 = Job('jgroup_mem_small_1', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
 				, size=9, timeout=timeout, onstart=mock.MagicMock())
@@ -1615,11 +1625,11 @@ class TestExecPool(unittest.TestCase):
 		etimeout = (max(1, TestExecPool._latency) + timeout) * 4  # Execution pool timeout; Note: *3 because nonstarted jobs exist here nad postponed twice
 		assert TestExecPool._latency * 3 < worktime/2 and worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
-		# Note: we need another execution pool to set vmlimit (10 Mb) there
-		epoolVmem = 0.15  # Execution pool vmem limit, Gb
+		# Note: we need another execution pool to set memlimit (10 Mb) there
+		epoolMem = 0.15  # Execution pool mem limit, Gb
 		msmall = inBytes(0.025)  # Small amount of memory for a job; Note: actual Python app consumes ~51 Mb for the allocated ~25 Mb
 		# Start not more than 3 simultaneous workers
-		with ExecPool(max(TestExecPool._WPROCSMAX, 4), latency=TestExecPool._latency, vmlimit=epoolVmem) as xpool:  # , _AFNSTEP, vmlimit
+		with ExecPool(max(TestExecPool._WPROCSMAX, 4), latency=TestExecPool._latency, memlimit=epoolMem) as xpool:  # , _AFNSTEP, memlimit
 			tstart = time.time()
 
 			jgms1 = Job('jgroup_mem_small_1', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
@@ -1697,7 +1707,7 @@ import subprocess
 import os
 from sys import executable as PYEXEC
 
-fnull = open(os.devnull, 'w')
+fnull = open(os.devnull, 'wb')
 subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 """.format(mprog=mprog, cprog=cprog)
 #subprocess.call(args=('./exectime', PYEXEC, '-c', '''{cprog}'''))
@@ -1718,39 +1728,39 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 		except psutil.Error as err:
 			print('WARNING, psutil.Process() failed: ', err, file=sys.stderr)
 			return
-		vmem = inGigabytes(up.memory_info().vms) * 1000  # Mb; Virtual Memory Size
+		mem = inGigabytes(up.memory_info().vms) * 1000  # Mb; Virtual Memory Size
 		rmem = inGigabytes(up.memory_info().rss) * 1000  # Mb; Resident Set Size
-		uvmem = inGigabytes(up.memory_full_info().vms) * 1000  # Mb; Unique Set Size
+		umem = inGigabytes(up.memory_full_info().vms) * 1000  # Mb; Unique Set Size
 		urmem = inGigabytes(up.memory_full_info().rss) * 1000  # Mb; Unique Set Size
 
-		avmem = vmem
+		acmem = mem
 		armem = rmem
-		auvmem = uvmem
+		aumem = umem
 		aurmem = urmem
-		cxvmem = 0
+		cxmem = 0
 		cxrmem = 0
-		cxuvmem = 0
+		cxumem = 0
 		cxurmem = 0
 		cxpid = None
 		cnum = 0  # The number of child processes
 		for ucp in up.children(recursive=True):
 			cnum += 1
-			cvmem = inGigabytes(ucp.memory_info().vms) * 1000  # Mb; Virtual Memory Size
+			cmem = inGigabytes(ucp.memory_info().vms) * 1000  # Mb; Virtual Memory Size
 			crmem = inGigabytes(ucp.memory_info().rss) * 1000  # Mb; Resident Set Size
-			cuvmem = inGigabytes(ucp.memory_full_info().vms) * 1000  # Mb; Unique Set Size
+			cumem = inGigabytes(ucp.memory_full_info().vms) * 1000  # Mb; Unique Set Size
 			curmem = inGigabytes(ucp.memory_full_info().rss) * 1000  # Mb; Unique Set Size
-			print('Memory in Mb of "{pname}" #{pid}: (vmem: {vmem:.2f}, rmem: {rmem:.2f}, uvmem: {uvmem:.2f}, urmem: {urmem:.2f})'
-				.format(pname=ucp.name(), pid=ucp.pid, vmem=cvmem, rmem=crmem, uvmem=cuvmem, urmem=curmem))
-			# Identify consumption by the heaviest child (by absolute vmem)
-			if cxvmem < cvmem:
-				cxvmem = cvmem
+			print('Memory in Mb of "{pname}" #{pid}: (mem: {mem:.2f}, rmem: {rmem:.2f}, umem: {umem:.2f}, urmem: {urmem:.2f})'
+				.format(pname=ucp.name(), pid=ucp.pid, mem=cmem, rmem=crmem, umem=cumem, urmem=curmem))
+			# Identify consumption by the heaviest child (by absolute mem)
+			if cxmem < cmem:
+				cxmem = cmem
 				cxrmem = crmem
-				cxuvmem = cuvmem
+				cxumem = cumem
 				cxurmem = curmem
 				cxpid = ucp.pid
-			avmem += cvmem
+			acmem += cmem
 			armem += crmem
-			auvmem += cuvmem
+			aumem += cumem
 			aurmem += curmem
 
 		amem *= 1000  # Mb
@@ -1758,18 +1768,18 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 		proc.wait()  # Wait for the process termination
 
 		print('Memory in Mb:\n  allocated for the proc #{pid}: {amem}, child: {camem}, total: {tamem}'
-			'\n  psutil proc #{pid} (vmem: {vmem:.2f}, rmem: {rmem:.2f}, uvmem: {uvmem:.2f}, urmem: {urmem:.2f})'
+			'\n  psutil proc #{pid} (mem: {mem:.2f}, rmem: {rmem:.2f}, umem: {umem:.2f}, urmem: {urmem:.2f})'
 			'\n  psutil proc #{pid} tree ({cnum} subprocs) heaviest child #{cxpid}'
-			' (vmem: {cxvmem:.2f}, rmem: {cxrmem:.2f}, uvmem: {cxuvmem:.2f}, urmem: {cxurmem:.2f})'
-			'\n  psutil proc #{pid} tree (vmem: {avmem:.2f}, rmem: {armem:.2f}, uvmem: {auvmem:.2f}, urmem: {aurmem:.2f})'
+			' (mem: {cxmem:.2f}, rmem: {cxrmem:.2f}, umem: {cxumem:.2f}, urmem: {cxurmem:.2f})'
+			'\n  psutil proc #{pid} tree (mem: {acmem:.2f}, rmem: {armem:.2f}, umem: {aumem:.2f}, urmem: {aurmem:.2f})'
 			''.format(pid=proc.pid, amem=amem, camem=camem, tamem=amem+camem
-			, vmem=vmem, rmem=rmem, uvmem=uvmem, urmem=urmem
-			, cnum=cnum, cxpid=cxpid, cxvmem=cxvmem, cxrmem=cxrmem, cxuvmem=cxuvmem, cxurmem=cxurmem
-			, avmem=avmem, armem=armem, auvmem=auvmem, aurmem=aurmem))
+			, mem=mem, rmem=rmem, umem=umem, urmem=urmem
+			, cnum=cnum, cxpid=cxpid, cxmem=cxmem, cxrmem=cxrmem, cxumem=cxumem, cxurmem=cxurmem
+			, acmem=acmem, armem=armem, aumem=aumem, aurmem=aurmem))
 
 
 	@unittest.skipUnless(_LIMIT_WORKERS_RAM, 'Requires _LIMIT_WORKERS_RAM')
-	def test_jobVmem(self):
+	def test_jobMem(self):
 		"""Test job virual memory evaluation
 		"""
 		worktime = TestExecPool._latency * 6  # Note: should be larger than 3*_latency
@@ -1779,38 +1789,38 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 		assert TestExecPool._latency * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
 		# Start not more than 3 simultaneous workers
-		with ExecPool(max(TestExecPool._WPROCSMAX, 3), latency=TestExecPool._latency) as xpool:  # , _AFNSTEP, vmlimit
+		with ExecPool(max(TestExecPool._WPROCSMAX, 3), latency=TestExecPool._latency) as xpool:  # , _AFNSTEP, memlimit
 			amem = 0.02  # Direct allocating memory in the process
 			camem = 0.07  # Allocatinf memory in the child process
 			duration = worktime / 3  # Duration in sec
-			job = Job('jvmem_proc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+			job = Job('jmem_proc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
 				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-				, timeout=timeout, vmemkind=0, ondone=mock.MagicMock())
-			jobx = Job('jvmem_max-subproc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+				, timeout=timeout, memkind=0, ondone=mock.MagicMock())
+			jobx = Job('jmem_max-subproc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
 				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-				, timeout=timeout, vmemkind=1, ondone=mock.MagicMock())
-			jobtr = Job('jvmem_tree', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+				, timeout=timeout, memkind=1, ondone=mock.MagicMock())
+			jobtr = Job('jmem_tree', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
 				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-				, timeout=timeout, vmemkind=2, ondone=mock.MagicMock())
+				, timeout=timeout, memkind=2, ondone=mock.MagicMock())
 
 			# Verify that non-started job raises exception on memory update request
 			if _LIMIT_WORKERS_RAM:
-				self.assertRaises(AttributeError, job._updateVmem)
+				self.assertRaises(AttributeError, job._updateMem)
 			else:
-				self.assertRaises(NameError, job._updateVmem)
+				self.assertRaises(NameError, job._updateMem)
 
 			tstart = time.time()
 			xpool.execute(job)
 			xpool.execute(jobx)
 			xpool.execute(jobtr)
 			time.sleep(duration*1.9)
-			pvmem = job._updateVmem()
-			xvmem = jobx._updateVmem()
-			tvmem = jobtr._updateVmem()
+			pmem = job._updateMem()
+			xmem = jobx._updateMem()
+			tmem = jobtr._updateMem()
 			# Verify memory consumption
-			print('Memory consumption in Mb,  proc_vmem: {pvmem:.3g}, max_procInTree_vmem: {xvmem:.3g}, procTree_vmem: {tvmem:.3g}'
-				.format(pvmem=pvmem*1000, xvmem=xvmem*1000, tvmem=tvmem*1000))
-			self.assertTrue(pvmem < xvmem < tvmem)
+			print('Memory consumption in Mb,  proc_mem: {pmem:.3g}, max_procInTree_mem: {xmem:.3g}, procTree_mem: {tmem:.3g}'
+				.format(pmem=pmem*1000, xmem=xmem*1000, tmem=tmem*1000))
+			self.assertTrue(pmem < xmem < tmem)
 			# Verify exec pool completion before the timeout
 			time.sleep(worktime / 3)  # Wait for the Job starting and memory allocation
 			self.assertTrue(xpool.join(etimeout))

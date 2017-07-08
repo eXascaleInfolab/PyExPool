@@ -22,7 +22,7 @@ Large executing jobs can be postponed for the later execution with less number o
 \author: (c) Artem Lutov <artem@exascale.info>  
 \license:  Apache License, Version 2.0  
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
-\date: 2015 v1, 2017-06 v2
+\date: 2015-07 v1, 2017-06 v2
 
 ## Content
 - [Dependencies](#dependencies)
@@ -58,7 +58,7 @@ Flexible API provides *automatic CPU affinity management, maximization of the de
 
 ```python
 # Global Parameters
-# Limit the amount of virtual memory (<= RAM) used by worker processes
+# Limit the amount of memory (<= RAM) used by worker processes
 # NOTE: requires import of psutils
 _LIMIT_WORKERS_RAM = True
 
@@ -70,7 +70,7 @@ _LIMIT_WORKERS_RAM = True
 
 Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 	, startdelay=0, onstart=None, ondone=None, params=None, category=None, size=0
-	, slowdown=1., omitafn=False, vmemkind=1, stdout=sys.stdout, stderr=sys.stderr):
+	, slowdown=1., omitafn=False, memkind=1, stdout=sys.stdout, stderr=sys.stderr):
 	"""Initialize job to be executed
 
 	Job is executed in a separate process via Popen or Process object and is
@@ -109,22 +109,27 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 		and the process has multiple treads
 	category  - classification category, typically semantic context or part of the name;
 		used for _CHAINED_CONSTRAINTS to identify related jobs
-	size  - size of the processing data, >= 0, where 0 means undefined size and prevents
-		jobs chaining on constraints violation; used for _LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS
-	slowdown  - execution slowdown ratio (inversely to the [estimated] execution speed), E (0, inf)
-	vmemkind  - kind of virtual memory to be evaluated (actually, the average of virtual and
-		resident memory to not overestimate the instant potential consumption of RAM):
-		0  - vmem for the process itself omitting the spawned sub-processes (if any)
-		1  - vmem for the heaviest process of the process tree spawned by the original process
+	size  - expected relative memory complexity of the jobs of the same category,
+		typically it is size of the processing data, >= 0, 0 means undefined size
+		and prevents jobs chaining on constraints violation;
+		used on _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS
+	slowdown  - execution slowdown ratio, >= 0, where (0, 1) - speedup, > 1 - slowdown; 1 by default;
+		used for the accurate timeout estimation of the jobs having the same .category and .size.
+	memkind  - kind of memory to be evaluated (average of virtual and resident memory
+		to not overestimate the instant potential consumption of RAM):
+		0  - mem for the process itself omitting the spawned sub-processes (if any)
+		1  - mem for the heaviest process of the process tree spawned by the original process
 			(including the origin itself)
-		2  - vmem for the whole spawned process tree including the origin process
+		2  - mem for the whole spawned process tree including the origin process
 
 	# Execution parameters, initialized automatically on execution
 	tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 	tstop  - termination / completion time after ondone
+		NOTE: onstart() and ondone() callbacks execution is included in the job execution time
 	proc  - process of the job, can be used in the ondone() to read it's PIPE
-	vmem  - consuming virtual memory (smooth max, not just the current value) or the least expected value
-		inherited from the jobs of the same category having non-smaller size; requires _LIMIT_WORKERS_RAM
+	mem  - consuming memory (smooth max of average of vms and rss, not just the current value)
+		or the least expected value inherited from the jobs of the same category having non-smaller size;
+		requires _LIMIT_WORKERS_RAM
 	"""
 ```
 ### Task
@@ -154,10 +159,10 @@ Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout,
 ```
 ### ExecPool
 ```python
-ExecPool(wksnum=cpu_count(), afnstep=None, vmlimit=0., latency=0.)
+ExecPool(wksnum=cpu_count(), afnstep=None, vmlimit=0., latency=0., name=None)
 	"""Multi-process execution pool of jobs
 
-	wksnum  - number of resident worker processes, >=1. The reasonable value is
+		wksnum  - number of resident worker processes, >=1. The reasonable value is
 			<= NUMA nodes * node CPUs, which is typically returned by cpu_count(),
 			where node CPUs = CPU cores * HW treads per core.
 			To guarantee minimal average RAM per a process, for example 2.5 Gb:
@@ -170,12 +175,12 @@ ExecPool(wksnum=cpu_count(), afnstep=None, vmlimit=0., latency=0.)
 				cpucorethreads()  - maximize the dedicated CPU cache (the number of
 					worker processes = CPU cores = CPU units / hardware treads per CPU core).
 			NOTE: specification of the afnstep might cause reduction of the workers number.
-		vmlimit  - limit total amount of VM (automatically reduced to the amount of physical
-			RAM if the larger value is specified) in gigabytes that can be used by worker
-			processes to provide in-RAM computations.
-			Dynamically reduce the number of workers to consume total virtual memory
-			not more than specified. The workers are rescheduled starting from the
-			most memory-heavy processes. >= 0
+		memlimit  - limit total amount of Memory (automatically reduced to
+			the amount of physical RAM if the larger value is specified) in gigabytes
+			that can be used by worker processes to provide in-RAM computations, >= 0.
+			Dynamically reduces the number of workers to consume not more memory
+			than specified. The workers are rescheduled starting from the
+			most memory-heavy processes.
 			NOTE:
 				- applicable only if _LIMIT_WORKERS_RAM
 				- 0 means unlimited (some jobs might be [partially] swapped)
@@ -183,6 +188,8 @@ ExecPool(wksnum=cpu_count(), afnstep=None, vmlimit=0., latency=0.)
 					jobs in RAM almost without the swapping
 		latency  - approximate minimal latency of the workers monitoring in sec, float >= 0.
 			0 means automatically defined value (recommended, typically 2-3 sec).
+		name  - name of the execution pool to distinuguish traces from subsequently
+			created execution pools (only on creation or termination)
 	"""
 
 	execute(job, async=True):
@@ -323,15 +330,15 @@ execpool.join(global_timeout)  # 30 min
 In case the execution pool is required locally then it can be used in the following way:
 ```python
 ...
-# Limit of the virtual memory for the all worker processes with max(32 GB, RAM)
+# Limit of the memory consumption for the all worker processes with max(32 GB, RAM)
 # and provide latency of 1.5 sec for the jobs rescheduling
 with ExecPool(max(cpu_count()-1, 1), vmlimit=32, latency=1.5) as xpool:
-	job = Job('jvmem_proc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+	job = Job('jmem_proc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
 		allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-		, timeout=timeout, vmemkind=0, ondone=mock.MagicMock())
-	jobx = Job('jvmem_max-subproc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
+		, timeout=timeout, memkind=0, ondone=mock.MagicMock())
+	jobx = Job('jmem_max-subproc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
 		allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-		, timeout=timeout, vmemkind=1, ondone=mock.MagicMock())
+		, timeout=timeout, memkind=1, ondone=mock.MagicMock())
 	...
 	xpool.execute(job)
 	xpool.execute(jobx)
