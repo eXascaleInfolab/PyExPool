@@ -602,8 +602,8 @@ class ExecPool(object):
 			'_wkslim or _afnstep is too large')
 		self._numanodes = cpunodes()  # Defines sequence of the CPU ids on affinity table mapping for the crossnodes enumeration
 		# Execution rescheduling attributes
-		self._latency = latency if latency else 1 + (not not self._memlimit)  # Seconds of sleep on pooling
 		self._memlimit =  0. if not _LIMIT_WORKERS_RAM else max(0, min(memlimit, _RAM_LIMIT))  # in Gb
+		self._latency = latency if latency else 1 + (not not self._memlimit)  # Seconds of sleep on pooling
 		# Predefined private attributes
 		self._killCount = 3  # 3 cycles of self._latency, termination wait time
 		self.__termlock = Lock()  # Lock for the __terminate() to avoid simultaneous call by the signal and normal execution flow
