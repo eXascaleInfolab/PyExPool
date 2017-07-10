@@ -53,12 +53,14 @@ import ctypes  # Required for the multiprocessing Value definition
 import types  # Required for instance methods definition
 import traceback  # Stacktrace;  To print a stacktrace fragment: traceback.print_stack(limit=5, file=sys.stderr)
 import subprocess
+import errno
 
 from multiprocessing import cpu_count, Value, Lock
 
 # Required to efficiently traverse items of dictionaries in both Python 2 and 3
 try:
 	from future.utils import viewvalues  #viewitems, viewkeys, viewvalues  # External package: pip install future
+	from future.builtins import range
 except ImportError:
 	def viewMethod(obj, method):
 		"""Fetch view method of the object
@@ -80,6 +82,12 @@ except ImportError:
 	#viewitems = lambda dct: viewMethod(dct, 'items')()
 	#viewkeys = lambda dct: viewMethod(dct, 'keys')()
 	viewvalues = lambda dct: viewMethod(dct, 'values')()
+
+	# Replace range() implementation for Python2
+	try:
+		range = xrange
+	except NameError:
+		pass  # xrange is not defined in Python3, which is fine
 
 
 # Limit the amount of memory consumption by worker processes.
@@ -157,7 +165,7 @@ class Task(object):
 		tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 		tstop  - termination / completion time after ondone.
 		"""
-		assert isinstance(name, str) and timeout >= 0, 'Parameters validaiton failed'
+		assert isinstance(name, str) and timeout >= 0, 'Arguments are invalid'
 		self.name = name
 		self.timeout = timeout
 		self.params = params
@@ -215,8 +223,8 @@ class Task(object):
 
 
 class Job(object):
-	rtm = 0.85  # Memory retention ratio, used to not drop the memory info fast on temporal releases, E [0, 1)
-	assert 0 <= rtm < 1, 'Memory retention ratio should E [0, 1)'
+	_RTM = 0.85  # Memory retention ratio, used to not drop the memory info fast on temporal releases, E [0, 1)
+	assert 0 <= _RTM < 1, 'Memory retention ratio should E [0, 1)'
 
 	# Note: the same job can be executed as Popen or Process object, but ExecPool
 	# should use some wrapper in the latter case to manage it
@@ -285,7 +293,7 @@ class Job(object):
 			requires _LIMIT_WORKERS_RAM
 		"""
 		assert isinstance(name, str) and timeout >= 0 and (task is None or isinstance(task, Task)
-			) and size >= 0 and slowdown > 0 and 0 <= memkind <= 2, 'Parameters validaiton failed'
+			) and size >= 0 and slowdown > 0 and 0 <= memkind <= 2, 'Arguments are invalid'
 		#if not args:
 		#	args = ("false")  # Create an empty process to schedule it's execution
 
@@ -374,7 +382,7 @@ class Job(object):
 		# Note: even if curmem = 0 updte mem smoothly to avoid issues on internal
 		# fails of psutil even thought they should not happen
 		curmem = inGigabytes(curmem)
-		self.mem = max(curmem, self.mem * Job.rtm + curmem * (1-Job.rtm))
+		self.mem = max(curmem, self.mem * Job._RTM + curmem * (1-Job._RTM))
 		return self.mem
 
 
@@ -469,92 +477,294 @@ def ramfracs(fracsize):
 def cpucorethreads():
 	"""The number of hardware treads per a CPU core
 
-	Used to specify CPU afinity step dedicating the maximal amount of CPU cache.
+	Used to specify CPU afinity dedicating the maximal amount of CPU cache L1/2.
 	"""
-	return int(subprocess.check_output([r"lscpu | sed -rn 's/^Thread\(s\).*(\w+)$/\1/p'"], shell=True))
+	# -r or -E  - extended regex syntax, -n  - quet output, /p  - print the match
+	return int(subprocess.check_output(
+		[r"lscpu | sed -rn 's/^Thread\(s\).*(\w+)$/\1/p'"], shell=True))
 
 
 def cpunodes():
-	"""The number of NUMA nodes, where CPUs are located
+	"""The number of NUMA nodes, where physical CPUs are located.
 
-	Used to evaluate CPU index from the affinity table index considerin the NUMA architectore.
+	Used to evaluate CPU index from the affinity table index considering the
+	NUMA architecture.
+	Usually NUMA nodes = physical CPUs.
 	"""
-	return int(subprocess.check_output([r"lscpu | sed -rn 's/^NUMA node\(s\).*(\w+)$/\1/p'"], shell=True))
+	return int(subprocess.check_output(
+		[r"lscpu | sed -rn 's/^NUMA node\(s\).*(\w+)$/\1/p'"], shell=True))
 
 
-def afnicpu(iafn, corethreads=1, nodes=1, crossnodes=True):
-	"""Affinity table index mapping to the CPU index
+def cpusequential():
+	"""Enumeration type of the logical CPUs: crossnodes or sequential
+
+	The enumeration can be crossnodes starting with one hardware thread per each
+	NUMA node, or sequential by enumerating all cores and hardware threads in each
+	NUMA node first.
+	For two hardware threads per a physical CPU core, where secondary hw threads
+	are taken in brackets:
+		Crossnodes enumeration, often used for the server CPUs
+		NUMA node0 CPU(s):     0,2(,4,6)		=> PU L#1 (P#4)
+		NUMA node1 CPU(s):     1,3(,5,7)
+		Sequential enumeration, often used for the laptop CPUs
+		NUMA node0 CPU(s):     0(,1),2(,3)		=> PU L#1 (P#1)  - indicates sequential
+		NUMA node1 CPU(s):     4(,5),6(,7)
+	ATTENTION: `hwloc` utility is required to detect the type of logical CPUs
+	enumeration:  `$ sudo apt-get install hwloc`
+	See details: http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service
+
+	return  - enumeration type of the logical CPUs, bool or None:
+		None  - was not defined, most likely crossnodes
+		False  - crossnodes
+		True  - sequential
+	"""
+	# Fetch index of the second hardware thread / CPU core / CPU on the first NUMA node
+	res = subprocess.check_output(
+		[r"lstopo-no-graphics | sed -rn 's/\s+PU L#1 \(P#([0-9]+)\)/\1/p'"], shell=True)
+	try:
+		return int(res) == 1
+	except ValueError as err:
+		print('WARNING, return sequential "None" because the "lstopo-no-graphics"'
+			' ("hwloc" utilities) call failed: ', err, file=sys.stderr)
+		pass  # Returned value is not a number, i.e. hwloc (lstopo*) is not installed
+	return None
+
+
+class AffinityMask(object):
+	"""Affinity mask
 
 	Affinity table is a reduced CPU table by the non-primary HW treads in each core.
-	Typically CPUs are evumerated across the nodes:
+	Typically, CPUs are enumerated across the nodes:
 	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30
 	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31
-	So, in case the number of threads per core is 2 then the following CPUs should be bound:
-	0, 1, 4, 5, 8, ...
-	2 -> 4, 4 -> 8
-	#i ->  i  +  i // cpunodes() * cpunodes() * (cpucorethreads() - 1)
+	In case the number of hw threads per core is 2 then the physical CPU cores are 1 .. 15:
+	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14	(16,18,20,22,24,26,28,30  - 2nd hw treads)
+	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15	(17,19,21,23,25,27,29,31  - 2nd hw treads)
+	But the enumeration can be also sequential:
+	NUMA node0 CPU(s):     0,(1),2,(3),...
+	...
 
-	iafn  - index in the affinity table to be mapped into the respective CPU index
-	corethreads  - HW threads per CPU core or just some affinity step,
-		1  - maximal parallelization with the minimal CPU cache size
-	nodes  - NUMA nodes containing CPUs
-	crossnodes  - cross-nodes enumeration of the CPUs in the NUMA nodes
+	Hardware threads share all levels of the CPU cache, physical CPU cores share only the
+	last level of the CPU cache (L2/3).
+	The number of worker processes in the pool should be equal to the:
+	- physical CPU cores for the cache L1/2 maximization
+	- NUMA nodes for the cache L2/3 maximization
 
-	return CPU index respective to the specified index in the affinity table
+	NOTE: `hwloc` utility can be used to detect the type of logical CPUs enumeration:
+	`$ sudo apt-get install hwloc`
+	See details: http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service
 
-	>>> afnicpu(2, 2, 2, True)
-	4
-	>>> afnicpu(4, 2, 2, True)
-	8
-	>>> afnicpu(2, 4, 2, True)
-	8
-	>>> afnicpu(2, 2, 3, True)
-	2
-	>>> afnicpu(4, 2, 3, True)
-	7
-	>>> afnicpu(1, 2, 1, True)
-	2
-	>>> afnicpu(3, 2, 1, True)
-	6
-	>>> afnicpu(4, 1, 3, True)
-	4
-	>>> afnicpu(3, 2, 2, False)
-	6
-	>>> afnicpu(3, 2, 3, False)
-	6
+	# Doctests -----------------------------------------------------------------
+	# Mask for all sequential logical CPU having index #1
+	>>> AffinityMask(1, False, sequential=True)(1) == \
+		str(AffinityMask.CORE_THREADS if AffinityMask.NODES == 1 else AffinityMask.NODE_CPUS)
+	True
+
+	# Mask for the first crossnode logical CPU in the group #1
+	>>> AffinityMask(AffinityMask.CORE_THREADS, sequential=False)(1) == '1'
+	True
+
+	# Mask for all crossnode logical CPUs in the group #1
+	>>> AffinityMask(AffinityMask.CORE_THREADS, first=False, sequential=False)(1) == \
+		','.join([str(1 + c*(AffinityMask.CPUS // (AffinityMask.NODES * AffinityMask.CORE_THREADS))) \
+		for c in range(AffinityMask.CORE_THREADS)])
+	True
+
+	# Mask for all sequential logical CPUs in the group #1
+	>>> AffinityMask(AffinityMask.CORE_THREADS, False, sequential=True)(1) == \
+		'-'.join([str(1*(AffinityMask.CPUS // (AffinityMask.NODES * AffinityMask.CORE_THREADS)) + c) \
+		for c in range(AffinityMask.CORE_THREADS)])
+	True
+
+	# Mask for all crossnode logical CPU on the NUMA node #0
+	>>> AffinityMask(AffinityMask.CPUS // AffinityMask.NODES, False, sequential=False)(0) == \
+		','.join(['{}-{}'.format(c*(AffinityMask.CPUS // AffinityMask.CORE_THREADS) \
+		, (c+1)*(AffinityMask.CPUS // AffinityMask.CORE_THREADS) - 1) for c in range(AffinityMask.CORE_THREADS)])
+	True
+
+	# Mask for all sequential logical CPU on the NUMA node #0
+	>>> AffinityMask(AffinityMask.CPUS // AffinityMask.NODES, first=False, sequential=True)(0) == \
+		'0-{}'.format(AffinityMask.NODE_CPUS-1)
+	True
+
+	# Exception on too large input index
+	>>> AffinityMask(AffinityMask.CPUS // AffinityMask.NODES, False, sequential=False)(100000)
+	Traceback (most recent call last):
+	IndexError
+
+	# Exception on float afnstep
+	>>> AffinityMask(2.1, False)(1)
+	Traceback (most recent call last):
+	AssertionError
+
+	# Exception on afnstep not multiple to the CORE_THREADS
+	>>> AffinityMask(AffinityMask.CORE_THREADS + 1, False)(0)
+	Traceback (most recent call last):
+	AssertionError
 	"""
-	if crossnodes:
-		return iafn + iafn // nodes * nodes * (corethreads - 1)
-	return iafn * corethreads
+	CPUS = cpu_count()  # Logical CPUs: all hardware threads in all physical CPU cores in all physical CPUs in all NUMA nodes
+	NODES = cpunodes()  # NUMA nodes (typically, physical CPUs)
+	CORE_THREADS = cpucorethreads()  # Hardware threads per CPU core
+	SEQUENTIAL = cpusequential()  # Sequential enumeration of the logical CPUs or crossnode enumeration
+
+	CORES = CPUS//CORE_THREADS  # Total number of physical CPU cores
+	NODE_CPUS = CPUS//NODES  # Logical CPUs per each NUMA node
+	#CPU_CORES = NODE_CPUS//CORE_THREADS  # The number of physical cores in each CPU
+	if NODE_CPUS*NODES != CPUS or CORES*CORE_THREADS != CPUS:
+		raise ValueError('Only uniform NUMA nodes are supported:'
+			'  CORE_THREADS: {}, CORES: {}, NODE_CPUS: {}, NODES: {}, CPUS: {}'
+			.format(CORE_THREADS, CORES, NODE_CPUS, NODES, CPUS))
+
+	def __init__(self, afnstep, first=True, sequential=SEQUENTIAL):
+		"""
+		afnstep  - affinity step, integer if applied, allowed values:
+			1, CORE_THREADS * n,  n E {1, 2, ... CPUS / (NODES * CORE_THREADS)}
+
+			Used to bind worker processes to the logical CPUs to have warm cache and,
+			optionally, maximize cache size per a worker process.
+			Groups of logical CPUs are selected in a way to maximize the cache locality:
+			the single physical CPU is used taking all it's hardware threads in each core
+			before allocating another core.
+
+			Typical Values:
+			1  - maximize parallelization for the single-threaded apps
+				(the number of worker processes = logical CPUs)
+			CORE_THREADS  - maximize the dedicated CPU cache L1/2
+				(the number of worker processes = physical CPU cores)
+			CPUS / NODES  - maximize the dedicated CPU cache L3
+				(the number of worker processes = physical CPUs)
+		first  - mask the first logical unit or all units in the selected group.
+			One unit per the group maximizes the dedicated CPU cache for the
+			single-threaded worker, all units should be used for the multi-threaded
+			apps.
+		sequential  - sequential or cross nodes enumeration of the CPUs in the NUMA nodes:
+			None  - undefined, interpreted as crossnodes (the most widely used on servers)
+			False  - crossnodes
+			True  - sequential
+
+			For two hardware threads per a physical CPU core, where secondary hw threads
+			are taken in brackets:
+			Crossnodes enumeration, often used for the server CPUs
+			NUMA node0 CPU(s):     0,2(,4,6)
+			NUMA node1 CPU(s):     1,3(,5,7)
+			Sequential enumeration, often used for the laptop CPUs
+			NUMA node0 CPU(s):     0(,1),2(,3)
+			NUMA node1 CPU(s):     4(,5),6(,7)
+		"""
+		assert ((afnstep == 1 or (afnstep >= self.CORE_THREADS
+			and not afnstep % self.CORE_THREADS)) and isinstance(first, bool)
+			and (sequential is None or isinstance(sequential, bool))
+			), ('Arguments are invalid:  afnstep: {}, first: {}, sequential: {}'
+			.format(afnstep, first, sequential))
+		self.afnstep = int(afnstep)  # To convert 2.0 to 2
+		self.first = first
+		self.sequential = sequential
+
+
+	def __call__(self, i):
+		"""Evaluate CPUs affinity mask for the specified group indes of size afnstep
+
+		i  - index of the selecting group of logical CPUs
+		return  - mask of the first or all logical CPUs
+		"""
+		if i < 0 or (i + 1) * self.afnstep > self.CPUS:
+			raise IndexError('Index is out of range for the given affinity step:'
+				'  i: {}, afnstep: {}, cpus: {} vs {} (afnstep * (i+1))'
+				.format(i, self.afnstep, self.CPUS, i * self.afnstep))
+
+		inode = i % self.NODES  # Index of the NUMA node
+		if self.afnstep == 1:
+			if self.sequential:
+				# 1. Identify shift inside the NUMA node traversing over the same number of
+				# the hardware threads in all physical cores starting from the first hw thread
+				indcpu = i//self.NODES * self.CORE_THREADS  # Traverse with step = CORE_THREADS
+				indcpu = indcpu%self.NODE_CPUS + indcpu//self.NODE_CPUS  # Normalize to fit the actual indices
+				# 2. Identify index of the NUMA node and conver it to the number of logical CPUs
+				#indcpus = inode * self.NODE_CPUS
+				i = inode*self.NODE_CPUS + indcpu
+				assert i < self.CPUS, 'Index out of range: {} >= {}'.format(i, self.CPUS)
+			cpumask = str(i)
+		else:  # afnstep = CORE_THREADS * n,  n E N
+			if self.sequential:
+				# NUMA node0 CPU(s):     0(,1),2(,3)
+				# NUMA node1 CPU(s):     4(,5),6(,7)
+
+				# 1. Identify index of the NUMA node and conver it to the number of logical CPUs
+				#indcpus = inode * self.NODE_CPUS
+				i = (inode*self.NODE_CPUS
+					# 2. Identify shift inside the NUMA node traversing over the same number of
+					# the hardware threads in all physical cores starting from the first hw thread
+					+ i//self.NODES * self.afnstep)
+				assert i + self.afnstep <= self.CPUS, ('Mask out of range: {} > {}'
+					.format(i + self.afnstep, self.CPUS))
+				if self.first:
+					cpumask = str(i)
+				else:
+					cpumask = '{}-{}'.format(i, i + self.afnstep - 1)
+			else:
+				# NUMA node0 CPU(s):     0,2,4,6,8,10,12,14	(16,18,20,22,24,26,28,30  - 2nd hw treads)
+				# NUMA node1 CPU(s):     1,3,5,7,9,11,13,15	(17,19,21,23,25,27,29,31  - 2nd hw treads)
+				# afnstep <= 1 or hwthreads = 1  -> direct mapping
+				# afnstep = 2 [th=2]  -> 0,16; 1,17; 2,18; ...
+				#
+				# NUMA node0 CPU(s):     0,3,6,9	(12,15,18,21  - 2nd hw treads)
+				# NUMA node1 CPU(s):     1,4,7,10	(13,16,19,22  - 2nd hw treads)
+				# NUMA node2 CPU(s):     2,5,8,11	(14,17,20,23  - 2nd hw treads)
+				# afnstep = 3 [th=2]  -> 0,12,3; 1,13,4; ... 15,6,18;
+				#
+				# NUMA node0 CPU(s):     0,3,6,9	(12,15,18,21  24... ...45)
+				# NUMA node1 CPU(s):     1,4,7,10	(13,16,19,22  25... ...46)
+				# NUMA node2 CPU(s):     2,5,8,11	(14,17,20,23  26... ...47)
+				# afnstep = 3 [th=4]  -> 0,12,24,36; ... 4,16,28,40; ...
+				ncores = self.afnstep//self.CORE_THREADS  # The number of physical cores to dedicate
+				# Index of the logical CPU (1st hw thread of the physical core) with shift of the NUMA node
+				indcpu = i//self.NODES * self.NODES * ncores + inode
+				cpus = []
+				for hwt in range(self.CORE_THREADS):
+					# Index of the logical cpu:
+					# innode + ihwthread_shift
+					i = indcpu + hwt * self.CORES
+					cpus.append(str(i) if ncores <= 1 else '{}-{}'.format(i, i + ncores-1))
+					if self.first:
+						break
+				assert i + ncores <= self.CPUS, (
+					'Index is out of range for the given affinity step:'
+					'  i: {}, afnstep: {}, ncores: {}, imapped: {}, CPUS: {}'
+					.format(i, self.afnstep, ncores, i + ncores, self.CPUS))
+				cpumask = ','.join(cpus)
+		return cpumask
 
 
 class ExecPool(object):
-	'''Execution Pool of workers for jobs
+	"""Execution Pool of workers for jobs
 
 	A worker in the pool executes only the one job, a new worker is created for
 	each subsequent job.
-	'''
-	memlow = _RAM_SIZE - _RAM_LIMIT  # Low RAM(RSS) memory condition
-	assert memlow >= 0, '_RAM_SIZE should be >= _RAM_LIMIT'
-	jmemtrr = 1.5  # Memory threshold ratio, multiplier for the job to have a gap and reduce the number of reschedulings, reccommended value: 1.2 .. 1.6
-	assert jmemtrr >= 1, 'Memory threshold retio should be >= 1'
+	"""
+	_CPUS = cpu_count()  # The number of logical CPUs in the system
+	_KILLDELAY = 3  # 3 cycles of self.latency, termination wait time
+	_MEMLOW = _RAM_SIZE - _RAM_LIMIT  # Low RAM(RSS) memory condition
+	assert _MEMLOW >= 0, '_RAM_SIZE should be >= _RAM_LIMIT'
+	# Memory threshold ratio, multiplier for the job to have a gap and
+	# reduce the number of reschedulings, reccommended value: 1.2 .. 1.6
+	_JMEMTRR = 1.5
+	assert _JMEMTRR >= 1, 'Memory threshold retio should be >= 1'
 
-	def __init__(self, wksnum=cpu_count(), afnstep=None, memlimit=0., latency=0., name=None):
+	def __init__(self, wksnum=max(_CPUS-1, 1), afnmask=None, memlimit=0., latency=0., name=None):  # afnstep=None
 		"""Execution Pool constructor
 
 		wksnum  - number of resident worker processes, >=1. The reasonable value is
-			<= NUMA nodes * node CPUs, which is typically returned by cpu_count(),
+			<= logical CPUs (returned by cpu_count()) = NUMA nodes * node CPUs,
 			where node CPUs = CPU cores * HW treads per core.
-			To guarantee minimal average RAM per a process, for example 2.5 Gb:
+			The recomended value is max(cpu_count() - 1, 1) to leave one logical
+			CPU for the benchmarking framework and OS applications.
+
+			To guarantee minimal average RAM per a process, for example 2.5 Gb
+			without _LIMIT_WORKERS_RAM flag (not using psutil for the dynamic
+			control of memory consumption):
 				wksnum = min(cpu_count(), max(ramfracs(2.5), 1))
-		afnstep  - affinity step, integer if applied. Used to bind worker to the
-			processing units to have warm cache for single thread workers.
-			Typical values:
-				None  - do not use affinity at all (recommended for multi-threaded workers),
-				1  - maximize parallelization (the number of worker processes = CPU units),
-				cpucorethreads()  - maximize the dedicated CPU cache (the number of
-					worker processes = CPU cores = CPU units / hardware treads per CPU core).
-			NOTE: specification of the afnstep might cause reduction of the workers number.
+		afnmask  - affinity mask for the worker processes, AffinityMask
+			None if not applied
 		memlimit  - limit total amount of Memory (automatically reduced to
 			the amount of physical RAM if the larger value is specified) in gigabytes
 			that can be used by worker processes to provide in-RAM computations, >= 0.
@@ -566,28 +776,34 @@ class ExecPool(object):
 				- 0 means unlimited (some jobs might be [partially] swapped)
 				- value > 0 is automatically limited with total physical RAM to process
 					jobs in RAM almost without the swapping
-		latency  - approximate minimal latency of the workers monitoring in sec, float >= 0.
-			0 means automatically defined value (recommended, typically 2-3 sec).
+		latency  - approximate minimal latency of the workers monitoring in sec, float >= 0;
+			0 means automatically defined value (recommended, typically 2-3 sec)
 		name  - name of the execution pool to distinuguish traces from subsequently
 			created execution pools (only on creation or termination)
+
+		Internal attributes:
+		alive  - whether the execution pool is alive or terminating, bool.
+			Should be reseted to True on resuse after the termination.
 		"""
-		assert wksnum >= 1 and (afnstep is None or afnstep <= cpu_count()
-			) and memlimit >= 0 and latency >= 0, 'Input parameters are invalid'
+		assert (wksnum >= 1 and (afnmask is None or isinstance(afnmask, AffinityMask))
+			and memlimit >= 0 and latency >= 0 and (name is None or isinstance(name, str))
+			), ('Arguments are invalid:  wksnum: {}, afnmask: {}, memlimit: {}'
+			', latency: {}, name: {}'.format(wksnum, afnmask, memlimit, latency, name))
 		self.name = name
 
 		# Verify and update wksnum and afnstep if required
-		if afnstep:
+		if afnmask:
 			# Check whether _AFFINITYBIN exists in the system
 			try:
 				subprocess.call([_AFFINITYBIN, '-V'])
-				if afnstep > cpu_count() / wksnum:
+				if afnmask.afnstep * wksnum > afnmask.CPUS:
 					print('WARNING{}, the number of worker processes is reduced'
 						' ({wlim0} -> {wlim} to satisfy the affinity step'
 						.format('' if not self.name else ' ' + self.name
-						,wlim0=wksnum, wlim=cpu_count() // afnstep), file=sys.stderr)
-					wksnum = cpu_count() // afnstep
+						,wlim0=wksnum, wlim=afnmask.CPUS//afnmask.afnstep), file=sys.stderr)
+					wksnum = afnmask.CPUS // afnmask.afnstep
 			except OSError as err:
-				afnstep = None
+				afnmask = None
 				print('WARNING{}, {afnbin} does not exists in the system to fix affinity: {err}'
 					.format('' if not self.name else ' ' + self.name
 					, afnbin=_AFFINITYBIN, err=err), file=sys.stderr)
@@ -596,26 +812,28 @@ class ExecPool(object):
 		self._jobs = collections.deque()  # Scheduled jobs that have not been started yet:  deque(job)
 		self._tstart = None  # Start time of the execution of the first task
 		# Affinity scheduling attributes
-		self._afnstep = afnstep  # Affinity step for each worker process
-		self._affinity = None if not self._afnstep else [None]*self._wkslim
-		assert self._wkslim * (self._afnstep if self._afnstep else 1) <= cpu_count(), (
-			'_wkslim or _afnstep is too large')
-		self._numanodes = cpunodes()  # Defines sequence of the CPU ids on affinity table mapping for the crossnodes enumeration
+		self._afnmask = afnmask  # Affinity mask functor
+		self._affinity = None if not self._afnmask else [None]*self._wkslim
+		assert (self._wkslim * (1 if not self._afnmask else self._afnmask.afnstep)
+			<= self._CPUS), ('_wkslim or afnstep is too large:'
+			'  _wkslim: {}, afnstep: {}, CPUs: {}'.format(self._wkslim
+			, 1 if not self._afnmask else self._afnmask.afnstep, self._CPUS))
 		# Execution rescheduling attributes
-		self._memlimit =  0. if not _LIMIT_WORKERS_RAM else max(0, min(memlimit, _RAM_LIMIT))  # in Gb
-		self._latency = latency if latency else 1 + (not not self._memlimit)  # Seconds of sleep on pooling
+		self.memlimit = 0. if not _LIMIT_WORKERS_RAM else max(0, min(memlimit, _RAM_LIMIT))  # in Gb
+		self.latency = latency if latency else 1 + (self.memlimit != 0.)  # Seconds of sleep on pooling
 		# Predefined private attributes
-		self._killCount = 3  # 3 cycles of self._latency, termination wait time
 		self.__termlock = Lock()  # Lock for the __terminate() to avoid simultaneous call by the signal and normal execution flow
+		self.alive = True  # The execution pool is in the working state (has not been terminated)
 
-		if self._memlimit and self._memlimit != memlimit:
+		if self.memlimit and self.memlimit != memlimit:
 			print('WARNING{}, total memory limit is reduced to guarantee the in-RAM'
 				' computations: {:.6f} -> {:.6f} Gb'.format('' if not self.name else ' ' + self.name
-				, memlimit, self._memlimit), file=sys.stderr)
+				, memlimit, self.memlimit), file=sys.stderr)
 
 
 	def __enter__(self):
 		"""Context entrence"""
+		self.alive = True
 		return self
 
 
@@ -653,11 +871,12 @@ class ExecPool(object):
 
 	def __terminate(self):
 		"""Force termination of the pool"""
-		if not self.__termlock.acquire(block=False) or not (self._workers or self._jobs):
+		acqlock = self.__termlock.acquire(block=False)
+		self.alive = False  # The execution pool is terminating
+		if not acqlock or not (self._workers or self._jobs):
+			if acqlock:
+				self.__termlock.release()
 			return
-		# # Note: On python3 del might already release the objects
-		# if not hasattr(self, '_jobs') or not hasattr(self, '_workers') or (not self._jobs and not self._workers):
-		# 	return
 		print('WARNING{}, terminating the execution pool with {} nonstarted jobs and {} workers'
 			', executed {} h {} m {:.4f} s, callstack fragment:'
 			.format('' if not self.name else ' ' + self.name, len(self._jobs), len(self._workers)
@@ -677,14 +896,14 @@ class ExecPool(object):
 		# Wait a few sec for the successful process termitaion before killing it
 		i = 0
 		active = True
-		while active and i < self._killCount:
+		while active and i < self._KILLDELAY:
 			i += 1
 			active = False
 			for job in self._workers:
 				if job.proc.poll() is None:
 					active = True
 					break
-			time.sleep(self._latency)
+			time.sleep(self.latency)
 		# Kill nonterminated processes
 		if active:
 			for job in self._workers:
@@ -696,6 +915,8 @@ class ExecPool(object):
 			self.__clearAffinity(job)
 			job.complete(False)
 		self._workers.clear()
+		## Set _wkslim to 0 to not start any jobs
+		#self._wkslim = 0  # ATTENTION: reset of the _wkslim can break silent subsequent reuse of the execution pool
 		self.__termlock.release()
 
 
@@ -717,7 +938,7 @@ class ExecPool(object):
 		wksnum = len(self._workers)  # The current number of worker processes
 		assert ((job.terminates or job.tstart is None) and (priority or self._workers)
 			# and _LIMIT_WORKERS_RAM and not job in self._workers and not job in self._jobs  # Note: self._jobs scanning is time-consuming
-			and (not self._memlimit or job.mem < self._memlimit)  # and wksnum < self._wkslim
+			and (not self.memlimit or job.mem < self.memlimit)  # and wksnum < self._wkslim
 			and (job.tstart is None) == (job.tstop is None) and (not job.timeout
 			or (True if job.tstart is None else job.tstop - job.tstart < job.timeout)
 			) and (not self._jobs or self._jobs[0].wkslim >= self._jobs[-1].wkslim)), (
@@ -727,7 +948,7 @@ class ExecPool(object):
 			job.name, job.terminates, job.tstart is not None, job.wkslim, self._wkslim
 			, priority, wksnum, len(self._jobs)
 			, ', '.join(['#{} {}: {}'.format(ij, j.name, j.wkslim) for ij, j in enumerate(self._jobs)])
-			, 0 if not self._memlimit else job.mem, self._memlimit
+			, 0 if not self.memlimit else job.mem, self.memlimit
 			, 0 if job.tstop is None else job.tstop - job.tstart, job.tstart, job.tstop, job.timeout))
 		# Postpone only the goup-terminated jobs by memory limit, not a single worker that exceeds the (time/memory) constraints
 		# (except the explicitly requirested restart via ontimeout, which results the priority rescheduling)
@@ -788,12 +1009,13 @@ class ExecPool(object):
 		async  - async execution or wait intill execution completed
 		return  - 0 on successful execution, proc.returncode otherwise
 		"""
-		assert isinstance(job, Job), 'Job type is invalid'
-		assert job.tstop is None or job.terminates, 'The starting job "{}" is expected to be non-completed'.format(job.name)
+		assert isinstance(job, Job), 'Job type is invalid: {}'.format(job)
+		assert job.tstop is None or job.terminates, ('The starting job "{}" is'
+			' expected to be non-completed'.format(job.name))
 		wksnum = len(self._workers)  # The current number of worker processes
-		if async and wksnum > self._wkslim:
-			raise AssertionError('Free workers must be available ({} busy workers of {})'
-				.format(wksnum, self._wkslim))
+		if (async and wksnum > self._wkslim) or not self._wkslim or not self.alive:
+			raise AssertionError('Free workers should be available ({} busy workers of {}), alive: {}'
+				.format(wksnum, self._wkslim, self.alive))
 		#if _DEBUG_TRACE:
 		print('Starting "{}"{}, workers: {} / {}...'.format(job.name, '' if async else ' in sync mode'
 			, wksnum, self._wkslim), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
@@ -813,7 +1035,8 @@ class ExecPool(object):
 			except Exception as err:
 				print('ERROR in onstart() callback of "{}": {}. The job has not been started: {}'
 					.format(job.name, err, traceback.format_exc()), file=sys.stderr)
-				return -1
+				errno = getattr(err, 'errno', None)
+				return -1 if errno is None else errno.errorcode
 		# Consider custom output channels for the job
 		fstdout = None
 		fstderr = None
@@ -853,16 +1076,19 @@ class ExecPool(object):
 				# Consider CPU affinity
 				iafn = -1 if not self._affinity or job._omitafn else self._affinity.index(None)  # Index in the affinity table to bind process to the CPU/core
 				if iafn >= 0:
-					job.args = [_AFFINITYBIN, '-c', str(afnicpu(iafn, self._afnstep, self._numanodes))] + list(job.args)
+					job.args = [_AFFINITYBIN, '-c', self._afnmask(iafn)] + list(job.args)
 				if _DEBUG_TRACE >= 2:
 					print('  Opening proc for "{}" with:\n\tjob.args: {},\n\tcwd: {}'.format(job.name
 						, ' '.join(job.args), job.workdir), file=sys.stderr)
-				job.proc = subprocess.Popen(job.args, bufsize=-1, cwd=job.workdir, stdout=fstdout, stderr=fstderr)  # bufsize=-1 - use system default IO buffer size
+				if self.alive:
+					job.proc = subprocess.Popen(job.args, bufsize=-1, cwd=job.workdir, stdout=fstdout, stderr=fstderr)  # bufsize=-1 - use system default IO buffer size
+				else:
+					raise EnvironmentError((errno.EINTR, 'The execution pool has been terminated'))  # errno.ERESTART
 				if iafn >= 0:
 					self._affinity[iafn] = job.proc.pid
-					print('"{jname}" #{pid}, affinity {afn} (CPU #{icpu})'
-						.format(jname=job.name, pid=job.proc.pid, afn=iafn
-						, icpu=afnicpu(iafn, self._afnstep, self._numanodes)))  # Note: write to log, not to the stderr
+					print('"{jname}" #{pid}, iafn: {iafn} (CPUs #: {icpus})'
+						.format(jname=job.name, pid=job.proc.pid, iafn=iafn
+						, icpus=self._afnmask(iafn)))  # Note: write to log, not to the stderr
 				# Wait a little bit to start the process besides it's scheduling
 				if job.startdelay > 0:
 					time.sleep(job.startdelay)
@@ -899,7 +1125,7 @@ class ExecPool(object):
 		memall = 0.  # Consuming memory by workers
 		jtorigs = {}  # Timeout caused terminating origins (jobs) for the chained termination, {category: lightweightest_job}
 		jmorigs = {}  # Memory limit caused terminating origins (jobs) for the chained termination, {category: smallest_job}
-		for job in self._workers:  # .items()  Note: the number of _workers is small
+		for job in self._workers:
 			if job.proc.poll() is not None:  # Not None means the process has been terminated / completed
 				completed.add(job)
 				continue
@@ -907,14 +1133,14 @@ class ExecPool(object):
 			exectime = time.time() - job.tstart
 			# Update memory statistics (if required) and skip jobs that do not exceed the specified time/memory constraints
 			if not job.terminates and (not job.timeout or exectime < job.timeout
-			) and (not self._memlimit or job.mem < self._memlimit):
+			) and (not self.memlimit or job.mem < self.memlimit):
 				# Update memory consumption statistics if applicable
-				if self._memlimit:
+				if self.memlimit:
 					# NOTE: Evaluate memory consuption for the heaviest process in the process tree
 					# of the origin job process to allow additional intermediate apps for the evaluations like:
 					# ./exectime ./clsalg ca_prm1 ca_prm2
 					job._updateMem()  # Consider mem consumption of the past runs if any
-					if job.mem < self._memlimit:
+					if job.mem < self.memlimit:
 						memall += job.mem  # Consider mem consumption of past runs if any
 						#if _DEBUG_TRACE >= 3:
 						#	print('  "{}" consumes {:.4f} Gb, memall: {:.4f} Gb'.format(job.name, job.mem, memall), file=sys.stderr)
@@ -935,7 +1161,7 @@ class ExecPool(object):
 					jorg = jtorigs.get(job.category, None)
 					if jorg is None or job.size * job.slowdown < jorg.size * jorg.slowdown:
 						jtorigs[job.category] = job
-				elif self._memlimit and job.mem >= self._memlimit:
+				elif self.memlimit and job.mem >= self.memlimit:
 					# Memory limit constraints
 					jorg = jmorigs.get(job.category, None)
 					if jorg is None or job.size < jorg.size:
@@ -944,7 +1170,7 @@ class ExecPool(object):
 				# it should be reschedulted, but not removed completely
 
 			# Force killing when the termination does not work
-			if job.terminates >= self._killCount:
+			if job.terminates >= self._KILLDELAY:
 				job.proc.kill()
 				completed.add(job)
 				if _DEBUG_TRACE:  # Note: anyway completing terminated jobs are traced
@@ -953,8 +1179,8 @@ class ExecPool(object):
 						' consuming {:.4f} Gb with timeout of {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 						.format(job.name, job.proc.pid
 						, 'timeout' if job.timeout and exectime >= job.timeout else (
-							('' if job.mem >= self._memlimit else 'group ') + 'memory limit')
-						, 0 if not self._memlimit else job.mem
+							('' if job.mem >= self.memlimit else 'group ') + 'memory limit')
+						, 0 if not self.memlimit else job.mem
 						, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			else:
 				job.proc.terminate()  # Schedule the worker completion to the next revise
@@ -1044,13 +1270,13 @@ class ExecPool(object):
 		# self._workers = [w for w in self._workers if w not in completed]
 
 		# Check memory limitation fulfilling for all remained processes
-		if self._memlimit:
+		if self.memlimit:
 			memfree = inGigabytes(psutil.virtual_memory().available)  # Amount of free RAM (RSS) in Gb; skip it if memlimit is not requested
-		if self._memlimit and (memall >= self._memlimit or memfree <= self.memlow):  # Jobs should use less memory than the limit
+		if self.memlimit and (memall >= self.memlimit or memfree <= self._MEMLOW):  # Jobs should use less memory than the limit
 			# Terminate the largest workers and reschedule jobs or reduce the workers number
 			wksnum = len(self._workers)
 			# Overused memory with some gap (to reschedule less) to be released by worker(s) termination
-			memov = memall - self._memlimit * (wksnum / (wksnum + 1.)) if memall >= self._memlimit else (self.memlow + self._memlimit / (wksnum + 1.))
+			memov = memall - self.memlimit * (wksnum / (wksnum + 1.)) if memall >= self.memlimit else (self._MEMLOW + self.memlimit / (wksnum + 1.))
 			pjobs = set()  # The heaviest jobs to be postponed to satisfy the memory limit constraint
 			# Remove the heaviest workers until the memory limit constraints are sutisfied
 			hws = []  # Heavy workers
@@ -1090,7 +1316,7 @@ class ExecPool(object):
 				# Upate wkslim
 				job.wkslim = wkslim
 			# Update amount of estimated memall
-			memall = self._memlimit + memov  # Note: memov is negative here
+			memall = self.memlimit + memov  # Note: memov is negative here
 
 		# Process completed (and terminated) jobs: execute callbacks and remove the workers
 		for job in completed:
@@ -1104,19 +1330,19 @@ class ExecPool(object):
 				', chtermtime: {}, consumes {:.4f} / {:.4f} Gb, timeout {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 				.format(job.name, job.proc.pid
 				, 'timeout' if job.timeout and exectime >= job.timeout else (
-					('' if job.mem >= self._memlimit else 'group ') + 'memory limit')
+					('' if job.mem >= self.memlimit else 'group ') + 'memory limit')
 				, None if not _CHAINED_CONSTRAINTS else job.chtermtime
-				, 0 if not self._memlimit else job.mem, self._memlimit
+				, 0 if not self.memlimit else job.mem, self.memlimit
 				, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			# Skip memory limit and timeout violating jobs that do not require autorestart (applicable only for the timeout)
 			if (exectime >= job.timeout and not job.ontimeout) or (_CHAINED_CONSTRAINTS
-			and job.chtermtime is not None) or (self._memlimit and job.mem >= self._memlimit):
+			and job.chtermtime is not None) or (self.memlimit and job.mem >= self.memlimit):
 				continue
 			# Reschedule job having the group violation of the memory limit
 			# if timeout is not violated or restart on timeout if requested
 			# Note: memall to not postpone the single existing job
-			if self._memlimit and ((memall and memall + job.mem * self.jmemtrr >= self._memlimit)
-			or memfree - job.mem * self.jmemtrr <= self.memlow) and (
+			if self.memlimit and ((memall and memall + job.mem * self._JMEMTRR >= self.memlimit)
+			or memfree - job.mem * self._JMEMTRR <= self._MEMLOW) and (
 			not job.timeout or exectime < job.timeout or job.ontimeout):
 				self.__postpone(job)
 			# Restart the job on timeout if requested
@@ -1125,12 +1351,12 @@ class ExecPool(object):
 				# Note: earlier executed job might not fit into the RAM now because of the inreasing mem consumption by the workers
 				#if _DEBUG_TRACE >= 3:
 				#	print('  "{}" is being rescheduled, workers: {} / {}, estimated mem: {:.4f} / {:.4f} Gb'
-				#		.format(job.name, len(self._workers), self._wkslim, memall + job.mem, self._memlimit)
+				#		.format(job.name, len(self._workers), self._wkslim, memall + job.mem, self.memlimit)
 				#		, file=sys.stderr)
 				assert len(self._workers) < self._wkslim, 'Completed jobs formed from the reduced workers'
-				#assert not self._memlimit or memall + job.mem * self.jmemtrr < self._memlimit, (
+				#assert not self.memlimit or memall + job.mem * self._JMEMTRR < self.memlimit, (
 				#	'Group exceeding of the memory limit should be already processed')
-				if not self.__start(job) and self._memlimit:
+				if not self.__start(job) and self.memlimit:
 					memall += job.mem  # Reuse .mem from the previous run if exists
 				# Note: do not call complete() on failed restart
 			else:
@@ -1146,24 +1372,27 @@ class ExecPool(object):
 		while self._jobs and len(self._workers) < self._wkslim:
 			#if _DEBUG_TRACE >= 3:
 			#	print('  "{}" (expected totmem: {:.4f} / {:.4f} Gb) is being resheduled, {} nonstarted jobs: {}'
-			#		.format(self._jobs[0].name, 0 if not self._memlimit else memall + job.mem, self._memlimit
+			#		.format(self._jobs[0].name, 0 if not self.memlimit else memall + job.mem, self.memlimit
 			#		, len(self._jobs), ', '.join([j.name for j in self._jobs])), file=sys.stderr)
 			job = self._jobs.popleft()
 			# Jobs should use less memory than the limit, a worker process violating (time/memory) constaints are already filtered out
 			# Note: memall to not postpone the single existing job
-			if self._memlimit:
-				jmemx = (job.mem if job.mem else memall / (1 + len(self._workers))) * self.jmemtrr  # Extended estimated job mem
-			if self._memlimit and ((memall and memall + jmemx >= self._memlimit
+			if self.memlimit:
+				jmemx = (job.mem if job.mem else memall / (1 + len(self._workers))) * self._JMEMTRR  # Extended estimated job mem
+			if self.memlimit and ((memall and memall + jmemx >= self.memlimit
 			# Note: omit the low memory condition for a single worker, otherwise the pool can't be executed
-			) or (memfree - jmemx <= self.memlow and self._workers)):
+			) or (memfree - jmemx <= self._MEMLOW and self._workers)):
 				# Note: only restarted jobs have defined mem
 				# Postpone the job updating it's workers limit
-				assert job.mem < self._memlimit, 'The workers exceeding memory constraints were already filtered out'
+				assert job.mem < self.memlimit, 'The workers exceeding memory constraints were already filtered out'
 				self.__postpone(job)
 				break
-			elif not self.__start(job) and self._memlimit:
+			elif not self.__start(job) and self.memlimit:
 				memall += job.mem  # Reuse .mem from the previous run if exists
-		assert (self._workers or not self._jobs) and self._wkslim, 'Worker processes should always exist if nonstarted jobs are remained'
+		assert (self._workers or not self._jobs) and self._wkslim, (
+			'Worker processes should always exist if nonstarted jobs are remained:'
+			'  workers: {}, wkslim: {}, jobs: {}'.format(len(self._workers)
+			, self._wkslim, len(self._jobs)))
 
 
 	def execute(self, job, async=True):
@@ -1174,39 +1403,43 @@ class ExecPool(object):
 		  NOTE: sync tasks are started at once
 		return  - 0 on successful execution, process return code otherwise
 		"""
-		assert isinstance(job, Job), 'job type is invalid'
-		assert len(self._workers) <= self._wkslim and self._wkslim >= 1, 'Number of workers exceeds the limit'
-		assert job.name, 'Job parameters must be defined'  #  and job.workdir and job.args
+		assert isinstance(job, Job) and job.name, (
+			'Job type is invalid or the instance is not initialized: {}'.format(job))
+		# Note: _wkslim an be 0 only on/after the termination
+		assert self.alive and len(self._workers) <= self._wkslim and self._wkslim >= 1, (
+			'Number of workers exceeds the limit or the pool has been terminated:'
+			'  workers: {}, wkslim: {}, alive: {}'
+			.format(len(self._workers), self._wkslim, self.alive))
 
 		if _DEBUG_TRACE:
 			print('Scheduling the job "{}" with timeout {}'.format(job.name, job.timeout))
 		errcode = 0
 		# Initialize the [latest] value of job workers limit
-		if self._memlimit:
+		if self.memlimit:
 			job.wkslim = self._wkslim
 		if async:
 			# Start the execution timer
 			if self._tstart is None:
 				self._tstart = time.time()
 			# Evaluate total memory consumed by the worker processes
-			if self._memlimit:
+			if self.memlimit:
 				memall = 0.
 				for wj in self._workers:
 					memall += wj.mem
 				memfree = inGigabytes(psutil.virtual_memory().available)  # Amount of free RAM (RSS) in Gb; skip it if memlimit is not requested
-				jmemx = (job.mem if job.mem else memall / (1 + len(self._workers))) * self.jmemtrr  # Extended estimated job mem
+				jmemx = (job.mem if job.mem else memall / (1 + len(self._workers))) * self._JMEMTRR  # Extended estimated job mem
 			# Schedule the job, postpone it if already nonstarted jobs exist or there are no any free workers
 			if self._jobs or len(self._workers) >= self._wkslim or (
-			self._memlimit and ((memall and memall + jmemx >= self._memlimit
+			self.memlimit and ((memall and memall + jmemx >= self.memlimit
 			# Note: omit the low memory condition for a single worker, otherwise the pool can't be executed
-			) or (memfree - jmemx <= self.memlow and self._workers))):
+			) or (memfree - jmemx <= self._MEMLOW and self._workers))):
 				if _DEBUG_TRACE >= 2:
 					print('  Postponing "{}", {} jobs, {} workers, {} wkslim'
 						', group memlim violation: {}, lowmem: {}'.format(job.name, len(self._jobs)
-						, len(self._workers), self._wkslim, self._memlimit and (memall and memall + (job.mem if job.mem else
-						memall / (1 + len(self._workers))) * self.jmemtrr >= self._memlimit)
-						, self._memlimit and (memfree - jmemx <= self.memlow and self._workers)))
-				if not self._memlimit or not self._jobs or self._jobs[-1].wkslim >= job.wkslim:
+						, len(self._workers), self._wkslim, self.memlimit and (memall and memall + (job.mem if job.mem else
+						memall / (1 + len(self._workers))) * self._JMEMTRR >= self.memlimit)
+						, self.memlimit and (memfree - jmemx <= self._MEMLOW and self._workers)))
+				if not self.memlimit or not self._jobs or self._jobs[-1].wkslim >= job.wkslim:
 					self._jobs.append(job)
 				else:
 					jnum = len(self._jobs)
@@ -1250,7 +1483,7 @@ class ExecPool(object):
 				print('WARNING, the execution pool is terminated on timeout', file=sys.stderr)
 				self.__terminate()
 				return False
-			time.sleep(self._latency)
+			time.sleep(self.latency)
 			self.__reviseWorkers()
 		self._tstart = None  # Be ready for the following execution
 
@@ -1258,582 +1491,11 @@ class ExecPool(object):
 		return True
 
 
-# Unit Tests -------------------------------------------------------------------
-import unittest
-from sys import executable as PYEXEC  # Full path to the current Python interpreter
-try:
-	from unittest import mock
-except ImportError:
-	try:
-		# Note: mock is not available under default Python2 / pypy installation
-		import mock
-	except ImportError:
-		mock = None  # Skip the unittests if the mock module is not installed
-
-
-# Accessory Funcitons
-def allocDelayProg(size, duration):
-	"""Python program as str that allocates object of the specified size
-	in Gigabytes and then waits for the specified time
-
-	size  - allocation size, bytes; None to skip allocation
-	duration  - execution duration, sec; None to skip the sleep
-
-	return  - Python program as str
-	"""
-	return """from __future__ import print_function, division  # Required for stderr output, must be the first import
-import sys
-import time
-import array
-
-if {size} is not None:
-	a = array.array('b', [0])
-	asize = sys.getsizeof(a)
-	# Note: allocate at least empty size, i.e. empty list
-	buffer = a * int(max({size} - asize + 1, 0))
-	#if _DEBUG_TRACE:
-	# print(''.join(('  allocDelayProg(), allocated ', str(sys.getsizeof(buffer))
-	# 	, ' bytes for ', str({duration}),' sec')), file=sys.stderr)
-if {duration} is not None:
-	time.sleep({duration})
-""".format(size=size, duration=duration)
-
-
-class TestExecPool(unittest.TestCase):
-	#global _DEBUG_TRACE
-	#_DEBUG_TRACE = True
-
-	_WPROCSMAX = max(cpu_count() - 1, 1)  # Maximal number of the worker processes, should be >= 1
-	_AFNSTEP = cpucorethreads()  # Affinity
-	# Note: 0.1 is specified just for the faster tests execution on the non-first run,
-	# generally at least 0.2 should be used
-	_latency = 0.1  # Approximate minimal latency of ExecPool in seconds
-	#_execpool = None
-
-
-	@classmethod
-	def terminationHandler(cls, signal=None, frame=None, terminate=True):
-		"""Signal termination handler
-
-		signal  - raised signal
-		frame  - origin stack frame
-		terminate  - whether to terminate the application
-		"""
-		#if signal == signal.SIGABRT:
-		#	os.killpg(os.getpgrp(), signal)
-		#	os.kill(os.getpid(), signal)
-
-		if cls._execpool:
-			del cls._execpool  # Destructors are caled later
-			# Define _execpool to avoid unnessary trash in the error log, which might
-			# be caused by the attempt of subsequent deletion on destruction
-			cls._execpool = None  # Note: otherwise _execpool becomes undefined
-		if terminate:
-			sys.exit()  # exit(0), 0 is the default exit code.
-
-
-	@classmethod
-	def setUpClass(cls):
-		cls._execpool = ExecPool(TestExecPool._WPROCSMAX, latency=TestExecPool._latency)  # , _AFNSTEP, memlimit
-
-
-	@classmethod
-	def tearDownClass(cls):
-		if cls._execpool:
-			del cls._execpool  # Destructors are caled later
-			# Define _execpool to avoid unnessary trash in the error log, which might
-			# be caused by the attempt of subsequent deletion on destruction
-			cls._execpool = None  # Note: otherwise _execpool becomes undefined
-
-
-	def setUp(self):
-		assert not self._execpool._workers, 'Worker processes should be empty for each new test case'
-
-
-	def tearDown(self):
-		assert not self._execpool._workers and not self._execpool._jobs, (
-			'All jobs should be completed in the end of each testcase (workers: "{}"; jobs: "{}")'
-			.format(', '.join([job.name for job in self._execpool._workers])
-			, ', '.join([job.name for job in self._execpool._jobs])))
-
-
-	def test_jobTimeoutSimple(self):
-		"""Verify termination of a single job by timeout and completion of independent another job"""
-		timeout = TestExecPool._latency * 4  # Note: should be larger than 3*_latency
-		worktime = max(1, TestExecPool._latency) + (timeout * 2) // 1  # Job work time
-		assert TestExecPool._latency * 3 < timeout < worktime, 'Testcase parameters validation failed'
-
-		tstart = time.time()
-		jterm = Job('j_timeout', args=('sleep', str(worktime)), timeout=timeout)
-		self._execpool.execute(jterm)
-		jcompl = Job('j_complete', args=('sleep', '0'), timeout=timeout)
-		self._execpool.execute(jcompl)
-		# Verify successful completion of the execution pool
-		self.assertTrue(self._execpool.join())
-		etime = time.time() - tstart  # Execution time
-		self.assertFalse(self._execpool._workers)  # Workers shuold be empty
-		# Verify termination time
-		self.assertLess(etime, worktime)
-		self.assertGreaterEqual(etime, timeout)
-		# Verify jobs timings
-		self.assertTrue(tstart < jterm.tstart <= jcompl.tstart <= jcompl.tstop < jterm.tstop)
-		self.assertLessEqual(jterm.tstop - jterm.tstart, etime)
-		self.assertGreaterEqual(jterm.tstop - jterm.tstart, timeout)
-
-
-	def test_epoolTimeoutSimple(self):
-		"""Validate:
-			1. Termination of a single job by timeout of the execution pool
-			2. Restart of the job by request on timeout and execution of the onstart()
-		"""
-		# Execution pool timeout
-		etimeout = TestExecPool._latency * 4  # Note: should be larger than 3*_latency
-		timeout = etimeout * 2  # Job timeout
-		worktime = max(1, TestExecPool._latency) + (timeout * 2) // 1  # Job work time
-		assert TestExecPool._latency * 3 < timeout < worktime, 'Testcase parameters validation failed'
-
-		tstart = time.time()
-		self._execpool.execute(Job('ep_timeout', args=('sleep', str(worktime)), timeout=timeout))
-
-		runsCount={'count': 0}
-		def updateruns(job):
-			job.params['count'] += 1
-
-		jrx = Job('ep_timeout_jrx', args=('sleep', str(worktime)), timeout=etimeout / 2, ontimeout=True
-			, params=runsCount, onstart=updateruns)  # Reexecuting job
-		self._execpool.execute(jrx)
-		# Verify termination of the execution pool
-		self.assertFalse(self._execpool.join(etimeout))
-		etime = time.time() - tstart  # Execution time
-		self.assertFalse(self._execpool._workers)  # Workers should be empty
-		# Verify termination time
-		self.assertLess(etime, worktime)
-		self.assertLess(etime, timeout)
-		self.assertGreaterEqual(etime, etimeout)
-		# Verify jrx runsCount and onstart execution
-		self.assertGreaterEqual(runsCount['count'], 2)
-
-
-	@unittest.skipUnless(_CHAINED_CONSTRAINTS, 'Requires _CHAINED_CONSTRAINTS')
-	def test_jobTimeoutChained(self):
-		"""Verify chained termination by timeout:
-			1. Termination of the related non-smaller job on termination of the main job
-			2. Not affecting smaller related jobs on termination of the main job
-			3. Not affecting non-related jobs (with another category)
-			4. Execution of the ondone() only on the graceful termination
-		"""
-		timeout = TestExecPool._latency * 5  # Note: should be larger than 3*_latency
-		worktime = max(1, TestExecPool._latency) + (timeout * 2) // 1  # Job work time
-		assert TestExecPool._latency * 3 < timeout < worktime, 'Testcase parameters validation failed'
-
-		tstart = time.time()
-		jm = Job('jmaster_timeout', args=('sleep', str(worktime))
-			, category='cat1', size=2, timeout=timeout)
-		self._execpool.execute(jm)
-		jss = Job('jslave_smaller', args=('sleep', str(worktime))
-			, category='cat1', size=1, ondone=mock.MagicMock())  # ondone() should be called for the completed job
-		self._execpool.execute(jss)
-		jsl = Job('jslave_larger', args=('sleep', str(worktime))
-			, category='cat1', size=3, ondone=mock.MagicMock())  # ondone() should be skipped for the terminated job
-		self._execpool.execute(jsl)
-		jso = Job('job_other', args=('sleep', str(worktime)), category='cat_other'
-			, ondone=mock.MagicMock())  # ondone() should be called for the completed job
-		self._execpool.execute(jso)
-		jsf = Job('job_failed', args=('sleep'), category='cat_f'
-			, ondone=mock.MagicMock())  # ondone() should be called for the completed job
-		self._execpool.execute(jsf)
-
-		# Execution pool timeout
-		etimeout = max(1, TestExecPool._latency) + worktime * 3 * (1 +
-			(len(self._execpool._workers) + len(self._execpool._jobs)) // self._execpool._wkslim)
-		assert etimeout > worktime, 'Additional testcase parameters are invalid'
-		print('jobTimeoutChained() started wth worktime: {}, etimeout: {}'.format(worktime, etimeout))
-
-		# Verify exec pool completion
-		self.assertTrue(self._execpool.join(etimeout))
-		etime = time.time() - tstart  # Execution time
-		# Verify timings
-		self.assertTrue(worktime <= etime < etimeout)
-		self.assertLess(jm.tstop - jm.tstart, worktime)
-		self.assertLess(jsl.tstop - jsl.tstart, worktime)
-		self.assertGreaterEqual(jsl.tstop - jm.tstart, timeout)  # Note: measure time from the master start
-		self.assertGreaterEqual(jss.tstop - jss.tstart, worktime)
-		self.assertLess(jsl.tstop - jsl.tstart, worktime)
-		self.assertGreaterEqual(jso.tstop - jso.tstart, worktime)
-		self.assertLess(jsf.tstop - jsl.tstart, worktime)
-		# Verify ondone() calls
-		jss.ondone.assert_called_once_with(jss)
-		jsl.ondone.assert_not_called()
-		jso.ondone.assert_called_once_with(jso)
-		jsf.ondone.assert_not_called()
-
-
-	@unittest.skipUnless(_LIMIT_WORKERS_RAM, 'Requires _LIMIT_WORKERS_RAM')
-	def test_jobMemlimSimple(self):
-		"""Verify memory violations caused by the single worker:
-		1. Absence of side effects on the remained jobs after bad_alloc
-			(exception of the external app) caused termination of the worker process
-		2. Termination of the worker process that exceeds limit of the dedicated memory
-		3. Termination of the worker process that exceeds limit of the dedicated memory
-	 		or had bad_alloc and termination of all related non-smaller jobs
-		"""
-		worktime = TestExecPool._latency * 5  # Note: should be larger than 3*_latency; 400 ms can be insufficient for the Python 3
-		timeout = worktime * 2  # Note: should be larger than 3*_latency
-		#etimeout = max(1, TestExecPool._latency) + (worktime * 2) // 1  # Job work time
-		etimeout = (max(1, TestExecPool._latency) + timeout) * 3  # Execution pool timeout; Note: *3 because nonstarted jobs exist here
-		assert TestExecPool._latency * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
-
-		# Note: we need another execution pool to set memlimit (10 Mb) there
-		epoolMem = 0.2  # Execution pool mem limit, Gb
-		msmall = 256  # Small amount of memory for a job, bytes
-		# Start not more than 3 simultaneous workers
-		with ExecPool(max(TestExecPool._WPROCSMAX, 3), latency=TestExecPool._latency, memlimit=epoolMem) as xpool:  # , _AFNSTEP, memlimit
-			tstart = time.time()
-
-			jmsDb = Job('jmem_small_ba', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
-				, category='cat1', size=9, timeout=timeout)
-			jmb = Job('jmem_badalloc', args=(PYEXEC, '-c', allocDelayProg(inBytes(_RAM_SIZE * 2), worktime))
-				, category='cat1', size=9, timeout=timeout)
-
-			jmvsize = 5  # Size of the task violating memory contraints
-			jmv = Job('jmem_violate', args=(PYEXEC, '-c', allocDelayProg(inBytes(epoolMem * 2), worktime))
-				, category='cat2', size=jmvsize, timeout=timeout)
-			jmsDvs = Job('jmem_small_v1', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
-				, category='cat2', size=jmvsize-1, timeout=timeout)
-			jms1 = Job('jmem_small_1', args=(PYEXEC, '-c', allocDelayProg(None, worktime))
-				, category='cat3', size=7, timeout=timeout)
-			jmsDvl1 = Job('jmem_large_v', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
-				, category='cat2', size=jmvsize, timeout=timeout)
-			jms2 = Job('jmem_small_2', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
-				, size=7, timeout=timeout)
-			jmsDvl2 = Job('jmem_small_v1', args=(PYEXEC, '-c', allocDelayProg(None, worktime))
-				, category='cat2', size=jmvsize*2, timeout=timeout)
-
-			xpool.execute(jmsDb)
-			xpool.execute(jmb)
-
-			xpool.execute(jmv)
-			xpool.execute(jmsDvs)
-			xpool.execute(jms1)
-			xpool.execute(jmsDvl1)
-			xpool.execute(jms2)
-			xpool.execute(jmsDvl2)
-
-			time.sleep(worktime / 3)  # Wait for the Job starting and memory allocation
-			# Verify exec pool completion before the timeout
-			self.assertTrue(xpool.join(etimeout))
-			etime = time.time() - tstart  # Execution time
-
-			# Verify timings
-			self.assertLess(etime, etimeout)
-			self.assertGreaterEqual(jmsDb.tstop - jmsDb.tstart, worktime)  # Note: internal errors in the external processes should not effect related jobs
-			self.assertTrue(jmb.proc.returncode)  # bad_alloc causes non zero termintion code
-			self.assertLess(jmb.tstop - jmb.tstart, worktime)  # Early termination cased by the bad_alloc (internal error in the external process)
-
-			self.assertLess(jmv.tstop - jmv.tstart, worktime)  # Early termination by the memory constraints violation
-			self.assertGreaterEqual(jmsDvs.tstop - jmsDvs.tstart, worktime)  # Smaller size of the ralted chained job to the vioated origin should not cause termination
-			self.assertGreaterEqual(jms1.tstop - jms1.tstart, worktime)  # Independent job should have graceful completion
-			self.assertFalse(jms1.proc.returncode)  # Errcode code is 0 on the gracefull completion
-			if _CHAINED_CONSTRAINTS:
-				self.assertIsNone(jmsDvl1.tstart)  # Postponed job should be terminated before being started by the chained relation on the memory-violating origin
-				self.assertIsNone(jmsDvl2.tstart)  # Postponed job should be terminated before being started by the chained relation on the memory-violating origin
-			#self.assertLess(jmsDvl1.tstop - jmsDvl1.tstart, worktime)  # Early termination by the chained retalion to the mem violated origin
-			self.assertGreaterEqual(jms2.tstop - jms2.tstart, worktime)  # Independent job should have graceful completion
-
-
-	@unittest.skipUnless(_LIMIT_WORKERS_RAM, 'Requires _LIMIT_WORKERS_RAM')
-	def test_jobMemlimGroupSimple(self):
-		"""Verify memory violations caused by group of workers but without chained jobs
-
-		Reduction of the number of worker processes when their total memory consumption
-		exceeds the dedicated limit and there are
-			1) either no any nonstarted jobs
-			2) or the nonstarted jobs were already rescheduled by the related worker (absence of chained constraints)
-		"""
-		worktime = TestExecPool._latency * 6  # Note: should be larger than 3*_latency
-		timeout = worktime * 2  # Note: should be larger than 3*_latency
-		#etimeout = max(1, TestExecPool._latency) + (worktime * 2) // 1  # Job work time
-		etimeout = (max(1, TestExecPool._latency) + timeout) * 3  # Execution pool timeout; Note: *3 because nonstarted jobs exist here nad postponed twice
-		assert TestExecPool._latency * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
-
-		# Note: we need another execution pool to set memlimit (10 Mb) there
-		epoolMem = 0.15  # Execution pool mem limit, Gb
-		msmall = inBytes(0.025)  # Small amount of memory for a job; Note: actual Python app consumes ~51 Mb for the allocated ~25 Mb
-		# Start not more than 3 simultaneous workers
-		with ExecPool(max(TestExecPool._WPROCSMAX, 3), latency=TestExecPool._latency, memlimit=epoolMem) as xpool:  # , _AFNSTEP, memlimit
-			tstart = time.time()
-			jgms1 = Job('jgroup_mem_small_1', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
-				, size=9, timeout=timeout, onstart=mock.MagicMock())
-			jgms2 = Job('jgroup_mem_small_2', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
-				, size=9, timeout=timeout)
-			jgms3 = Job('jgroup_mem_small_3', args=(PYEXEC, '-c', allocDelayProg(msmall*1.25, worktime))
-				, size=5, timeout=timeout, onstart=mock.MagicMock(), ondone=mock.MagicMock())
-			jgmsp1 = Job('jgroup_mem_small_postponed_1', args=(PYEXEC, '-c', allocDelayProg(msmall*0.85, worktime))
-				, size=4, timeout=timeout, onstart=mock.MagicMock())
-			jgmsp2 = Job('jgroup_mem_small_postponed_2_to', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
-				, timeout=worktime/2, ondone=mock.MagicMock())
-
-			xpool.execute(jgms1)
-			xpool.execute(jgms2)
-			xpool.execute(jgms3)
-			xpool.execute(jgmsp1)
-			xpool.execute(jgmsp2)
-
-			time.sleep(worktime / 3)  # Wait for the Job starting and memory allocation
-			# Verify exec pool completion before the timeout
-			self.assertTrue(xpool.join(etimeout))
-			# All jobs should be completed
-			etime = time.time() - tstart  # Execution time
-
-			# Verify timings, gracefull copletion of all jobs except the last one
-			self.assertLess(etime, etimeout)
-			self.assertGreaterEqual(jgms1.tstop - jgms1.tstart, worktime)
-			self.assertFalse(jgms1.proc.returncode)
-			self.assertGreaterEqual(jgms2.tstop - jgms2.tstart, worktime)
-			self.assertFalse(jgms2.proc.returncode)
-			self.assertGreaterEqual(jgms3.tstop - jgms3.tstart, worktime)
-			self.assertFalse(jgms3.proc.returncode)
-			self.assertGreaterEqual(jgmsp1.tstop - jgmsp1.tstart, worktime)
-			self.assertFalse(jgmsp1.proc.returncode)
-			self.assertLess(jgmsp2.tstop - jgmsp2.tstart, worktime)
-			self.assertTrue(jgmsp2.proc.returncode)
-			# Check the last comleted job
-			self.assertTrue(jgms3.tstop <= tstart + etime)
-
-			# Verify handlers calls
-			jgms1.onstart.assert_called_once_with(jgms1)
-			jgms3.onstart.assert_called_once_with(jgms3)
-			jgms3.ondone.assert_called_once_with(jgms3)
-			jgmsp1.onstart.assert_called_with(jgmsp1)
-			self.assertTrue(1 <= jgmsp1.onstart.call_count <= 2)
-			jgmsp2.ondone.assert_not_called()
-
-
-	@unittest.skipUnless(_LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS, 'Requires _LIMIT_WORKERS_RAM, _CHAINED_CONSTRAINTS')
-	def test_jobMemlimGroupChained(self):
-		"""Verify memory violations caused by group of workers having chained jobs
-		Rescheduling of the worker processes when their total memory consumption
-		exceeds the dedicated limit and there are some nonstarted jobs of smaller
-		size and the same category that
-			1) were not rescheduled by the non-heavier worker.
-			2) were rescheduled by the non-heavier worker.
-		"""
-		# Note: for one of the tests timeout=worktime/2 is used, so use multiplier of at least *3*2 = 6
-		worktime = TestExecPool._latency * 8  # Note: should be larger than 3*_latency
-		timeout = worktime * 2  # Note: should be larger than 3*_latency
-		#etimeout = max(1, TestExecPool._latency) + (worktime * 2) // 1  # Job work time
-		etimeout = (max(1, TestExecPool._latency) + timeout) * 4  # Execution pool timeout; Note: *3 because nonstarted jobs exist here nad postponed twice
-		assert TestExecPool._latency * 3 < worktime/2 and worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
-
-		# Note: we need another execution pool to set memlimit (10 Mb) there
-		epoolMem = 0.15  # Execution pool mem limit, Gb
-		msmall = inBytes(0.025)  # Small amount of memory for a job; Note: actual Python app consumes ~51 Mb for the allocated ~25 Mb
-		# Start not more than 3 simultaneous workers
-		with ExecPool(max(TestExecPool._WPROCSMAX, 4), latency=TestExecPool._latency, memlimit=epoolMem) as xpool:  # , _AFNSTEP, memlimit
-			tstart = time.time()
-
-			jgms1 = Job('jgroup_mem_small_1', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
-				, size=5, timeout=timeout)
-			tjms2 = worktime/3
-			jgms2 = Job('jgroup_mem_small_2s', args=(PYEXEC, '-c', allocDelayProg(msmall, tjms2))
-				, size=5, timeout=timeout, onstart=mock.MagicMock())
-			jgms3 = Job('jgroup_mem_small_3g', args=(PYEXEC, '-c', allocDelayProg(msmall*1.5, worktime))
-				, category="cat_sa", size=5, timeout=timeout, onstart=mock.MagicMock(), ondone=mock.MagicMock())
-			jgmsp1 = Job('jgroup_mem_small_postponed_1m', args=(PYEXEC, '-c', allocDelayProg(msmall*1.2, worktime*1.25))
-				, category="cat_toch", size=6, timeout=timeout, onstart=mock.MagicMock())
-			jgmsp2 = Job('jgroup_mem_small_postponed_2_to', args=(PYEXEC, '-c', allocDelayProg(msmall*0.8, worktime))
-				, category="cat_toch", size=4, timeout=worktime/2, ondone=mock.MagicMock())
-			jgmsp3 = Job('jgroup_mem_small_postponed_3', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
-				, size=9, timeout=worktime, onstart=mock.MagicMock())
-
-			xpool.execute(jgms1)
-			xpool.execute(jgms2)
-			xpool.execute(jgms3)
-			xpool.execute(jgmsp1)
-			xpool.execute(jgmsp2)
-			xpool.execute(jgmsp3)
-
-			time.sleep(worktime / 4)  # Wait for the Job starting and memory allocation
-			# Verify exec pool completion before the timeout
-			self.assertTrue(xpool.join(etimeout))
-			etime = time.time() - tstart  # Execution time
-
-			# Verify timings, gracefull copletion of all jobs except the last one
-			self.assertLess(etime, etimeout)
-			self.assertGreaterEqual(jgms1.tstop - jgms1.tstart, worktime)
-			self.assertFalse(jgms1.proc.returncode)
-			self.assertGreaterEqual(jgms2.tstop - jgms2.tstart, tjms2)
-			self.assertFalse(jgms2.proc.returncode)
-			self.assertGreaterEqual(jgms3.tstop - jgms3.tstart, worktime)
-			self.assertFalse(jgms3.proc.returncode)
-			if jgmsp1.tstop > jgmsp2.tstop + TestExecPool._latency:
-				self.assertLessEqual(jgmsp1.tstop - jgmsp1.tstart, worktime*1.25 + TestExecPool._latency * 3)  # Canceled by chained timeout
-				self.assertTrue(jgmsp1.proc.returncode)
-			self.assertLessEqual(jgmsp2.tstop - jgmsp2.tstart, worktime)
-			self.assertTrue(jgmsp2.proc.returncode)
-			self.assertGreaterEqual(jgmsp3.tstop - jgmsp3.tstart, worktime)  # Execution time a bit exceeds te timeout
-			# Note: jgmsp3 may complete gracefully or may be terminated by timeout depending on the wrkers revision time.
-			# Most likely the completion is graceful
-			## Check the last comleted job
-			#self.assertTrue(jgms3.tstop < jgmsp1.tstop < tstart + etime)  # Note: heavier job is rescheduled after the more lightweight one
-
-			# Verify handlers calls
-			jgms2.onstart.assert_called_with(jgms2)
-			jgms3.onstart.assert_called_with(jgms3)
-			self.assertTrue(2 <= jgms3.onstart.call_count <= 3)
-			jgms3.ondone.assert_called_once_with(jgms3)
-			jgmsp1.onstart.assert_called_with(jgmsp1)
-			self.assertTrue(1 <= jgmsp1.onstart.call_count <= 2)
-			jgmsp2.ondone.assert_not_called()
-			jgmsp3.onstart.assert_called_with(jgmsp3)
-			self.assertTrue(1 <= jgmsp3.onstart.call_count <= 2)
-
-
-class TestProcMemTree(unittest.TestCase):
-	"""Process tree memory evaluation tests"""
-
-	@staticmethod
-	def allocAndSpawnProg(mprog, cprog):
-		"""Python program as str that allocates object of the specified size
-		in Gigabytes and then waits for the specified time
-
-		mprog  - Python program text (action) for the main process
-		cprog  - Python program text for the child process
-
-		return  - Python program as str
-		"""
-		return """{mprog}
-import subprocess
-import os
-from sys import executable as PYEXEC
-
-fnull = open(os.devnull, 'wb')
-subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
-""".format(mprog=mprog, cprog=cprog)
-#subprocess.call(args=('./exectime', PYEXEC, '-c', '''{cprog}'''))
-
-
-	@unittest.skip('Used to understand what is included into the reported process memory by "psutil"')
-	def test_psutilPTMem(self):
-		"""Test psutil process tree memory consumpotion"""
-		amem = 0.02  # Direct allocating memory in the process
-		camem = 0.07  # Allocatinf memory in the child process
-		duration = 0.2  # Duration in sec
-		proc = subprocess.Popen(args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
-			allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration))))
-		time.sleep(duration*2)
-		#proc.wait()  # Wait for the process termination
-		try:
-			up = psutil.Process(proc.pid)
-		except psutil.Error as err:
-			print('WARNING, psutil.Process() failed: ', err, file=sys.stderr)
-			return
-		mem = inGigabytes(up.memory_info().vms) * 1000  # Mb; Virtual Memory Size
-		rmem = inGigabytes(up.memory_info().rss) * 1000  # Mb; Resident Set Size
-		umem = inGigabytes(up.memory_full_info().vms) * 1000  # Mb; Unique Set Size
-		urmem = inGigabytes(up.memory_full_info().rss) * 1000  # Mb; Unique Set Size
-
-		acmem = mem
-		armem = rmem
-		aumem = umem
-		aurmem = urmem
-		cxmem = 0
-		cxrmem = 0
-		cxumem = 0
-		cxurmem = 0
-		cxpid = None
-		cnum = 0  # The number of child processes
-		for ucp in up.children(recursive=True):
-			cnum += 1
-			cmem = inGigabytes(ucp.memory_info().vms) * 1000  # Mb; Virtual Memory Size
-			crmem = inGigabytes(ucp.memory_info().rss) * 1000  # Mb; Resident Set Size
-			cumem = inGigabytes(ucp.memory_full_info().vms) * 1000  # Mb; Unique Set Size
-			curmem = inGigabytes(ucp.memory_full_info().rss) * 1000  # Mb; Unique Set Size
-			print('Memory in Mb of "{pname}" #{pid}: (mem: {mem:.2f}, rmem: {rmem:.2f}, umem: {umem:.2f}, urmem: {urmem:.2f})'
-				.format(pname=ucp.name(), pid=ucp.pid, mem=cmem, rmem=crmem, umem=cumem, urmem=curmem))
-			# Identify consumption by the heaviest child (by absolute mem)
-			if cxmem < cmem:
-				cxmem = cmem
-				cxrmem = crmem
-				cxumem = cumem
-				cxurmem = curmem
-				cxpid = ucp.pid
-			acmem += cmem
-			armem += crmem
-			aumem += cumem
-			aurmem += curmem
-
-		amem *= 1000  # Mb
-		camem *= 1000  # Mb
-		proc.wait()  # Wait for the process termination
-
-		print('Memory in Mb:\n  allocated for the proc #{pid}: {amem}, child: {camem}, total: {tamem}'
-			'\n  psutil proc #{pid} (mem: {mem:.2f}, rmem: {rmem:.2f}, umem: {umem:.2f}, urmem: {urmem:.2f})'
-			'\n  psutil proc #{pid} tree ({cnum} subprocs) heaviest child #{cxpid}'
-			' (mem: {cxmem:.2f}, rmem: {cxrmem:.2f}, umem: {cxumem:.2f}, urmem: {cxurmem:.2f})'
-			'\n  psutil proc #{pid} tree (mem: {acmem:.2f}, rmem: {armem:.2f}, umem: {aumem:.2f}, urmem: {aurmem:.2f})'
-			''.format(pid=proc.pid, amem=amem, camem=camem, tamem=amem+camem
-			, mem=mem, rmem=rmem, umem=umem, urmem=urmem
-			, cnum=cnum, cxpid=cxpid, cxmem=cxmem, cxrmem=cxrmem, cxumem=cxumem, cxurmem=cxurmem
-			, acmem=acmem, armem=armem, aumem=aumem, aurmem=aurmem))
-
-
-	@unittest.skipUnless(_LIMIT_WORKERS_RAM, 'Requires _LIMIT_WORKERS_RAM')
-	def test_jobMem(self):
-		"""Test job virual memory evaluation
-		"""
-		worktime = TestExecPool._latency * 6  # Note: should be larger than 3*_latency
-		timeout = worktime * 2  # Note: should be larger than 3*_latency
-		#etimeout = max(1, TestExecPool._latency) + (worktime * 2) // 1  # Job work time
-		etimeout = (max(1, TestExecPool._latency) + timeout) * 3  # Execution pool timeout; Note: *3 because nonstarted jobs exist here nad postponed twice
-		assert TestExecPool._latency * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
-
-		# Start not more than 3 simultaneous workers
-		with ExecPool(max(TestExecPool._WPROCSMAX, 3), latency=TestExecPool._latency) as xpool:  # , _AFNSTEP, memlimit
-			amem = 0.02  # Direct allocating memory in the process
-			camem = 0.07  # Allocatinf memory in the child process
-			duration = worktime / 3  # Duration in sec
-			job = Job('jmem_proc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
-				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-				, timeout=timeout, memkind=0, ondone=mock.MagicMock())
-			jobx = Job('jmem_max-subproc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
-				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-				, timeout=timeout, memkind=1, ondone=mock.MagicMock())
-			jobtr = Job('jmem_tree', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
-				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
-				, timeout=timeout, memkind=2, ondone=mock.MagicMock())
-
-			# Verify that non-started job raises exception on memory update request
-			if _LIMIT_WORKERS_RAM:
-				self.assertRaises(AttributeError, job._updateMem)
-			else:
-				self.assertRaises(NameError, job._updateMem)
-
-			tstart = time.time()
-			xpool.execute(job)
-			xpool.execute(jobx)
-			xpool.execute(jobtr)
-			time.sleep(duration*1.9)
-			pmem = job._updateMem()
-			xmem = jobx._updateMem()
-			tmem = jobtr._updateMem()
-			# Verify memory consumption
-			print('Memory consumption in Mb,  proc_mem: {pmem:.3g}, max_procInTree_mem: {xmem:.3g}, procTree_mem: {tmem:.3g}'
-				.format(pmem=pmem*1000, xmem=xmem*1000, tmem=tmem*1000))
-			self.assertTrue(pmem < xmem < tmem)
-			# Verify exec pool completion before the timeout
-			time.sleep(worktime / 3)  # Wait for the Job starting and memory allocation
-			self.assertTrue(xpool.join(etimeout))
-			etime = time.time() - tstart  # Execution time
-			# Verify jobs execution time
-			self.assertLessEqual(jobtr.tstop - jobtr.tstart, etime)
-
-
 if __name__ == '__main__':
 	"""Doc tests execution"""
 	import doctest
 	#doctest.testmod()  # Detailed tests output
-	flags = doctest.REPORT_NDIFF | doctest.REPORT_ONLY_FIRST_FAILURE
+	flags = doctest.REPORT_NDIFF | doctest.REPORT_ONLY_FIRST_FAILURE | doctest.IGNORE_EXCEPTION_DETAIL
 	failed, total = doctest.testmod(optionflags=flags)
 	if failed:
 		print("Doctest FAILED: {} failures out of {} tests".format(failed, total), file=sys.stderr)
@@ -1841,7 +1503,13 @@ if __name__ == '__main__':
 		print('Doctest PASSED')
 	# Note: to check specific testcase use:
 	# $ python -m unittest mpepool.TestExecPool.test_jobTimeoutChained
-	if mock is not None and unittest.main().result:  # verbosity=2
-		print('Try to reexecute the tests using x2-3 larger TestExecPool._latency (especially for the first run)')
-	else:
-		print('WARNING, the unit tests are skipped because the mock module is not installed', file=sys.stderr)
+	if len(sys.argv) <= 1:
+		import mpetests
+		suite = mpetests.unittest.TestLoader().loadTestsFromModule(mpetests)
+		if mpetests.mock is not None:
+			print('')  # Indent from doctests
+			if not mpetests.unittest.TextTestRunner().run(suite).wasSuccessful():  # TextTestRunner(verbosity=2)
+			#if unittest.main().result:  # verbosity=2
+				print('Try to reexecute the tests (hot run) or set x2-3 larger TEST_LATENCY')
+		else:
+			print('WARNING, the unit tests are skipped because the mock module is not installed', file=sys.stderr)
