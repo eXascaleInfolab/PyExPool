@@ -20,6 +20,7 @@ A Lightweight Multi-Process Execution Pool with load balancing and customizable 
 	- [Failsafe Termination](#failsafe-termination)
 - [Related Projects](#related-projects)
 
+
 ## Overview
 A Lightweight Multi-Process Execution Pool with load balancing to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying optional execution parameters considering NUMA architecture peculiarities:
 - automatic rescheduling and *load balancing* (reduction) of the worker processes and on low memory condition for the *in-RAM computations* (requires [psutil](https://pypi.python.org/pypi/psutil), can be disabled)
@@ -40,12 +41,13 @@ If the asynchronous execution of *Python functions* is required, usage of extern
 The **load balancing** is enabled when the global variables `_LIMIT_WORKERS_RAM` and `_CHAINED_CONSTRAINTS` are set, jobs `.category` and relative `.size` (if known) specified. The balancing is performed to use as much RAM and CPU resources as possible performing in-RAM computations and meeting the specified timeout and memory constraints for each job and for the whole pool.  
 Large executing jobs can be postponed for the later execution with less number of worker processes after completion of the smaller jobs. The number of workers is reduced automatically (balanced) on the jobs queue processing to meet memory constraints. It is recommended to add jobs in the order of the increasing memory/time complexity if possible to reduce the number of worker processes terminations on jobs postponing (rescheduling).
 
-Demo of the scheduling with memory limit for the worker processes:
+Demo of the *scheduling with memory constraints* for the worker processes:
 ![mpepool_memory](images/mpepool_mem.png)
 
-Demo of the scheduling with cache L1 maximization for single-threaded processes on the server with crossnode CPUs enumeration. Whole physical CPU core consisting of two hardware threads assigned to each worker process, so the L1 cache is dedicated (not shared), but the maximal loading over all CPUs is 50%:
+Demo of the *scheduling with cache L1 maximization* for single-threaded processes on the server with crossnode CPUs enumeration. Whole physical CPU core consisting of two hardware threads assigned to each worker process, so the L1 cache is dedicated (not shared), but the maximal loading over all CPUs is 50%:
 ![mpepool_cacheL1_1](images/mpepool_cacheL1_1.png)
 ![mpepool_cacheL1_2](images/mpepool_cacheL1_2.png)
+
 
 ## Requirements
 
@@ -55,7 +57,7 @@ The external modules / apps are required only for the extended functionality:
 ```
 $ sudo pip install psutil
 ```
-- [hwloc](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) (includes `lstopo`) is required to identify enumeration type of CPUs to perform correct CPU affinity masking.
+- [hwloc](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) (includes `lstopo`) is required to identify enumeration type of CPUs to perform correct CPU affinity masking. Required only for the automatic affinity masking with cache usage optimization an only if the CPU enumeration type is not specified manually.
 ```
 $ sudo apt-get install -y hwloc
 ```
@@ -64,10 +66,12 @@ $ sudo apt-get install -y hwloc
 $ sudo pip install mock
 ```
 
+
 ## API
 
 Flexible API provides *automatic CPU affinity management, maximization of the dedicated CPU cache, limitation of the minimal dedicated RAM per worker process, balancing of the worker processes and rescheduling of chains of the related jobs on low memory condition for the in-RAM computations*, optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and more...  
 `ExecPool` represents a pool of worker processes to execute `Job`s that can be grouped into `Tasks`s for more flexible management.
+
 
 ### Job
 
@@ -147,6 +151,7 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 		requires _LIMIT_WORKERS_RAM
 	"""
 ```
+
 ### Task
 ```python
 Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout, stderr=sys.stderr):
@@ -172,6 +177,7 @@ Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout,
 	tstop  - termination / completion time after ondone
 	"""
 ```
+
 ### AffinityMask
 ```python
 AffinityMask(afnstep, first=True, sequential=cpusequential())
@@ -233,6 +239,7 @@ AffinityMask(afnstep, first=True, sequential=cpusequential())
 		NUMA node1 CPU(s):     4(,5),6(,7)
 	"""
 ```
+
 ### ExecPool
 ```python
 ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., name=None)
@@ -295,6 +302,7 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 	__finalize__():
 		"""Force termination of the pool"""
 ```
+
 ### Accessory Routines
 ```python
 def ramfracs(fracsize):
@@ -344,6 +352,7 @@ def cpusequential():
 	"""
 ```
 
+
 ## Usage
 
 Target version of the Python is 2.7+ including 3.x, also works fine on PyPy.
@@ -355,6 +364,7 @@ The workflow consists of the following steps:
 1. Wait on Execution pool until all the jobs are completed or terminated, or until the global timeout is elapsed.
 
 See [unit tests (TestExecPool)](mpepool.py) for the advanced examples.
+
 
 ### Usage Example
 ```python
@@ -428,6 +438,7 @@ with ExecPool(max(cpu_count()-1, 1), vmlimit=32, latency=1.5) as xpool:
 ```
 The code shown above is fetched from the `TestProcMemTree` unit test available in the end of the [source file](mpepool.py).
 
+
 ### Failsafe Termination
 To perform *graceful termination* of the Jobs in case of external termination of your program, signal handlers can be set:
 ```python
@@ -476,6 +487,7 @@ atexit.register(terminationHandler, terminate=False)
 ```
 
 **Note:** Please, [star this project](//github.com/eXascaleInfolab/PyExPool) if you use it.
+
 
 ## Related Projects
 - [ExecTime](https://bitbucket.org/lumais/exectime)  -  *failover* lightweight resource consumption profiler (*timings and memory*), applicable to multiple processes with optional *per-process results labeling* and synchronized *output to the specified file* or `stderr`: https://bitbucket.org/lumais/exectime
