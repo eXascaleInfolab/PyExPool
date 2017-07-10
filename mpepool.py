@@ -1517,12 +1517,15 @@ if __name__ == '__main__':
 	# Note: to check specific testcase use:
 	# $ python -m unittest mpepool.TestExecPool.test_jobTimeoutChained
 	if len(sys.argv) <= 1:
-		import mpetests
-		suite = mpetests.unittest.TestLoader().loadTestsFromModule(mpetests)
-		if mpetests.mock is not None:
-			print('')  # Indent from doctests
-			if not mpetests.unittest.TextTestRunner().run(suite).wasSuccessful():  # TextTestRunner(verbosity=2)
-			#if unittest.main().result:  # verbosity=2
-				print('Try to reexecute the tests (hot run) or set x2-3 larger TEST_LATENCY')
-		else:
-			print('WARNING, the unit tests are skipped because the mock module is not installed', file=sys.stderr)
+		try:
+			import mpetests
+			suite = mpetests.unittest.TestLoader().loadTestsFromModule(mpetests)
+			if mpetests.mock is not None:
+				print('')  # Indent from doctests
+				if not mpetests.unittest.TextTestRunner().run(suite).wasSuccessful():  # TextTestRunner(verbosity=2)
+				#if unittest.main().result:  # verbosity=2
+					print('Try to reexecute the tests (hot run) or set x2-3 larger TEST_LATENCY')
+			else:
+				print('WARNING, the unit tests are skipped because the mock module is not installed', file=sys.stderr)
+		except ImportError as err:
+			print('WARNING, Unit tests skipped because of the failed import: ', err, sys.stderr)

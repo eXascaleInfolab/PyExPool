@@ -3,7 +3,7 @@
 A Lightweight Multi-Process Execution Pool with load balancing and customizable resource consumption constraints.
 
 \author: (c) Artem Lutov <artem@exascale.info>  
-\license:  Apache License, Version 2.0  
+\license:  [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0)  
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
 \date: 2015-07 v1, 2017-06 v2
 
@@ -438,7 +438,7 @@ with ExecPool(max(cpu_count()-1, 1), vmlimit=32, latency=1.5) as xpool:
 	...
 	xpool.join(10)  # Timeout for the execution of all jobs is 10 sec [+latency]
 ```
-The code shown above is fetched from the `TestProcMemTree` unit test available in the end of the [source file](mpepool.py).
+The code shown above is fetched from the [`TestProcMemTree` unit test](mpetests.py).
 
 
 ### Failsafe Termination
