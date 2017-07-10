@@ -35,8 +35,9 @@ A Lightweight Multi-Process Execution Pool with load balancing to schedule Jobs 
 All scheduling jobs share the same CPU affinity policy, which is convenient for the benchmarking, but not so suitable for scheduling both single and multi-threaded apps with distinct demands of the CPU cache.
 
 Implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/eXascaleInfolab/PyCABeM)), not as a separate library.  
-The main purpose of this single-file module is the **asynchronous execution of modules and external executables with cache / parallelization tuning and automatic balancing of the worker processes for the in-RAM computations**.  
-If the asynchronous execution of *Python functions* is required, usage of external modules is not a problem and the automatic jobs scheduling for the in-RAM computations is not necessary, then a more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
+The main purpose of this single-file module is the **asynchronous execution of modules and external executables with custom resource consumption constraints, cache / parallelization tuning and automatic balancing of the worker processes for the in memory computations on the single server**.  
+If the asynchronous execution of *Python functions* is required, usage of external modules is not a problem and the automatic jobs scheduling for the in-RAM computations is not necessary, then a more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.  
+In case a distributed task queue is required with advanced monitoring and reporting facilities then [Celery](http://www.celeryproject.org/) might be a good choice.
 
 The **load balancing** is enabled when the global variables `_LIMIT_WORKERS_RAM` and `_CHAINED_CONSTRAINTS` are set, jobs `.category` and relative `.size` (if known) specified. The balancing is performed to use as much RAM and CPU resources as possible performing in-RAM computations and meeting the specified timeout and memory constraints for each job and for the whole pool.  
 Large executing jobs can be postponed for the later execution with less number of worker processes after completion of the smaller jobs. The number of workers is reduced automatically (balanced) on the jobs queue processing to meet memory constraints. It is recommended to add jobs in the order of the increasing memory/time complexity if possible to reduce the number of worker processes terminations on jobs postponing (rescheduling).
@@ -51,13 +52,13 @@ Demo of the *scheduling with cache L1 maximization* for single-threaded processe
 
 ## Requirements
 
-Multi-Process Execution Pool can be run without any external modules with automatically disabled load balancing.  
+Multi-Process Execution Pool *can be run without any external modules* with automatically disabled load balancing.  
 The external modules / apps are required only for the extended functionality:
-- [psutil](https://pypi.python.org/pypi/psutil) is required the dynamic jobs balancing to perform the in-RAM computations (`_LIMIT_WORKERS_RAM = True`) and limit memory consumption of the workers.
+- [psutil](https://pypi.python.org/pypi/psutil) is required for the dynamic jobs balancing to perform the in-RAM computations (`_LIMIT_WORKERS_RAM = True`) and limit memory consumption of the workers.
 ```
 $ sudo pip install psutil
 ```
-- [hwloc](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) (includes `lstopo`) is required to identify enumeration type of CPUs to perform correct CPU affinity masking. Required only for the automatic affinity masking with cache usage optimization an only if the CPU enumeration type is not specified manually.
+- [hwloc](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) (includes `lstopo`) is required to identify enumeration type of logical CPUs to perform correct CPU affinity masking. Required only for the automatic affinity masking with cache usage optimization and only if the CPU enumeration type is not specified manually.
 ```
 $ sudo apt-get install -y hwloc
 ```
