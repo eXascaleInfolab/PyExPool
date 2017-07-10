@@ -40,8 +40,12 @@ If the asynchronous execution of *Python functions* is required, usage of extern
 The **load balancing** is enabled when the global variables `_LIMIT_WORKERS_RAM` and `_CHAINED_CONSTRAINTS` are set, jobs `.category` and relative `.size` (if known) specified. The balancing is performed to use as much RAM and CPU resources as possible performing in-RAM computations and meeting the specified timeout and memory constraints for each job and for the whole pool.  
 Large executing jobs can be postponed for the later execution with less number of worker processes after completion of the smaller jobs. The number of workers is reduced automatically (balanced) on the jobs queue processing to meet memory constraints. It is recommended to add jobs in the order of the increasing memory/time complexity if possible to reduce the number of worker processes terminations on jobs postponing (rescheduling).
 
-Demo of the scheduling with memory limit:
+Demo of the scheduling with memory limit for the worker processes:
 ![mpepool_memory](images/mpepool_mem.png)
+
+Demo of the scheduling with cache L1 maximization for single-threaded processes on the server with crossnode CPUs enumeration. Whole physical CPU core consisting of two hardware threads assigned to each worker process, so the L1 cache is dedicated (not shared), but the maximal loading over all CPUs is 50%:
+![mpepool_cacheL1_1](images/mpepool_cacheL1_1.png)
+![mpepool_cacheL1_2](images/mpepool_cacheL1_2.png)
 
 ## Requirements
 
