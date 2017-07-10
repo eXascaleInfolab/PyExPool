@@ -616,7 +616,8 @@ class AffinityMask(object):
 			.format(CORE_THREADS, CORES, NODE_CPUS, NODES, CPUS))
 
 	def __init__(self, afnstep, first=True, sequential=SEQUENTIAL):
-		"""
+		"""Affinity mask initialization
+
 		afnstep  - affinity step, integer if applied, allowed values:
 			1, CORE_THREADS * n,  n E {1, 2, ... CPUS / (NODES * CORE_THREADS)}
 
@@ -778,7 +779,7 @@ class ExecPool(object):
 					jobs in RAM almost without the swapping
 		latency  - approximate minimal latency of the workers monitoring in sec, float >= 0;
 			0 means automatically defined value (recommended, typically 2-3 sec)
-		name  - name of the execution pool to distinuguish traces from subsequently
+		name  - name of the execution pool to distinguish traces from subsequently
 			created execution pools (only on creation or termination)
 
 		Internal attributes:

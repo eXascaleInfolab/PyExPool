@@ -9,7 +9,7 @@ A Lightweight Multi-Process Execution Pool with load balancing and customizable 
 
 ## Content
 - [Overview](#overview)
-- [Dependencies](#dependencies)
+- [Requirements](#requirements)
 - [API](#api)
 	- [Job](#job)
 	- [Task](#task)
@@ -35,7 +35,7 @@ All scheduling jobs share the same CPU affinity policy, which is convenient for 
 
 Implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/eXascaleInfolab/PyCABeM)), not as a separate library.  
 The main purpose of this single-file module is the **asynchronous execution of modules and external executables with cache / parallelization tuning and automatic balancing of the worker processes for the in-RAM computations**.  
-If the asynchronous execution of *Python functions* is required, usage of external dependences is not a problem and the automatic jobs scheduling for the in-RAM computations is not necessary, then a more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
+If the asynchronous execution of *Python functions* is required, usage of external modules is not a problem and the automatic jobs scheduling for the in-RAM computations is not necessary, then a more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
 
 The **load balancing** is enabled when the global variables `_LIMIT_WORKERS_RAM` and `_CHAINED_CONSTRAINTS` are set, jobs `.category` and relative `.size` (if known) specified. The balancing is performed to use as much RAM and CPU resources as possible performing in-RAM computations and meeting the specified timeout and memory constraints for each job and for the whole pool.  
 Large executing jobs can be postponed for the later execution with less number of worker processes after completion of the smaller jobs. The number of workers is reduced automatically (balanced) on the jobs queue processing to meet memory constraints. It is recommended to add jobs in the order of the increasing memory/time complexity if possible to reduce the number of worker processes terminations on jobs postponing (rescheduling).
@@ -43,15 +43,19 @@ Large executing jobs can be postponed for the later execution with less number o
 Demo of the scheduling with memory limit:
 ![mpepool_memory](images/mpepool_mem.png)
 
-## Dependencies
+## Requirements
 
-[psutil](https://pypi.python.org/pypi/psutil) is required only in case of dynamic jobs balancing for the in-RAM computations (`_LIMIT_WORKERS_RAM = True`), otherwise there are no any dependencies.  
-To install `psutil`:
+Multi-Process Execution Pool can be run without any external modules with automatically disabled load balancing.  
+The external modules / apps are required only for the extended functionality:
+- [psutil](https://pypi.python.org/pypi/psutil) is required the dynamic jobs balancing to perform the in-RAM computations (`_LIMIT_WORKERS_RAM = True`) and limit memory consumption of the workers.
 ```
 $ sudo pip install psutil
 ```
-[mock](https://pypi.python.org/pypi/mock) is required exclusively for the unit testing under Python2, `mock` is included in the standard lib of Python3.  
-To install `mock`:
+- [hwloc](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) (includes `lstopo`) is required to identify enumeration type of CPUs to perform correct CPU affinity masking.
+```
+$ sudo apt-get install -y hwloc
+```
+- [mock](https://pypi.python.org/pypi/mock) is required exclusively for the unit testing under Python2, `mock` is included in the standard lib of Python3.
 ```
 $ sudo pip install mock
 ```
@@ -164,24 +168,84 @@ Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout,
 	tstop  - termination / completion time after ondone
 	"""
 ```
+### AffinityMask
+```python
+AffinityMask(afnstep, first=True, sequential=cpusequential())
+	"""Affinity mask
+
+	Affinity table is a reduced CPU table by the non-primary HW treads in each core.
+	Typically, CPUs are enumerated across the nodes:
+	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30
+	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31
+	In case the number of hw threads per core is 2 then the physical CPU cores are 1 .. 15:
+	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14	(16,18,20,22,24,26,28,30  - 2nd hw treads)
+	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15	(17,19,21,23,25,27,29,31  - 2nd hw treads)
+	But the enumeration can be also sequential:
+	NUMA node0 CPU(s):     0,(1),2,(3),...
+	...
+
+	Hardware threads share all levels of the CPU cache, physical CPU cores share only the
+	last level of the CPU cache (L2/3).
+	The number of worker processes in the pool should be equal to the:
+	- physical CPU cores for the cache L1/2 maximization
+	- NUMA nodes for the cache L2/3 maximization
+
+	NOTE: `hwloc` utility can be used to detect the type of logical CPUs enumeration:
+	`$ sudo apt-get install hwloc`
+	See details: http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service
+
+	afnstep  - affinity step, integer if applied, allowed values:
+		1, CORE_THREADS * n,  n E {1, 2, ... CPUS / (NODES * CORE_THREADS)}
+
+		Used to bind worker processes to the logical CPUs to have warm cache and,
+		optionally, maximize cache size per a worker process.
+		Groups of logical CPUs are selected in a way to maximize the cache locality:
+		the single physical CPU is used taking all it's hardware threads in each core
+		before allocating another core.
+
+		Typical Values:
+		1  - maximize parallelization for the single-threaded apps
+			(the number of worker processes = logical CPUs)
+		CORE_THREADS  - maximize the dedicated CPU cache L1/2
+			(the number of worker processes = physical CPU cores)
+		CPUS / NODES  - maximize the dedicated CPU cache L3
+			(the number of worker processes = physical CPUs)
+	first  - mask the first logical unit or all units in the selected group.
+		One unit per the group maximizes the dedicated CPU cache for the
+		single-threaded worker, all units should be used for the multi-threaded
+		apps.
+	sequential  - sequential or cross nodes enumeration of the CPUs in the NUMA nodes:
+		None  - undefined, interpreted as crossnodes (the most widely used on servers)
+		False  - crossnodes
+		True  - sequential
+
+		For two hardware threads per a physical CPU core, where secondary hw threads
+		are taken in brackets:
+		Crossnodes enumeration, often used for the server CPUs
+		NUMA node0 CPU(s):     0,2(,4,6)
+		NUMA node1 CPU(s):     1,3(,5,7)
+		Sequential enumeration, often used for the laptop CPUs
+		NUMA node0 CPU(s):     0(,1),2(,3)
+		NUMA node1 CPU(s):     4(,5),6(,7)
+	"""
+```
 ### ExecPool
 ```python
-ExecPool(wksnum=cpu_count(), afnstep=None, vmlimit=0., latency=0., name=None)
+ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., name=None)
 	"""Multi-process execution pool of jobs
 
 		wksnum  - number of resident worker processes, >=1. The reasonable value is
-			<= NUMA nodes * node CPUs, which is typically returned by cpu_count(),
+			<= logical CPUs (returned by cpu_count()) = NUMA nodes * node CPUs,
 			where node CPUs = CPU cores * HW treads per core.
-			To guarantee minimal average RAM per a process, for example 2.5 Gb:
+			The recomended value is max(cpu_count() - 1, 1) to leave one logical
+			CPU for the benchmarking framework and OS applications.
+
+			To guarantee minimal average RAM per a process, for example 2.5 Gb
+			without _LIMIT_WORKERS_RAM flag (not using psutil for the dynamic
+			control of memory consumption):
 				wksnum = min(cpu_count(), max(ramfracs(2.5), 1))
-		afnstep  - affinity step, integer if applied. Used to bind worker to the
-			processing units to have warm cache for single thread workers.
-			Typical values:
-				None  - do not use affinity at all (recommended for multi-threaded workers),
-				1  - maximize parallelization (the number of worker processes = CPU units),
-				cpucorethreads()  - maximize the dedicated CPU cache (the number of
-					worker processes = CPU cores = CPU units / hardware treads per CPU core).
-			NOTE: specification of the afnstep might cause reduction of the workers number.
+		afnmask  - affinity mask for the worker processes, AffinityMask
+			None if not applied
 		memlimit  - limit total amount of Memory (automatically reduced to
 			the amount of physical RAM if the larger value is specified) in gigabytes
 			that can be used by worker processes to provide in-RAM computations, >= 0.
@@ -193,10 +257,14 @@ ExecPool(wksnum=cpu_count(), afnstep=None, vmlimit=0., latency=0., name=None)
 				- 0 means unlimited (some jobs might be [partially] swapped)
 				- value > 0 is automatically limited with total physical RAM to process
 					jobs in RAM almost without the swapping
-		latency  - approximate minimal latency of the workers monitoring in sec, float >= 0.
-			0 means automatically defined value (recommended, typically 2-3 sec).
-		name  - name of the execution pool to distinuguish traces from subsequently
+		latency  - approximate minimal latency of the workers monitoring in sec, float >= 0;
+			0 means automatically defined value (recommended, typically 2-3 sec)
+		name  - name of the execution pool to distinguish traces from subsequently
 			created execution pools (only on creation or termination)
+
+		Internal attributes:
+		alive  - whether the execution pool is alive or terminating, bool.
+			Should be reseted to True on resuse after the termination.
 	"""
 
 	execute(job, async=True):
@@ -246,28 +314,30 @@ def cpunodes():
 
 	Used to evaluate CPU index from the affinity table index considerin the NUMA architectore.
 	"""
+	
+def cpusequential():
+	"""Enumeration type of the logical CPUs: crossnodes or sequential
 
-def afnicpu(iafn, corethreads=1, nodes=1, crossnodes=True):
-	"""Affinity table index mapping to the CPU index
+	The enumeration can be crossnodes starting with one hardware thread per each
+	NUMA node, or sequential by enumerating all cores and hardware threads in each
+	NUMA node first.
+	For two hardware threads per a physical CPU core, where secondary hw threads
+	are taken in brackets:
+		Crossnodes enumeration, often used for the server CPUs
+		NUMA node0 CPU(s):     0,2(,4,6)		=> PU L#1 (P#4)
+		NUMA node1 CPU(s):     1,3(,5,7)
+		Sequential enumeration, often used for the laptop CPUs
+		NUMA node0 CPU(s):     0(,1),2(,3)		=> PU L#1 (P#1)  - indicates sequential
+		NUMA node1 CPU(s):     4(,5),6(,7)
+	ATTENTION: `hwloc` utility is required to detect the type of logical CPUs
+	enumeration:  `$ sudo apt-get install hwloc`
+	See details: http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service
 
-	Affinity table is a reduced CPU table by the non-primary HW treads in each core.
-	Typically CPUs are evumerated across the nodes:
-	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30
-	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31
-	So, in case the number of threads per core is 2 then the following CPUs should be bound:
-	0, 1, 4, 5, 8, ...
-	2 -> 4, 4 -> 8
-	#i ->  i  +  i // cpunodes() * cpunodes() * (cpucorethreads() - 1)
-
-	iafn  - index in the affinity table to be mapped into the respective CPU index
-	corethreads  - HW threads per CPU core or just some affinity step,
-		1  - maximal parallelization with the minimal CPU cache size
-	nodes  - NUMA nodes containing CPUs
-	crossnodes  - cross-nodes enumeration of the CPUs in the NUMA nodes
-
-	return CPU index respective to the specified index in the affinity table
+	return  - enumeration type of the logical CPUs, bool or None:
+		None  - was not defined, most likely crossnodes
+		False  - crossnodes
+		True  - sequential
 	"""
-
 ```
 
 ## Usage
