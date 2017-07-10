@@ -1,23 +1,6 @@
 # PyExPool
 
-A Lightweight Multi-Process Execution Pool to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying optional execution parameters considering NUMA architecture peculiarities:
-
-- automatic rescheduling and *load balancing* (reduction) of the worker processes and on low memory condition for the *in-RAM computations* (requires [psutil](https://pypi.python.org/pypi/psutil), can be disabled)
-- *chained termination* of the related worker processes (started jobs) and non-started jobs rescheduling to satisfy *timeout* and *memory limit* constraints
-- automatic CPU affinity management and maximization of the dedicated CPU cache vs parallelization for a worker process
-- *timeout per each Job* (it was the main initial motivation to implement this module, because this feature is not provided by any Python implementation out of the box)
-- onstart/ondone *callbacks*, ondone is called only on successful completion (not termination) for both Jobs and Tasks (group of jobs)
-- stdout/err output, which can be redirected to any custom file or PIPE
-- custom parameters for each Job and respective owner Task besides the name/id
-
-> Automatic rescheduling of the workers on low memory condition for the in-RAM computations is an optional and the only feature that requires an external package, [psutil](https://pypi.python.org/pypi/psutil).
-
-Implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/eXascaleInfolab/PyCABeM)), not as a separate library.  
-The main purpose of this single-file module is the **asynchronous execution of modules and external executables with cache / parallelization tuning and automatic balancing of the worker processes for the in-RAM computations**.  
-If the asynchronous execution of *Python functions* is required, usage of external dependences is not a problem and the automatic jobs scheduling for the in-RAM computations is not necessary, then a more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
-
-The **load balancing** is enabled when the global variables `_LIMIT_WORKERS_RAM` and `_CHAINED_CONSTRAINTS` are set, jobs `.category` and relative `.size` (if known) specified. The balancing is performed to use as much RAM and CPU resources as possible performing in-RAM computations and meeting the specified timeout and memory constraints for each job and for the whole pool.  
-Large executing jobs can be postponed for the later execution with less number of worker processes after completion of the smaller jobs. The number of workers is reduced automatically (balanced) on the jobs queue processing to meet memory constraints. It is recommended to add jobs in the order of the increasing memory/time complexity if possible to reduce the number of worker processes terminations on jobs postponing (rescheduling).
+A Lightweight Multi-Process Execution Pool with load balancing and customizable resource consumption constraints.
 
 \author: (c) Artem Lutov <artem@exascale.info>  
 \license:  Apache License, Version 2.0  
@@ -25,6 +8,7 @@ Large executing jobs can be postponed for the later execution with less number o
 \date: 2015-07 v1, 2017-06 v2
 
 ## Content
+- [Overview](#overview)
 - [Dependencies](#dependencies)
 - [API](#api)
 	- [Job](#job)
@@ -35,6 +19,29 @@ Large executing jobs can be postponed for the later execution with less number o
 	- [Usage Example](#usage-example)
 	- [Failsafe Termination](#failsafe-termination)
 - [Related Projects](#related-projects)
+
+## Overview
+A Lightweight Multi-Process Execution Pool with load balancing to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying optional execution parameters considering NUMA architecture peculiarities:
+- automatic rescheduling and *load balancing* (reduction) of the worker processes and on low memory condition for the *in-RAM computations* (requires [psutil](https://pypi.python.org/pypi/psutil), can be disabled)
+- *chained termination* of the related worker processes (started jobs) and non-started jobs rescheduling to satisfy *timeout* and *memory limit* constraints
+- automatic CPU affinity management and maximization of the dedicated CPU cache vs parallelization for a worker process
+- *timeout per each Job* (it was the main initial motivation to implement this module, because this feature is not provided by any Python implementation out of the box)
+- onstart/ondone *callbacks*, ondone is called only on successful completion (not termination) for both Jobs and Tasks (group of jobs)
+- stdout/err output, which can be redirected to any custom file or PIPE
+- custom parameters for each Job and respective owner Task besides the name/id
+
+> Automatic rescheduling of the workers on low memory condition for the in-RAM computations is an optional and the only feature that requires an external package, [psutil](https://pypi.python.org/pypi/psutil).  
+All scheduling jobs share the same CPU affinity policy, which is convenient for the benchmarking, but not so suitable for scheduling both single and multi-threaded apps with distinct demands of the CPU cache.
+
+Implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/eXascaleInfolab/PyCABeM)), not as a separate library.  
+The main purpose of this single-file module is the **asynchronous execution of modules and external executables with cache / parallelization tuning and automatic balancing of the worker processes for the in-RAM computations**.  
+If the asynchronous execution of *Python functions* is required, usage of external dependences is not a problem and the automatic jobs scheduling for the in-RAM computations is not necessary, then a more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library.
+
+The **load balancing** is enabled when the global variables `_LIMIT_WORKERS_RAM` and `_CHAINED_CONSTRAINTS` are set, jobs `.category` and relative `.size` (if known) specified. The balancing is performed to use as much RAM and CPU resources as possible performing in-RAM computations and meeting the specified timeout and memory constraints for each job and for the whole pool.  
+Large executing jobs can be postponed for the later execution with less number of worker processes after completion of the smaller jobs. The number of workers is reduced automatically (balanced) on the jobs queue processing to meet memory constraints. It is recommended to add jobs in the order of the increasing memory/time complexity if possible to reduce the number of worker processes terminations on jobs postponing (rescheduling).
+
+Demo of the scheduling with memory limit:
+![mpepool_memory](images/mpepool_mem.png)
 
 ## Dependencies
 
@@ -231,7 +238,7 @@ def ramfracs(fracsize):
 def cpucorethreads():
 	"""The number of hardware treads per a CPU core
 
-	Used to specify CPU afinity step dedicating the maximal amount of CPU cache.
+	Used to specify CPU afinity dedicating the maximal amount of CPU cache L1/2.
 	"""
 
 def cpunodes():
