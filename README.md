@@ -276,6 +276,8 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 		Internal attributes:
 		alive  - whether the execution pool is alive or terminating, bool.
 			Should be reseted to True on resuse after the termination.
+			NOTE: should be reseted to True if the execution pool is reused
+			after the joining or termination.
 	"""
 
 	execute(job, async=True):

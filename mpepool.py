@@ -785,6 +785,8 @@ class ExecPool(object):
 		Internal attributes:
 		alive  - whether the execution pool is alive or terminating, bool.
 			Should be reseted to True on resuse after the termination.
+			NOTE: should be reseted to True if the execution pool is reused
+			after the joining or termination.
 		"""
 		assert (wksnum >= 1 and (afnmask is None or isinstance(afnmask, AffinityMask))
 			and memlimit >= 0 and latency >= 0 and (name is None or isinstance(name, str))
@@ -834,7 +836,17 @@ class ExecPool(object):
 
 	def __enter__(self):
 		"""Context entrence"""
-		self.alive = True
+		# Reuse execpool if possible
+		if not self.alive:
+			if not self._workers and not self._jobs:
+				print('WARNING{}, the non-cleared execution pool is reused'
+					.format('' if not self.name else ' ' + self.name))
+				self._tstart = None
+				self.alive = True
+			else:
+				raise ValueError('Terminating dirty execution pool can not be reentered:'
+					'  alive: {}, {} workers, {} jobs'.format(self.alive
+					, len(self._workers), len(self._jobs)))
 		return self
 
 
