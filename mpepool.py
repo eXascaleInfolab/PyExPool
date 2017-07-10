@@ -411,7 +411,7 @@ class Job(object):
 			.format(self.name, self.tstart, self.tstop))
 		# Close process-related file descriptors
 		for fd in (self._fstdout, self._fstderr):
-			if fd and hasattr(fd, 'close'):
+			if fd and fd is not sys.stdout and fd is not sys.stderr and hasattr(fd, 'close'):
 				fd.close()
 		self._fstdout = None
 		self._fstderr = None
