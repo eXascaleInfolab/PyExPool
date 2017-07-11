@@ -1027,7 +1027,7 @@ class ExecPool(object):
 			' expected to be non-completed'.format(job.name))
 		wksnum = len(self._workers)  # The current number of worker processes
 		if (async and wksnum > self._wkslim) or not self._wkslim or not self.alive:
-			raise AssertionError('Free workers should be available ({} busy workers of {}), alive: {}'
+			raise ValueError('Free workers should be available ({} busy workers of {}), alive: {}'
 				.format(wksnum, self._wkslim, self.alive))
 		#if _DEBUG_TRACE:
 		print('Starting "{}"{}, workers: {} / {}...'.format(job.name, '' if async else ' in sync mode'
@@ -1048,8 +1048,8 @@ class ExecPool(object):
 			except Exception as err:
 				print('ERROR in onstart() callback of "{}": {}. The job has not been started: {}'
 					.format(job.name, err, traceback.format_exc()), file=sys.stderr)
-				errno = getattr(err, 'errno', None)
-				return -1 if errno is None else errno.errorcode
+				errinf = getattr(err, 'errno', None)
+				return -1 if errinf is None else errinf.errorcode
 		# Consider custom output channels for the job
 		fstdout = None
 		fstderr = None
@@ -1062,12 +1062,12 @@ class ExecPool(object):
 						os.makedirs(basedir)
 					try:
 						if joutp == job.stdout:
-							self._fstdout = open(joutp, 'a')
-							fstdout = self._fstdout
+							job._fstdout = open(joutp, 'a')
+							fstdout = job._fstdout
 							outcapt = 'stdout'
 						elif joutp == job.stderr:
-							self._fstderr = open(joutp, 'a')
-							fstderr = self._fstderr
+							job._fstderr = open(joutp, 'a')
+							fstderr = job._fstderr
 							outcapt = 'stderr'
 						else:
 							raise ValueError('Ivalid output stream value: ' + str(joutp))
@@ -1416,10 +1416,14 @@ class ExecPool(object):
 		  NOTE: sync tasks are started at once
 		return  - 0 on successful execution, process return code otherwise
 		"""
+		if not self.alive:
+			print('WARNING, scheduling of the job "{}" is cancelled because'
+				  ' the execution pool is not alive'.format(job.name))
+			return -1
 		assert isinstance(job, Job) and job.name, (
 			'Job type is invalid or the instance is not initialized: {}'.format(job))
 		# Note: _wkslim an be 0 only on/after the termination
-		assert self.alive and len(self._workers) <= self._wkslim and self._wkslim >= 1, (
+		assert len(self._workers) <= self._wkslim and self._wkslim >= 1, (
 			'Number of workers exceeds the limit or the pool has been terminated:'
 			'  workers: {}, wkslim: {}, alive: {}'
 			.format(len(self._workers), self._wkslim, self.alive))
@@ -1491,7 +1495,7 @@ class ExecPool(object):
 			return False
 
 		self.__reviseWorkers()
-		while self._jobs or self._workers:
+		while self.alive and (self._jobs or self._workers):
 			if timeout and time.time() - self._tstart > timeout:
 				print('WARNING, the execution pool is terminated on timeout', file=sys.stderr)
 				self.__terminate()
