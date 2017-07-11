@@ -373,7 +373,7 @@ class TestExecPool(unittest.TestCase):
 			2) were rescheduled by the non-heavier worker.
 		"""
 		# Note: for one of the tests timeout=worktime/2 is used, so use multiplier of at least *3*2 = 6
-		worktime = _TEST_LATENCY * 8  # Note: should be larger than 3*latency
+		worktime = _TEST_LATENCY * 10  # Note: should be larger than 3*latency
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
 		etimeout = (max(1, _TEST_LATENCY) + timeout) * 4  # Execution pool timeout; Note: *3 because nonstarted jobs exist here nad postponed twice
@@ -386,18 +386,18 @@ class TestExecPool(unittest.TestCase):
 		with ExecPool(max(_WPROCSMAX, 4), latency=_TEST_LATENCY, memlimit=epoolMem) as xpool:
 			tstart = time.time()
 
-			jgms1 = Job('jgroup_mem_small_1', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
+			jgms1 = Job('jcgroup_mem_small_1', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
 				, size=5, timeout=timeout)
 			tjms2 = worktime/3
-			jgms2 = Job('jgroup_mem_small_2s', args=(PYEXEC, '-c', allocDelayProg(msmall, tjms2))
+			jgms2 = Job('jcgroup_mem_small_2s', args=(PYEXEC, '-c', allocDelayProg(msmall, tjms2))
 				, size=5, timeout=timeout, onstart=mock.MagicMock())
-			jgms3 = Job('jgroup_mem_small_3g', args=(PYEXEC, '-c', allocDelayProg(msmall*1.5, worktime))
+			jgms3 = Job('jcgroup_mem_small_3g', args=(PYEXEC, '-c', allocDelayProg(msmall*1.5, worktime))
 				, category="cat_sa", size=5, timeout=timeout, onstart=mock.MagicMock(), ondone=mock.MagicMock())
-			jgmsp1 = Job('jgroup_mem_small_postponed_1m', args=(PYEXEC, '-c', allocDelayProg(msmall*1.2, worktime*1.25))
+			jgmsp1 = Job('jcgroup_mem_small_postponed_1m', args=(PYEXEC, '-c', allocDelayProg(msmall*1.2, worktime*1.25))
 				, category="cat_toch", size=6, timeout=timeout, onstart=mock.MagicMock())
-			jgmsp2 = Job('jgroup_mem_small_postponed_2_to', args=(PYEXEC, '-c', allocDelayProg(msmall*0.8, worktime))
+			jgmsp2 = Job('jcgroup_mem_small_postponed_2_to', args=(PYEXEC, '-c', allocDelayProg(msmall*0.8, worktime))
 				, category="cat_toch", size=4, timeout=worktime/2, ondone=mock.MagicMock())
-			jgmsp3 = Job('jgroup_mem_small_postponed_3', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
+			jgmsp3 = Job('jcgroup_mem_small_postponed_3', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
 				, size=9, timeout=worktime, onstart=mock.MagicMock())
 
 			xpool.execute(jgms1)
