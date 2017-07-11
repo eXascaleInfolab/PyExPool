@@ -884,8 +884,11 @@ class ExecPool(object):
 
 	def __terminate(self):
 		"""Force termination of the pool"""
-		acqlock = self.__termlock.acquire(block=False)
-		self.alive = False  # The execution pool is terminating
+		# Wait for the new worker registration on the job starting if required,
+		# which shold be done << 10 ms
+		acqlock = self.__termlock.acquire(True, 0.01)  # 10 ms
+		self.alive = False  # The execution pool is terminating, should be always set on termination
+		# The lock can't be acquired (takes more than 10 ms) only if the termination was already called
 		if not acqlock or not (self._workers or self._jobs):
 			if acqlock:
 				self.__termlock.release()
@@ -1053,6 +1056,7 @@ class ExecPool(object):
 		# Consider custom output channels for the job
 		fstdout = None
 		fstderr = None
+		acqlock = False  # The lock is aquired and shuold be released
 		try:
 			# Initialize fstdout, fstderr by the required output channel
 			for joutp in (job.stdout, job.stderr):
@@ -1087,16 +1091,22 @@ class ExecPool(object):
 					, job.stdout, job.stderr))  # Note: write to log, not to the stderr
 			if(job.args):
 				# Consider CPU affinity
+				# Note: the exception is raised by .index() if the _affinity table is corrupted (doesn't have the free entry)
 				iafn = -1 if not self._affinity or job._omitafn else self._affinity.index(None)  # Index in the affinity table to bind process to the CPU/core
 				if iafn >= 0:
 					job.args = [_AFFINITYBIN, '-c', self._afnmask(iafn)] + list(job.args)
 				if _DEBUG_TRACE >= 2:
 					print('  Opening proc for "{}" with:\n\tjob.args: {},\n\tcwd: {}'.format(job.name
 						, ' '.join(job.args), job.workdir), file=sys.stderr)
-				if self.alive:
-					job.proc = subprocess.Popen(job.args, bufsize=-1, cwd=job.workdir, stdout=fstdout, stderr=fstderr)  # bufsize=-1 - use system default IO buffer size
-				else:
+				acqlock = self.__termlock.acquire(False)
+				if not acqlock or not self.alive:
 					raise EnvironmentError((errno.EINTR, 'The execution pool has been terminated'))  # errno.ERESTART
+				job.proc = subprocess.Popen(job.args, bufsize=-1, cwd=job.workdir, stdout=fstdout, stderr=fstderr)  # bufsize=-1 - use system default IO buffer size
+				if async:
+					self._workers.add(job)
+				# ATTENTION: the exception could be raised before the lock releasing on process creation
+				self.__termlock.release()
+				acqlock = False  # Note: an exception can be thrown below, but the lock is already released and should not be released again
 				if iafn >= 0:
 					self._affinity[iafn] = job.proc.pid
 					print('"{jname}" #{pid}, iafn: {iafn} (CPUs #: {icpus})'
@@ -1106,6 +1116,10 @@ class ExecPool(object):
 				if job.startdelay > 0:
 					time.sleep(job.startdelay)
 		except Exception as err:  # Should not occur: subprocess.CalledProcessError
+			# ATTENTION: the exception could be raised on process creation or on not self.alive
+			# with acquired lock, which should be released
+			if acqlock:
+				self.__termlock.release()
 			print('ERROR on "{}" execution occurred: {}, skipping the job. {}'.format(
 				job.name, err, traceback.format_exc()), file=sys.stderr)
 			# Note: process-associated file descriptors are closed in complete()
@@ -1114,7 +1128,6 @@ class ExecPool(object):
 			job.complete(False)
 		else:
 			if async:
-				self._workers.add(job)
 				return 0
 			else:
 				job.proc.wait()
