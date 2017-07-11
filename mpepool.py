@@ -948,6 +948,10 @@ class ExecPool(object):
 			Used only when the job should should be started, but was terminated
 			earlier (because of the timeout with restart or group memory limit violation)
 		"""
+		if not self.alive:
+			print('WARNING, postponing of the job "{}" is cancelled because'
+				  ' the execution pool is not alive'.format(job.name))
+			return
 		# Note:
 		# - postponing jobs are terminated jobs only, can be called for !_CHAINED_CONSTRAINTS;
 		# - wksnum < self._wkslim
@@ -1432,7 +1436,7 @@ class ExecPool(object):
 		if not self.alive:
 			print('WARNING, scheduling of the job "{}" is cancelled because'
 				  ' the execution pool is not alive'.format(job.name))
-			return -1
+			return errno.EINTR
 		assert isinstance(job, Job) and job.name, (
 			'Job type is invalid or the instance is not initialized: {}'.format(job))
 		# Note: _wkslim an be 0 only on/after the termination
