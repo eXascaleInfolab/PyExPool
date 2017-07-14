@@ -55,7 +55,7 @@ import traceback  # Stacktrace;  To print a stacktrace fragment: traceback.print
 import subprocess
 import errno
 
-from multiprocessing import cpu_count, Value, Lock
+from multiprocessing import cpu_count, Value, Lock, active_children
 
 # Required to efficiently traverse items of dictionaries in both Python 2 and 3
 try:
@@ -90,6 +90,17 @@ except ImportError:
 		pass  # xrange is not defined in Python3, which is fine
 
 
+def timeheader(timestamp=time.gmtime()):
+	"""Timestamp header string
+
+	timestamp  - timestamp
+
+	return  - timetamp string for the file header
+	"""
+	assert isinstance(timestamp, time.struct_time), 'Unexpected type of timestamp'
+	return time.strftime('# --- %Y-%m-%d %H:%M:%S ' + '-'*32, timestamp)
+
+
 # Limit the amount of memory consumption by worker processes.
 # NOTE:
 #  - requires import of psutils
@@ -102,7 +113,7 @@ if _LIMIT_WORKERS_RAM:
 		_LIMIT_WORKERS_RAM = False
 		# Note: import occurs before the execution of the main application, so show
 		# the timestamp to outline when the error occurred and separate reexecutions
-		print(time.strftime('-- %Y-%m-%d %H:%M:%S ' + '-'*29, time.gmtime()), file=sys.stderr)
+		print(timeheader(), file=sys.stderr)
 		print('WARNING, RAM constraints are disabled because the psutil module import failed: ', err, file=sys.stderr)
 
 # Use chained constraints (timeout and memory limitation) in jobs to terminate
@@ -413,15 +424,15 @@ class Job(object):
 		self._fstdout = None
 		self._fstderr = None
 
-		if self.proc is not None:
-			if self.proc.poll() is None:  # poll() None means the process has not been terminated / completed
-				self.proc.kill()
-				print('WARNING, completion of the non-finished process is called for "{}", killed'
-					.format(self.name), file=sys.stderr)
-			self.proc.wait()  # Join the completed orocess to remove the entry from the children table and avoid zombie
+		#if self.proc is not None:
+		#	if self.proc.poll() is None:  # poll() None means the process has not been terminated / completed
+		#		self.proc.kill()
+		#		self.proc.wait()  # Join the completed orocess to remove the entry from the children table and avoid zombie
+		#		print('WARNING, completion of the non-finished process is called for "{}", killed'
+		#			.format(self.name), file=sys.stderr)
 
 		# Note: files should be closed before any assertions or exceptions
-		assert self.tstop is None and self.tstart is not None, (
+		assert self.tstop is None and self.tstart is not None, (  # and self.proc.poll() is not None
 			'A job ({}) should be already started and can be completed only once, tstart: {}, tstop: {}'
 			.format(self.name, self.tstart, self.tstop))
 		# Job-related post execution
@@ -1071,22 +1082,31 @@ class ExecPool(object):
 		acqlock = False  # The lock is aquired and should be released
 		try:
 			# Initialize fstdout, fstderr by the required output channel
+			timestamp = None
 			for joutp in (job.stdout, job.stderr):
 				if joutp and isinstance(joutp, str):
 					basedir = os.path.split(joutp)[0]
 					if basedir and not os.path.exists(basedir):
 						os.makedirs(basedir)
 					try:
+						fout = None
 						if joutp == job.stdout:
-							job._fstdout = open(joutp, 'a')
-							fstdout = job._fstdout
+							fout = open(joutp, 'a')
+							job._fstdout = fout
+							fstdout = fout
 							outcapt = 'stdout'
 						elif joutp == job.stderr:
-							job._fstderr = open(joutp, 'a')
-							fstderr = job._fstderr
+							fout = open(joutp, 'a')
+							job._fstderr = fout
+							fstderr = fout
 							outcapt = 'stderr'
 						else:
 							raise ValueError('Ivalid output stream value: ' + str(joutp))
+						# Add a timestamp if the file is not empty to distinguish logs
+						if fout is not None and os.fstat(fout.fileno()).st_size:
+							if timestamp is None:
+								timestamp = time.gmtime()
+							print(timeheader(timestamp), file=fout)  # Note: prints also newline unlike fout.write()
 					except IOError as err:
 						print('ERROR on opening custom {} "{}" for "{}": {}. Default is used.'
 							.format(outcapt, joutp, job.name, err), file=sys.stderr)
@@ -1136,7 +1156,10 @@ class ExecPool(object):
 				job.name, err, traceback.format_exc()), file=sys.stderr)
 			# Note: process-associated file descriptors are closed in complete()
 			if job.proc is not None:  # Note: this is an extra rare, but possible case
-				if job.proc.poll() is None:  # None means the process has not been terminated / completed, which can be if sleep() generates exception
+				# poll None means the process has not been terminated / completed,
+				# which can be if sleep() generates exception or if the system
+				# interrupted called [and the sync] process already created
+				if job.proc.poll() is None:
 					job.proc.terminate()
 				self.__clearAffinity(job)  # Note: process can both exists here and does not exist, i.e. the process state is undefined
 			job.complete(False)
@@ -1319,11 +1342,11 @@ class ExecPool(object):
 		# mark the completed dependent jobs to not be restarted / postponed
 		# Note: jobs complete execution relatively seldom, so set with fast
 		# search is more suitable than full scan of the list
-		for job in completed:
-			# Join the processes to clear the memory table and avoid zombie
-			# Do it before the removement from the worker to not loose this step in case of interruption
-			job.proc.wait()
-			self._workers.remove(job)
+		if completed:
+			# ATTENTION: required to join terminated procs and avoid zombies
+			active_children()  # Return list of all live children of the current process, joining any processes which have already finished
+			for job in completed:
+				self._workers.remove(job)
 		# self._workers = [w for w in self._workers if w not in completed]
 
 		# Check memory limitation fulfilling for all remained processes
