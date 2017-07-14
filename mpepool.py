@@ -427,7 +427,7 @@ class Job(object):
 				except Exception as err:
 					print('ERROR in ondone callback of "{}": {}. {}'.format(
 						self.name, err, traceback.format_exc()), file=sys.stderr)
-			# Clean up
+			# Clean up empty logs (can be left for the terminatig process to avoid delays)
 			# Remove empty logs skipping the system devnull
 			tpaths = []  # Base dir of the output
 			if (self.stdout and isinstance(self.stdout, str) and self.stdout != os.devnull
@@ -1061,7 +1061,7 @@ class ExecPool(object):
 		# Consider custom output channels for the job
 		fstdout = None
 		fstderr = None
-		acqlock = False  # The lock is aquired and shuold be released
+		acqlock = False  # The lock is aquired and should be released
 		try:
 			# Initialize fstdout, fstderr by the required output channel
 			for joutp in (job.stdout, job.stderr):
