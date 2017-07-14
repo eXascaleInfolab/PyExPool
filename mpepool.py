@@ -1320,6 +1320,9 @@ class ExecPool(object):
 		# Note: jobs complete execution relatively seldom, so set with fast
 		# search is more suitable than full scan of the list
 		for job in completed:
+			# Join the processes to clear the memory table and avoid zombie
+			# Do it before the removement from the worker to not loose this step in case of interruption
+			job.proc.wait()
 			self._workers.remove(job)
 		# self._workers = [w for w in self._workers if w not in completed]
 
