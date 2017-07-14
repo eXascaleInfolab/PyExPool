@@ -413,6 +413,13 @@ class Job(object):
 		self._fstdout = None
 		self._fstderr = None
 
+		if self.proc is not None:
+			if self.proc.poll() is None:  # poll() None means the process has not been terminated / completed
+				self.proc.kill()
+				print('WARNING, completion of the non-finished process is called for "{}", killed'
+					.format(self.name), file=sys.stderr)
+			self.proc.wait()  # Join the completed orocess to remove the entry from the children table and avoid zombie
+
 		# Note: files should be closed before any assertions or exceptions
 		assert self.tstop is None and self.tstart is not None, (
 			'A job ({}) should be already started and can be completed only once, tstart: {}, tstop: {}'
@@ -1129,6 +1136,8 @@ class ExecPool(object):
 				job.name, err, traceback.format_exc()), file=sys.stderr)
 			# Note: process-associated file descriptors are closed in complete()
 			if job.proc is not None:  # Note: this is an extra rare, but possible case
+				if job.proc.poll() is None:  # None means the process has not been terminated / completed, which can be if sleep() generates exception
+					job.proc.terminate()
 				self.__clearAffinity(job)  # Note: process can both exists here and does not exist, i.e. the process state is undefined
 			job.complete(False)
 			# ATTENTION: reraise exception for the BaseException but not Exception subclusses
