@@ -406,9 +406,6 @@ class Job(object):
 		graceful  - the job is successfully completed or it was terminated / crashed, bool.
 			None means use "not self.proc.returncode" (i.e. whether errcode is 0)
 		"""
-		assert self.tstop is None and self.tstart is not None, (
-			'A job ({}) should be already started and can be completed only once, tstart: {}, tstop: {}'
-			.format(self.name, self.tstart, self.tstop))
 		# Close process-related file descriptors
 		for fd in (self._fstdout, self._fstderr):
 			if fd and fd is not sys.stdout and fd is not sys.stderr and hasattr(fd, 'close'):
@@ -416,6 +413,10 @@ class Job(object):
 		self._fstdout = None
 		self._fstderr = None
 
+		# Note: files should be closed before any assertions or exceptions
+		assert self.tstop is None and self.tstart is not None, (
+			'A job ({}) should be already started and can be completed only once, tstart: {}, tstop: {}'
+			.format(self.name, self.tstart, self.tstop))
 		# Job-related post execution
 		if graceful is None:
 			graceful = self.proc is not None and not self.proc.returncode
@@ -1119,7 +1120,7 @@ class ExecPool(object):
 				# Wait a little bit to start the process besides it's scheduling
 				if job.startdelay > 0:
 					time.sleep(job.startdelay)
-		except Exception as err:  # Should not occur: subprocess.CalledProcessError
+		except BaseException as err:  # Should not occur: subprocess.CalledProcessError
 			# ATTENTION: the exception could be raised on process creation or on not self.alive
 			# with acquired lock, which should be released
 			if acqlock:
@@ -1130,13 +1131,27 @@ class ExecPool(object):
 			if job.proc is not None:  # Note: this is an extra rare, but possible case
 				self.__clearAffinity(job)  # Note: process can both exists here and does not exist, i.e. the process state is undefined
 			job.complete(False)
+			# ATTENTION: reraise exception for the BaseException but not Exception subclusses
+			# to have termination of the whole pool by the system interruption
+			if not isinstance(err, Exception):
+				raise
 		else:
 			if async:
 				return 0
-			else:
+			# Synchronous job processing
+			err = None
+			try:
 				job.proc.wait()
+			except BaseException as err:  # Should not occur: subprocess.CalledProcessError
+				print('ERROR on "{}" execution occurred: {}, skipping the job. {}'.format(
+					job.name, err, traceback.format_exc()), file=sys.stderr)
+			finally:
 				self.__clearAffinity(job)
 				job.complete()
+			# ATTENTION: reraise exception for the BaseException but not Exception subclusses
+			# to have termination of the whole pool by the system interruption
+			if err and not isinstance(err, Exception):
+				raise
 		if job.proc.returncode:
 			print('WARNING, "{}" failed to start, errcode: {}'.format(job.name, job.proc.returncode), file=sys.stderr)
 		return job.proc.returncode
