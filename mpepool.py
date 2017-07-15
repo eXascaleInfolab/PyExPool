@@ -55,7 +55,7 @@ import traceback  # Stacktrace;  To print a stacktrace fragment: traceback.print
 import subprocess
 import errno
 
-from multiprocessing import cpu_count, Value, Lock, active_children
+from multiprocessing import cpu_count, Value, Lock
 
 # Required to efficiently traverse items of dictionaries in both Python 2 and 3
 try:
@@ -994,6 +994,12 @@ class ExecPool(object):
 		# Note: job wkslim should be updated before adding to the _jobs to handle correctly the case when _jobs were empty
 		if _DEBUG_TRACE >= 2:
 			print('  Nonstarted initial jobs: ', ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs]))
+		# Reset proc to remove it from the subproceeses table and avoid zombies for the postponed jobs
+		if job.terminates:
+			job.proc = None  # Reset old job process if any
+			#job.terminates = 0  # Reset termination requests counter
+			#job.tstop = None  # Reset the completion / termination time
+			#job.tstart = None  # Reset the start times
 		jobsnum = len(self._jobs)
 		i = 0
 		if priority:
@@ -1342,11 +1348,8 @@ class ExecPool(object):
 		# mark the completed dependent jobs to not be restarted / postponed
 		# Note: jobs complete execution relatively seldom, so set with fast
 		# search is more suitable than full scan of the list
-		if completed:
-			# ATTENTION: required to join terminated procs and avoid zombies
-			active_children()  # Return list of all live children of the current process, joining any processes which have already finished
-			for job in completed:
-				self._workers.remove(job)
+		for job in completed:
+			self._workers.remove(job)
 		# self._workers = [w for w in self._workers if w not in completed]
 
 		# Check memory limitation fulfilling for all remained processes
