@@ -55,7 +55,7 @@ import traceback  # Stacktrace;  To print a stacktrace fragment: traceback.print
 import subprocess
 import errno
 
-from multiprocessing import cpu_count, Value, Lock
+from multiprocessing import cpu_count, Value, Lock  #, active_children
 
 # Required to efficiently traverse items of dictionaries in both Python 2 and 3
 try:
@@ -879,20 +879,6 @@ class ExecPool(object):
 		self.__terminate()
 
 
-	def __clearAffinity(self, job):
-		"""Clear job affinity
-
-		job  - the job to be processed
-		"""
-		if self._affinity and not job._omitafn and job.proc is not None:
-			try:
-				self._affinity[self._affinity.index(job.proc.pid)] = None
-			except ValueError:
-				print('WARNING, affinity clearup is requested to the job "{}" without the activated affinity'
-					.format(job.name), file=sys.stderr)
-				pass  # Do nothing if the affinity was not set for this process
-
-
 	def __del__(self):
 		self.__terminate()
 
@@ -947,8 +933,7 @@ class ExecPool(object):
 					job.proc.kill()
 		# Tidy jobs
 		for job in self._workers:
-			self.__clearAffinity(job)
-			job.complete(False)
+			self.__complete(job, False)
 		self._workers.clear()
 		## Set _wkslim to 0 to not start any jobs
 		#self._wkslim = 0  # ATTENTION: reset of the _wkslim can break silent subsequent reuse of the execution pool
@@ -994,12 +979,13 @@ class ExecPool(object):
 		# Note: job wkslim should be updated before adding to the _jobs to handle correctly the case when _jobs were empty
 		if _DEBUG_TRACE >= 2:
 			print('  Nonstarted initial jobs: ', ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs]))
-		# Reset proc to remove it from the subproceeses table and avoid zombies for the postponed jobs
-		if job.terminates:
-			job.proc = None  # Reset old job process if any
-			#job.terminates = 0  # Reset termination requests counter
-			#job.tstop = None  # Reset the completion / termination time
-			#job.tstart = None  # Reset the start times
+		# Note: it does not impact on the existence of zombie procs
+		## Reset proc to remove it from the subproceeses table and avoid zombies for the postponed jobs
+		#if job.terminates:
+		#	job.proc = None  # Reset old job process if any
+		#	#job.terminates = 0  # Reset termination requests counter
+		#	#job.tstop = None  # Reset the completion / termination time
+		#	#job.tstart = None  # Reset the start times
 		jobsnum = len(self._jobs)
 		i = 0
 		if priority:
@@ -1058,7 +1044,8 @@ class ExecPool(object):
 		assert job.tstop is None or job.terminates, ('The starting job "{}" is'
 			' expected to be non-completed'.format(job.name))
 		wksnum = len(self._workers)  # The current number of worker processes
-		if (async and wksnum > self._wkslim) or not self._wkslim or not self.alive:
+		if (async and wksnum >= self._wkslim) or not self._wkslim or not self.alive:
+			# Note: can be cause by the execution pool termination
 			raise ValueError('Free workers should be available ({} busy workers of {}), alive: {}'
 				.format(wksnum, self._wkslim, self.alive))
 		#if _DEBUG_TRACE:
@@ -1138,7 +1125,8 @@ class ExecPool(object):
 						, ' '.join(job.args), job.workdir), file=sys.stderr)
 				acqlock = self.__termlock.acquire(False)
 				if not acqlock or not self.alive:
-					raise EnvironmentError((errno.EINTR, 'The execution pool has been terminated'))  # errno.ERESTART
+					# Note: it just interrupts job start, but does not cause termination of the whole (already terminated) execution pool
+					raise EnvironmentError((errno.EINTR, 'Jobs can not be started beause the execution pool has been terminated'))  # errno.ERESTART
 				job.proc = subprocess.Popen(job.args, bufsize=-1, cwd=job.workdir, stdout=fstdout, stderr=fstderr)  # bufsize=-1 - use system default IO buffer size
 				if async:
 					self._workers.add(job)
@@ -1146,10 +1134,14 @@ class ExecPool(object):
 				self.__termlock.release()
 				acqlock = False  # Note: an exception can be thrown below, but the lock is already released and should not be released again
 				if iafn >= 0:
-					self._affinity[iafn] = job.proc.pid
-					print('"{jname}" #{pid}, iafn: {iafn} (CPUs #: {icpus})'
-						.format(jname=job.name, pid=job.proc.pid, iafn=iafn
-						, icpus=self._afnmask(iafn)))  # Note: write to log, not to the stderr
+					try:
+						self._affinity[iafn] = job.proc.pid
+						print('"{jname}" #{pid}, iafn: {iafn} (CPUs #: {icpus})'
+							.format(jname=job.name, pid=job.proc.pid, iafn=iafn
+							, icpus=self._afnmask(iafn)))  # Note: write to log, not to the stderr
+					except IndexError as err:
+						# Note: BaseException is used to terminate whole execution pool
+						raise BaseException('Affinity table is inconsistent: {}'.format(err))
 				# Wait a little bit to start the process besides it's scheduling
 				if job.startdelay > 0:
 					time.sleep(job.startdelay)
@@ -1161,14 +1153,12 @@ class ExecPool(object):
 			print('ERROR on "{}" execution occurred: {}, skipping the job. {}'.format(
 				job.name, err, traceback.format_exc()), file=sys.stderr)
 			# Note: process-associated file descriptors are closed in complete()
-			if job.proc is not None:  # Note: this is an extra rare, but possible case
+			if job.proc is not None and job.proc.poll() is None:  # Note: this is an extra rare, but possible case
 				# poll None means the process has not been terminated / completed,
 				# which can be if sleep() generates exception or if the system
 				# interrupted called [and the sync] process already created
-				if job.proc.poll() is None:
-					job.proc.terminate()
-				self.__clearAffinity(job)  # Note: process can both exists here and does not exist, i.e. the process state is undefined
-			job.complete(False)
+				job.proc.terminate()
+			self.__complete(job, False)
 			# ATTENTION: reraise exception for the BaseException but not Exception subclusses
 			# to have termination of the whole pool by the system interruption
 			if not isinstance(err, Exception):
@@ -1184,8 +1174,7 @@ class ExecPool(object):
 				print('ERROR on "{}" execution occurred: {}, skipping the job. {}'.format(
 					job.name, err, traceback.format_exc()), file=sys.stderr)
 			finally:
-				self.__clearAffinity(job)
-				job.complete()
+				self.__complete(job)
 			# ATTENTION: reraise exception for the BaseException but not Exception subclusses
 			# to have termination of the whole pool by the system interruption
 			if err and not isinstance(err, Exception):
@@ -1193,6 +1182,24 @@ class ExecPool(object):
 		if job.proc.returncode:
 			print('WARNING, "{}" failed to start, errcode: {}'.format(job.name, job.proc.returncode), file=sys.stderr)
 		return job.proc.returncode
+
+
+	def __complete(self, job, graceful=None):
+		"""Complete the job clearing affinity if required
+
+		job  - the job to be completed
+		graceful  - the completion is graceful (job was not terminated internally
+			due to some error or externally).
+			None means unknown and should be identified automatically.
+		"""
+		if self._affinity and not job._omitafn and job.proc is not None:
+			try:
+				self._affinity[self._affinity.index(job.proc.pid)] = None
+			except ValueError:
+				print('WARNING, affinity clearup is requested to the job "{}" without the activated affinity'
+					.format(job.name), file=sys.stderr)
+				pass  # Do nothing if the affinity was not set for this process
+		job.complete(graceful)
 
 
 	def __reviseWorkers(self):
@@ -1402,12 +1409,14 @@ class ExecPool(object):
 			memall = self.memlimit + memov  # Note: memov is negative here
 
 		# Process completed (and terminated) jobs: execute callbacks and remove the workers
+		#cterminated = False  # Completed terminated procs processed
 		for job in completed:
-			self.__clearAffinity(job)  # Note: the affinity must be updated before the job restart or on completion
-			job.complete(not job.terminates and not job.proc.returncode)  # The completion is graceful only if the termination requests were not received
+			# The completion is graceful only if the termination requests were not received
+			self.__complete(job, not job.terminates and not job.proc.returncode)
 			exectime = job.tstop - job.tstart
 			# Restart the job if it was terminated and should be restarted
 			if not job.terminates:
+				#cterminated = True
 				continue
 			print('WARNING, "{}" #{} is terminated because of the {} violation'
 				', chtermtime: {}, consumes {:.4f} / {:.4f} Gb, timeout {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
@@ -1448,6 +1457,11 @@ class ExecPool(object):
 				# but now can be started successfully and will be satrted soon
 				self.__postpone(job, True)
 		# Note: the number of workers is not reduced to less than 1
+
+		# Note: active_children() does not impact on the existence of zombie procs
+		#if cterminated:
+		#	# Note: required to join terminated child procs and avoid zombies
+		#	active_children()   # Return list of all live children of the current process, joining any processes which have already finished
 
 		# Start subsequent job if it is required
 		if _DEBUG_TRACE >= 2:
