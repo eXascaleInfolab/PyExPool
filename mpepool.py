@@ -819,7 +819,8 @@ class ExecPool(object):
 		if afnmask:
 			# Check whether _AFFINITYBIN exists in the system
 			try:
-				subprocess.call([_AFFINITYBIN, '-V'])
+				with open(os.devnull, 'wb') as fdevnull:
+					subprocess.call([_AFFINITYBIN, '-V'], stdout=fdevnull)
 				if afnmask.afnstep * wksnum > afnmask.CPUS:
 					print('WARNING{}, the number of worker processes is reduced'
 						' ({wlim0} -> {wlim} to satisfy the affinity step'
