@@ -98,7 +98,9 @@ def timeheader(timestamp=time.gmtime()):
 	return  - timetamp string for the file header
 	"""
 	assert isinstance(timestamp, time.struct_time), 'Unexpected type of timestamp'
-	return time.strftime('# --- %Y-%m-%d %H:%M:%S ' + '-'*32, timestamp)
+	# ATTENTION: MPE pool timestamp [prefix] intentionally differs a bit from the
+	# benchmark timestamp to easily find/filter each of them
+	return time.strftime('# ----- %Y-%m-%d %H:%M:%S ' + '-'*30, timestamp)
 
 
 # Limit the amount of memory consumption by worker processes.
