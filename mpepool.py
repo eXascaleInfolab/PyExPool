@@ -872,14 +872,15 @@ class ExecPool(object):
 		return self
 
 
-	def __exit__(self, type, value, traceback):
+	def __exit__(self, etype, evalue, traceback):
 		"""Contex exit
 
-		type  - exception type
-		value  - exception value
+		etype  - exception type
+		evalue  - exception value
 		traceback  - exception traceback
 		"""
 		self.__terminate()
+		# Note: the exception (if any) is propagated if True is not returned here
 
 
 	def __del__(self):
