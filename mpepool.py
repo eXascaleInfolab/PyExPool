@@ -446,7 +446,7 @@ class Job(object):
 					self.ondone()
 				except Exception as err:
 					print('ERROR in ondone callback of "{}": {}. {}'.format(
-						self.name, err, traceback.format_exc()), file=sys.stderr)
+						self.name, err, traceback.format_exc(5)), file=sys.stderr)
 			# Clean up empty logs (can be left for the terminatig process to avoid delays)
 			# Remove empty logs skipping the system devnull
 			tpaths = []  # Base dir of the output
@@ -480,6 +480,7 @@ class Job(object):
 			, '-' if self.proc is None else str(self.proc.returncode)
 			, *secondsToHms(self.tstop - self.tstart))
 			, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		# Note: the callstack is shown on the termination
 		#traceback.print_stack(limit=5, file=sys.stderr)
 
 
@@ -1071,8 +1072,8 @@ class ExecPool(object):
 			try:
 				job.onstart()
 			except Exception as err:
-				print('ERROR in onstart() callback of "{}": {}. The job has not been started: {}'
-					.format(job.name, err, traceback.format_exc()), file=sys.stderr)
+				print('ERROR in onstart() callback of "{}": {}, the job is discarded. {}'
+					.format(job.name, err, traceback.format_exc(5)), file=sys.stderr)
 				errinf = getattr(err, 'errno', None)
 				return -1 if errinf is None else errinf.errorcode
 		# Consider custom output channels for the job
@@ -1156,8 +1157,8 @@ class ExecPool(object):
 			# with acquired lock, which should be released
 			if acqlock:
 				self.__termlock.release()
-			print('ERROR on "{}" execution occurred: {}, skipping the job. {}'.format(
-				job.name, err, traceback.format_exc()), file=sys.stderr)
+			print('ERROR on "{}" start occurred: {}, the job is discarded. {}'.format(
+				job.name, err, traceback.format_exc(5)), file=sys.stderr)
 			# Note: process-associated file descriptors are closed in complete()
 			if job.proc is not None and job.proc.poll() is None:  # Note: this is an extra rare, but possible case
 				# poll None means the process has not been terminated / completed,
@@ -1177,8 +1178,8 @@ class ExecPool(object):
 			try:
 				job.proc.wait()
 			except BaseException as err:  # Should not occur: subprocess.CalledProcessError
-				print('ERROR on "{}" execution occurred: {}, skipping the job. {}'.format(
-					job.name, err, traceback.format_exc()), file=sys.stderr)
+				print('ERROR on the synchronous execution of "{}" occurred: {}, the job is discarded. {}'
+					.format(job.name, err, traceback.format_exc(5)), file=sys.stderr)
 			finally:
 				self.__complete(job)
 			# ATTENTION: reraise exception for the BaseException but not Exception subclusses

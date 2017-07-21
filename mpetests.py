@@ -304,7 +304,7 @@ class TestExecPool(unittest.TestCase):
 			1) either no any nonstarted jobs
 			2) or the nonstarted jobs were already rescheduled by the related worker (absence of chained constraints)
 		"""
-		worktime = _TEST_LATENCY * 6  # Note: should be larger than 3*latency
+		worktime = _TEST_LATENCY * 10  # Note: should be larger than 3*latency
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
 		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3  # Execution pool timeout; Note: *3 because nonstarted jobs exist here nad postponed twice
