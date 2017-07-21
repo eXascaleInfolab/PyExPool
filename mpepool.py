@@ -51,7 +51,10 @@ import collections
 import os
 import ctypes  # Required for the multiprocessing Value definition
 import types  # Required for instance methods definition
-import traceback  # Stacktrace;  To print a stacktrace fragment: traceback.print_stack(limit=5, file=sys.stderr)
+import traceback  # Stacktrace
+# To print a stacktrace fragment:
+# traceback.print_stack(limit=5, file=sys.stderr) or
+# print(traceback.format_exc(5), file=sys.stderr)
 import subprocess
 import errno
 
