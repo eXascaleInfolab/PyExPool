@@ -884,11 +884,13 @@ class ExecPool(object):
 
 
 	def __del__(self):
+		"""Destructor"""
 		self.__terminate()
 
 
 	def __finalize__(self):
-		self.__del__()
+		"""Late clear up called after the garbage collection (unlikely to be used)"""
+		self.__terminate()
 
 
 	def __terminate(self):
