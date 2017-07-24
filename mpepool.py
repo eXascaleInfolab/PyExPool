@@ -424,8 +424,12 @@ class Job(object):
 		"""
 		# Close process-related file descriptors
 		for fd in (self._fstdout, self._fstderr):
-			if fd and fd is not sys.stdout and fd is not sys.stderr and hasattr(fd, 'close'):
-				fd.close()
+			if fd and fd is not sys.stdout and fd is not sys.stderr:  #  and hasattr(fd, 'close')
+				try:
+					fd.close()
+				except Exception as err:
+					print('ERROR, job "{}" I/O channel closing failed: {}. {}'.format(
+						self.name, err, traceback.format_exc(5)), file=sys.stderr)
 		self._fstdout = None
 		self._fstderr = None
 
@@ -1626,4 +1630,4 @@ if __name__ == '__main__':
 			else:
 				print('WARNING, the unit tests are skipped because the mock module is not installed', file=sys.stderr)
 		except ImportError as err:
-			print('WARNING, Unit tests skipped because of the failed import: ', err, sys.stderr)
+			print('WARNING, Unit tests skipped because of the failed import: ', err, file=sys.stderr)
