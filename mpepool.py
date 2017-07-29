@@ -524,7 +524,7 @@ def cpunodes():
 		[r"lscpu | sed -rn 's/^NUMA node\(s\).*(\w+)$/\1/p'"], shell=True))
 
 
-def cpusequential():
+def cpusequential(ncpunodes=cpunodes()):
 	"""Enumeration type of the logical CPUs: crossnodes or sequential
 
 	The enumeration can be crossnodes starting with one hardware thread per each
@@ -542,8 +542,10 @@ def cpusequential():
 	enumeration:  `$ sudo apt-get install hwloc`
 	See details: http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service
 
+	ncpunodes  - the number of cpu nodes in the system to assume sequential
+		enumeration for multinode systems only; >= 1
+
 	return  - enumeration type of the logical CPUs, bool or None:
-		None  - was not defined, most likely crossnodes
 		False  - crossnodes
 		True  - sequential
 	"""
@@ -553,10 +555,10 @@ def cpusequential():
 	try:
 		return int(res) == 1
 	except ValueError as err:
-		print('WARNING, return sequential "None" because the "lstopo-no-graphics"'
-			' ("hwloc" utilities) call failed: ', err, file=sys.stderr)
-		pass  # Returned value is not a number, i.e. hwloc (lstopo*) is not installed
-	return None
+		# res is not a number, i.e. hwloc (lstopo*) is not installed
+		print('WARNING, "lstopo-no-graphics ("hwloc" utilities) call failed: {}'
+			', assuming that multinode systems have nonsequential CPU enumeration.', err, file=sys.stderr)
+	return ncpunodes == 1
 
 
 class AffinityMask(object):
@@ -634,7 +636,7 @@ class AffinityMask(object):
 	CPUS = cpu_count()  # Logical CPUs: all hardware threads in all physical CPU cores in all physical CPUs in all NUMA nodes
 	NODES = cpunodes()  # NUMA nodes (typically, physical CPUs)
 	CORE_THREADS = cpucorethreads()  # Hardware threads per CPU core
-	SEQUENTIAL = cpusequential()  # Sequential enumeration of the logical CPUs or crossnode enumeration
+	SEQUENTIAL = cpusequential(NODES)  # Sequential enumeration of the logical CPUs or crossnode enumeration
 
 	CORES = CPUS//CORE_THREADS  # Total number of physical CPU cores
 	NODE_CPUS = CPUS//NODES  # Logical CPUs per each NUMA node
