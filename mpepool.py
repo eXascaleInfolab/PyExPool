@@ -1046,7 +1046,7 @@ class ExecPool(object):
 							k -= 1  # Note: k is incremented below
 				k += 1
 		if _DEBUG_TRACE >= 2:
-			print('  Nonstarted updated jobs: ', ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs]))
+			print('  Nonstarted updated jobs: ', ', '.join(['{} ({})'.format(pjob.name, pjob.wkslim) for pjob in self._jobs]))
 
 
 	def __start(self, job, async=True):
