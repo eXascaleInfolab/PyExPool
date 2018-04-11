@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-\descr:  Multi-Process Execution Pool to schedule Jobs execution with per-job timeout,
+:Description:  Multi-Process Execution Pool to schedule Jobs execution with per-job timeout,
 optionally grouping them into Tasks and specifying optional execution parameters
 considering NUMA architecture:
 	- automatic rescheduling and *load balancing* (reduction) of the worker processes
@@ -39,9 +39,10 @@ considering NUMA architecture:
 	increasing memory/time complexity if possible to reduce the number of worker process
 	terminations for the jobs execution postponing on rescheduling.
 
-\author: (c) Artem Lutov <artem@exascale.info>
-\organizations: eXascale Infolab <http://exascale.info/>, Lumais <http://www.lumais.com/>, ScienceWise <http://sciencewise.info/>
-\date: 2015-07 v1, 2017-06 v2
+:Authors: (c) Artem Lutov <artem@exascale.info>
+:Organizations: eXascale Infolab <http://exascale.info/>, Lumais <http://www.lumais.com/>,
+	ScienceWise <http://sciencewise.info/>
+:Date: 2015-07 v1, 2017-06 v2
 """
 
 from __future__ import print_function, division  # Required for stderr output, must be the first import
@@ -1194,7 +1195,7 @@ class ExecPool(object):
 			# ATTENTION: reraise exception for the BaseException but not Exception subclusses
 			# to have termination of the whole pool by the system interruption
 			if err and not isinstance(err, Exception):
-				raise
+				raise err
 		if job.proc.returncode:
 			print('WARNING, "{}" failed to start, errcode: {}'.format(job.name, job.proc.returncode), file=sys.stderr)
 		return job.proc.returncode
