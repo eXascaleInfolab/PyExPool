@@ -1482,7 +1482,7 @@ class ExecPool(object):
 
 		# Start subsequent job if it is required
 		if _DEBUG_TRACE >= 2:
-			print('  Nonstarted jobs: ', ', '.join(['{} ({})'.format(job.name, job.wkslim) for pj in self._jobs]))
+			print('  Nonstarted jobs: ', ', '.join(['{} ({})'.format(job.name, job.wkslim) for job in self._jobs]))
 		while self._jobs and len(self._workers) < self._wkslim:
 			#if _DEBUG_TRACE >= 3:
 			#	print('  "{}" (expected totmem: {:.4f} / {:.4f} Gb) is being resheduled, {} nonstarted jobs: {}'

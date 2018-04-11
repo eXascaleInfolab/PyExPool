@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-\descr:  Unit tests for the Multi-Process Execution Pool
+:Description:  Unit tests for the Multi-Process Execution Pool
 
-\author: (c) Artem Lutov <artem@exascale.info>
-\organizations: eXascale Infolab <http://exascale.info/>, Lumais <http://www.lumais.com/>, ScienceWise <http://sciencewise.info/>
-\date: 2017-06 v2
+:Authors: (c) Artem Lutov <artem@exascale.info>
+:Organizations: eXascale Infolab <http://exascale.info/>, Lumais <http://www.lumais.com/>, ScienceWise <http://sciencewise.info/>
+:Date: 2017-06 v2
 """
 
 from __future__ import print_function, division  # Required for stderr output, must be the first import
