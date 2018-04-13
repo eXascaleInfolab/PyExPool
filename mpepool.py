@@ -428,7 +428,7 @@ class Job(object):
 			if fd and fd is not sys.stdout and fd is not sys.stderr:  #  and hasattr(fd, 'close')
 				try:
 					fd.close()
-				except Exception as err:
+				except IOError as err:
 					print('ERROR, job "{}" I/O channel closing failed: {}. {}'.format(
 						self.name, err, traceback.format_exc(5)), file=sys.stderr)
 		self._fstdout = None
@@ -452,7 +452,7 @@ class Job(object):
 			if self.ondone:
 				try:
 					self.ondone()
-				except Exception as err:
+				except Exception as err:  #pylint: disable=W0703
 					print('ERROR in ondone callback of "{}": {}. {}'.format(
 						self.name, err, traceback.format_exc(5)), file=sys.stderr)
 			# Clean up empty logs (can be left for the terminatig process to avoid delays)
