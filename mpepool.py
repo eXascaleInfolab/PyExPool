@@ -110,7 +110,7 @@ def timeheader(timestamp=time.gmtime()):
 # Limit the amount of memory consumption by worker processes.
 # NOTE:
 #  - requires import of psutils
-#  - automatically reduced to the RAM size if the specidied limit is larger
+#  - automatically reduced to the RAM size if the specified limit is larger
 _LIMIT_WORKERS_RAM = True
 if _LIMIT_WORKERS_RAM:
 	try:
@@ -1213,7 +1213,7 @@ class ExecPool(object):
 			try:
 				self._affinity[self._affinity.index(job.proc.pid)] = None
 			except ValueError:
-				print('WARNING, affinity clearup is requested to the job "{}" without the activated affinity'
+				print('WARNING, affinity cleanup is requested to the job "{}" without the activated affinity'
 					.format(job.name), file=sys.stderr)
 				pass  # Do nothing if the affinity was not set for this process
 		job.complete(graceful)
