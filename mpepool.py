@@ -971,7 +971,7 @@ class ExecPool(object):
 		"""
 		if not self.alive:
 			print('WARNING, postponing of the job "{}" is cancelled because'
-				  ' the execution pool is not alive'.format(job.name))
+				' the execution pool is not alive'.format(job.name))
 			return
 		# Note:
 		# - postponing jobs are terminated jobs only, can be called for !_CHAINED_CONSTRAINTS;
@@ -1514,12 +1514,12 @@ class ExecPool(object):
 
 		job  - the job to be executed, instance of Job
 		async  - async execution or wait until execution completed
-		  NOTE: sync tasks are started at once
+			 NOTE: sync tasks are started at once
 		return  - 0 on successful execution, process return code otherwise
 		"""
 		if not self.alive:
 			print('WARNING, scheduling of the job "{}" is cancelled because'
-				  ' the execution pool is not alive'.format(job.name))
+					' the execution pool is not alive'.format(job.name))
 			return errno.EINTR
 		assert isinstance(job, Job) and job.name, (
 			'Job type is invalid or the instance is not initialized: {}'.format(job))
