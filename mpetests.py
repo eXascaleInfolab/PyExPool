@@ -19,7 +19,7 @@ except ImportError:
 		import mock
 	except ImportError:
 		mock = None  # Skip the unittests if the mock module is not installed
-from mpepool import AffinityMask, ExecPool, Job, _CHAINED_CONSTRAINTS, _LIMIT_WORKERS_RAM, _RAM_SIZE, inBytes, inGigabytes
+from mpepool import AffinityMask, ExecPool, Job, Task, _CHAINED_CONSTRAINTS, _LIMIT_WORKERS_RAM, _RAM_SIZE, inBytes, inGigabytes
 import sys, time, subprocess, unittest
 try:
 	import psutil
@@ -168,7 +168,7 @@ class TestExecPool(unittest.TestCase):
 		self.assertGreaterEqual(runsCount['count'], 2)
 
 
-	@unittest.skipUnless(_CHAINED_CONSTRAINTS, 'Requires _CHAINED_CONSTRAINTS')
+	@unittest.skipUnless(_CHAINED_CONSTRAINTS and mock is not None, 'Requires _CHAINED_CONSTRAINTS and defined mock')
 	def test_jobTimeoutChained(self):
 		"""Verify chained termination by timeout:
 			1. Termination of the related non-smaller job on termination of the main job
@@ -295,7 +295,7 @@ class TestExecPool(unittest.TestCase):
 			self.assertGreaterEqual(jms2.tstop - jms2.tstart, worktime)  # Independent job should have graceful completion
 
 
-	@unittest.skipUnless(_LIMIT_WORKERS_RAM, 'Requires _LIMIT_WORKERS_RAM')
+	@unittest.skipUnless(_LIMIT_WORKERS_RAM and mock is not None, 'Requires _LIMIT_WORKERS_RAM and defined mock')
 	def test_jobMemlimGroupSimple(self):
 		"""Verify memory violations caused by group of workers but without chained jobs
 
@@ -532,7 +532,7 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 			, acmem=acmem, armem=armem, aumem=aumem, aurmem=aurmem))
 
 
-	@unittest.skipUnless(_LIMIT_WORKERS_RAM, 'Requires _LIMIT_WORKERS_RAM')
+	@unittest.skipUnless(_LIMIT_WORKERS_RAM and mock is not None, 'Requires _LIMIT_WORKERS_RAM and defined mock')
 	def test_jobMem(self):
 		"""Test job virual memory evaluation
 		"""
@@ -583,9 +583,49 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 			self.assertLessEqual(jobtr.tstop - jobtr.tstart, etime)
 
 
+class TestTasks(unittest.TestCase):
+	"""Process tasks evaluation tests"""
+	@unittest.skipUnless(mock is not None, 'Requires defined mock')
+	def test_taskDone(self):
+		with ExecPool(2, latency=_TEST_LATENCY) as xpool:
+			# Prepare jobs task with the postprocessing
+			timeout = max(0.5, _TEST_LATENCY * 3)
+			task = Task('TimeoutTask', onstart=mock.MagicMock(), ondone=mock.MagicMock(), params=0)
+			job1 = Job('j1', args=('sleep', str(timeout)), task=task, onstart=mock.MagicMock(), ondone=mock.MagicMock())
+			job2 = Job('j2', args=('sleep', str(timeout)), task=task, ondone=mock.MagicMock(), timeout=timeout*2)
+
+			xpool.execute(job1)
+			xpool.execute(job2)
+			xpool.join(timeout*2)
+
+			job1.onstart.assert_called_once_with(job1)
+			job1.ondone.assert_called_once_with(job1)
+			job2.ondone.assert_called_once_with(job2)
+			task.onstart.assert_called_once_with(task)
+			task.ondone.assert_called_once_with(task)
+
+
+	@unittest.skipUnless(mock is not None, 'Requires defined mock')
+	def test_taskTimeout(self):
+		with ExecPool(2, latency=_TEST_LATENCY) as xpool:
+			# Prepare jobs task with the postprocessing
+			timeout = max(0.5, _TEST_LATENCY * 3)
+			task = Task('TimeoutTask', onstart=mock.MagicMock(), ondone=mock.MagicMock(), params=0)
+			worktime = (timeout + _TEST_LATENCY) * 3  # Note: should be larger than 3*latency
+			job1 = Job('j1', args=('sleep', str(timeout)), task=task, onstart=mock.MagicMock(), ondone=mock.MagicMock())
+			job2 = Job('j2', args=('sleep', str(worktime)), task=task, ondone=mock.MagicMock(), timeout=timeout)
+
+			xpool.execute(job1)
+			xpool.execute(job2)
+			xpool.join(timeout*2)
+
+			job1.onstart.assert_called_once_with(job1)
+			job1.ondone.assert_called_once_with(job1)
+			job2.ondone.assert_not_called()
+			task.onstart.assert_called_once_with(task)
+			task.ondone.assert_not_called()
+
+
 if __name__ == '__main__':
-	if mock is not None:
-		if unittest.main().result:  # verbosity=2
-			print('Try to reexecute the tests (hot run) or set x2-3 larger TEST_LATENCY')
-	else:
-		print('WARNING, the unit tests are skipped because the mock module is not installed', file=sys.stderr)
+	if unittest.main().result:  # verbosity=2
+		print('Try to reexecute the tests (hot run) or set x2-3 larger TEST_LATENCY')

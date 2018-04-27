@@ -167,11 +167,11 @@ class Task(object):
 
 		name  - task name
 		timeout  - execution timeout in seconds. Default: 0, means infinity
-		onstart  - callback which is executed on the task starting (before the execution
+		onstart  - callback which is executed on the task start (before the execution
 			started) in the CONTEXT OF THE CALLER (main process) with the single argument,
 			the task. Default: None
 			ATTENTION: must be lightweight
-		ondone  - callback which is executed on successful completion of the task in the
+		ondone  - callback which is executed on the SUCCESSFUL completion of the task in the
 			CONTEXT OF THE CALLER (main process) with the single argument, the task. Default: None
 			ATTENTION: must be lightweight
 		params  - additional parameters to be used in callbacks
@@ -187,14 +187,14 @@ class Task(object):
 		self.timeout = timeout
 		self.params = params
 		# Add member handlers if required
-		self.onstart = types.MethodType(onstart, self) if onstart else None
-		self.ondone = types.MethodType(ondone, self) if ondone else None
+		self.onstart = types.MethodType(onstart, self) if onstart else None  # Bind the callback to the object
+		self.ondone = types.MethodType(ondone, self) if ondone else None  # Bind the callback to the object
 		self.stdout = stdout
 		self.stderr = stderr
 		self.tstart = None
 		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
 		# Private attributes
-		self._jobsnum = Value(ctypes.c_uint)
+		self._jobsnum = Value(ctypes.c_uint)  # The number of active (executing) jobs
 		# Graceful completion of all tasks or at least one of the tasks was terminated
 		self._graceful = Value(ctypes.c_bool)
 		self._graceful.value = True
@@ -221,6 +221,8 @@ class Task(object):
 	def delJob(self, graceful):
 		"""Delete one job from the task
 
+		NOTE: called also for the terminated jobs
+
 		graceful  - whether the job is successfully completed or it was terminated
 		return  - None
 		"""
@@ -232,11 +234,11 @@ class Task(object):
 		# Finalize if required
 		if not graceful:
 			self._graceful.value = False
-		elif final:
+		if final:
+			# Prevent reexecution of the managed failed jobs othrerwise ondone would be always called
 			if self.ondone and self._graceful.value:
 				self.ondone()
 			self.tstop = time.time()
-		return None
 
 
 class Job(object):
