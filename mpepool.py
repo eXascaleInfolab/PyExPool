@@ -48,6 +48,9 @@ considering NUMA architecture:
 from __future__ import print_function, division  # Required for stderr output, must be the first import
 import sys
 import time
+# Consider compatibility with Python before v3.3
+if not hasattr(time, 'perf_counter'):
+	time.perf_counter = time.time
 import collections
 import os
 import ctypes  # Required for the multiprocessing Value definition
@@ -58,6 +61,9 @@ import traceback  # Stacktrace
 # print(traceback.format_exc(5), file=sys.stderr)
 import subprocess
 import errno
+# # Anync Tasks management
+# import threading  # Used only for the asyncronous Tasks termination by timeout
+# import signal  # Required for the correct handling of KeyboardInterrupt: https://docs.python.org/2/library/thread.html
 
 from multiprocessing import cpu_count, Value, Lock  #, active_children
 
@@ -159,14 +165,43 @@ def inBytes(gb):
 	return gb * 1024. ** 3
 
 
+def applyCallback(callback, owner):
+	"""Process the callback call
+	
+	Args:
+		callback (function): callback (self.onXXX)
+		owner (str): owner name of the callback (self.name)
+	"""
+	assert callable(callback) and isinstance(owner, str), 'A valid callback and owner name are expected'
+	try:
+		callback()
+	except Exception as err:  #pylint: disable=W0703
+		print('ERROR in {}() callback of the "{}": {}, discarded. {}'
+			.format(callback.__name__, owner, err, traceback.format_exc(5)), file=sys.stderr)
+		
+
 class Task(object):
+	# _tasks = []
+	# _taskManager = None
+	# _taskManagerLock = threading.Lock()
+	#
+	# @staticmethod
+	# def _taskTerminator(*args, **kwargs):
+	# 	tasks = kwargs['tasks']
+	# 	latency = kwargs['latency']
+	# 	lock = kwargs['lock']
+	# 	ctime = time.perf_counter()
+	# 	with lock:
+	# 		for task in tasks:
+	# 			if task.timeout and ctime - task.tstart >= task.timeout:
+	# 				task.terminate()
+
 	"""Task is a managing container for Jobs"""
-	#TODO: Implement timeout support in add/delJob
-	def __init__(self, name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout, stderr=sys.stderr):
+	# , timeout=0  - execution timeout in seconds. Default: 0, means infinity
+	def __init__(self, name, onstart=None, ondone=None, onfinish=None, params=None, latency=2, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize task, which is a group of jobs to be executed
 
 		name  - task name
-		timeout  - execution timeout in seconds. Default: 0, means infinity
 		onstart  - callback which is executed on the task start (before the execution
 			started) in the CONTEXT OF THE CALLER (main process) with the single argument,
 			the task. Default: None
@@ -174,71 +209,145 @@ class Task(object):
 		ondone  - callback which is executed on the SUCCESSFUL completion of the task in the
 			CONTEXT OF THE CALLER (main process) with the single argument, the task. Default: None
 			ATTENTION: must be lightweight
+		onfinish  - callback which is executed on either completion or termination of the task in the
+			CONTEXT OF THE CALLER (main process) with the single argument, the task. Default: None
+			ATTENTION: must be lightweight
 		params  - additional parameters to be used in callbacks
+		latency: float  - lock timeout in seconds: None means infinite, <= 0 means non-bocking, > 0 is the actual timeout
 		stdout  - None or file name or PIPE for the buffered output to be APPENDED
 		stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited
 
 		tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 		tstop  - termination / completion time after ondone.
+		numdone  - the number of completed DIRECT subtasks (each subtask may conatin multiple jobs or subsubtasks)
 		"""
-		assert isinstance(name, str) and timeout >= 0, 'Arguments are invalid'
+		assert isinstance(name, str) and (latency is None or latency >= 0), 'Arguments are invalid'
+		self._lock = Lock()  # Lock for the embrasing jobs
+		self._items = dict()  # Dictionary of subtasks with termination counter
 		self.name = name
-		self.timeout = timeout
+		# self.timeout = timeout
 		self.params = params
+		self.latency = latency
 		# Add member handlers if required
 		self.onstart = types.MethodType(onstart, self) if onstart else None  # Bind the callback to the object
 		self.ondone = types.MethodType(ondone, self) if ondone else None  # Bind the callback to the object
+		self.onfinish = types.MethodType(onfinish, self) if onfinish else None  # Bind the callback to the object
 		self.stdout = stdout
 		self.stderr = stderr
 		self.tstart = None
 		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
-		# Private attributes
-		self._jobsnum = Value(ctypes.c_uint)  # The number of active (executing) jobs
-		# Graceful completion of all tasks or at least one of the tasks was terminated
-		self._graceful = Value(ctypes.c_bool)
-		self._graceful.value = True
+		self.numadded = 0  # The number of added direct subtasks (the same subtask/job can be readded several times)
+		self.numdone = 0  # The number of completed direct subtasks
+		self.numterm = 0  # Total number of terminated direct subtasks
+		# Consider subtasks termination by timeout
+		# if self.timeout:
+		# 	if not _tasks:
+		# 		_tasks.append(self)
+		# 		Task._taskManager = threading.Thread(name="TaskManager", target=Task._taskTerminator
+		# 			, kwargs={'tasks': Task._tasks, 'latency': latency})
 
-
-	def addJob(self):
-		"""Add one more job to the task
-
-		return  - updated task
+	def add(self, subtask):
+		"""Add one more subtask to the task
+		
+		Args:
+			subtask (Job, Task): subtask of the current task
+		
+		Raises:
+			RuntimeError: lock acquasition failed
 		"""
-		initial = False
-		with self._jobsnum.get_lock():
-			if self._jobsnum.value == 0:
-				initial = True
-			self._jobsnum.value += 1
-		# Run onstart if required
-		if initial:
-			self.tstart = time.time()  # ATTENTION: .clock() should not be used, because it does not consider "sleep" time
+		assert isinstance(subtask, Job) or isinstance(subtask, Task), 'Unexpected type of the subtask'
+		if self.tstart is None:
+			self.tstart = time.perf_counter()
+			# Consider onstart callback
 			if self.onstart:
-				self.onstart()
-		return self
+				applyCallback(self.onstart, self.name)
+		elif subtask in self._items:
+			return
+		if self._lock.acquire(timeout=self.latency):
+			self._items.setdefault(subtask, 0)
+			self._lock.release()
+			self.numadded += 1
+		else:
+			raise RuntimeError('Lock acqusition failed on add() in "{}"'.format(self.name))
 
 
-	def delJob(self, graceful):
-		"""Delete one job from the task
-
-		NOTE: called also for the terminated jobs
-
-		graceful  - whether the job is successfully completed or it was terminated
-		return  - None
+	def finished(self, subtask, succeed):
+		"""Complete subtask
+		
+		Args:
+			subtask (Job, Task): finished subtask
+			succeed (bool): graceful successful completion or termination
+		
+		Raises:
+			RuntimeError: lock acquasition failed
 		"""
-		final = False
-		with self._jobsnum.get_lock():
-			self._jobsnum.value -= 1
-			if self._jobsnum.value == 0:
-				final = True
-		# Finalize if required
-		if not graceful:
-			self._graceful.value = False
-		if final:
-			# Prevent reexecution of the managed failed jobs othrerwise ondone would be always called
-			if self.ondone and self._graceful.value:
-				self.ondone()
-			self.tstop = time.time()
+		if not self._lock.acquire(timeout=self.latency):
+			raise RuntimeError('Lock acqusition failed on finished() in "{}"'.format(self.name))
+		try:
+			if succeed:
+				del self._items[subtask]
+				self.numdone += 1
+			else:
+				self._items[subtask] += 1
+				self.numterm += 1
+		except KeyError as err:
+			print('ERROR in "{}" succeed: {}, the finishing subtask "{}" should be among the active subtasks: {}'
+				.format(self.name, succeed, subtask, err, file=sys.stderr))
+		finally:
+			self._lock.release()
+		# Consider onfinish callback
+		if self.numterm + self.numdone == self.numadded:
+			if succeed and self.ondone:
+				assert not self._items, 'All subtasks should be already finished'
+				applyCallback(self.ondone, self.name)
+			self.tstop = time.perf_counter()
+			if self.onfinish:
+				applyCallback(self.onfinish, self.name)
+		else:
+			assert self._items, ('Uncomplete subtasks should be remained;'
+				' numterm: {}, numdone: {}, numadded: {}'.format(self.numterm, self.numdone, self.numadded))
+
+
+	def uncompleted(self, recursive=False):
+		"""Fetch names of the uncompleted tasks
+		
+		Args:
+			recursive (bool, optional): Defaults to False. Fetch uncompleted subtasks recursively
+		
+		Returns:
+			hierarchical dictionary of the uncompleted task names, each name is str
+		"""
+		if not self._lock.acquire(timeout=self.latency):
+			raise RuntimeError('Lock acquasition failed on uncompleted() in "{}"'.format(self.name))
+		try:
+			return [subtask.name if not recursive or isinstance(subtask, Job) else subtask.uncompleted(recursive) for subtask in self._items]
+		finally:
+			self._lock.release()
+		
+
+
+	# def remove(self, graceful):
+	# 	"""Delete one job from the task
+
+	# 	NOTE: called also for the terminated jobs
+
+	# 	graceful  - whether the job is successfully completed or it was terminated
+	# 	return  - None
+	# 	"""
+	# 	final = False
+	# 	with self._jobsnum.get_lock():
+	# 		self._jobsnum.value -= 1
+	# 		if self._jobsnum.value == 0:
+	# 			final = True
+	# 	# Finalize if required
+	# 	if not graceful:
+	# 		self._graceful.value = False
+	# 	if final:
+	# 		# Prevent reexecution of the managed failed jobs othrerwise ondone would be always called
+	# 		if self.ondone and self._graceful.value:
+	# 			self.ondone()
+	# 		self.tstop = time.perf_counter()
 
 
 class Job(object):
@@ -323,7 +432,7 @@ class Job(object):
 		self.params = params
 		self.timeout = timeout
 		self.ontimeout = ontimeout
-		self.task = task.addJob() if task else None
+		self.task = task
 		# Delay in the callers context after starting the job process. Should be small.
 		self.startdelay = startdelay  # 0.2  # Required to sync sequence of started processes
 		# Callbacks ------------------------------------------------------------
@@ -357,6 +466,9 @@ class Job(object):
 			# Note: wkslim is used only internally for the cross-category ordering
 			# of the jobs queue by reducing resource consumption
 			self.wkslim = None  # Worker processes limit (max number) on the job postponing if any
+		# Update the task if any with this Job
+		if self.task:
+			self.task.add(self)
 
 
 	def _updateMem(self):
@@ -478,11 +590,11 @@ class Job(object):
 					os.rmdir(tpath)
 				except OSError:
 					pass  # The dir is not empty, just skip it
+		# Updated execution status
+		self.tstop = time.perf_counter()
 		# Check whether the job is associated with any task
 		if self.task:
-			self.task = self.task.delJob(graceful)
-		# Updated execution status
-		self.tstop = time.time()
+			self.task.finished(self, graceful)
 		#if _DEBUG_TRACE:  # Note: terminated jobs are traced in __reviseWorkers()
 		print('Completed {} "{}" #{} with errcode {}, executed {} h {} m {:.4f} s'
 			.format('gracefully' if graceful else '(ABNORMALLY)'
@@ -920,7 +1032,7 @@ class ExecPool(object):
 		print('WARNING{}, terminating the execution pool with {} nonstarted jobs and {} workers'
 			', executed {} h {} m {:.4f} s, callstack fragment:'
 			.format('' if not self.name else ' ' + self.name, len(self._jobs), len(self._workers)
-			, *secondsToHms(0 if self._tstart is None else time.time() - self._tstart)), file=sys.stderr)
+			, *secondsToHms(0 if self._tstart is None else time.perf_counter() - self._tstart)), file=sys.stderr)
 		traceback.print_stack(limit=5, file=sys.stderr)
 
 		# Shut down all [nonstarted] jobs
@@ -1077,13 +1189,13 @@ class ExecPool(object):
 			job.proc = None  # Reset old job process if any
 			job.tstop = None  # Reset the completion / termination time
 			# Note: retain previous value of mem for better scheduling, it is the valid value for the same job
-		job.tstart = time.time()
+		job.tstart = time.perf_counter()
 		if job.onstart:
 			if _DEBUG_TRACE >= 2:
 				print('  Starting onstart() for job "{}"'.format(job.name), file=sys.stderr)
 			try:
 				job.onstart()
-			except Exception as err:
+			except Exception as err:  #pylint: disable=W0703
 				print('ERROR in onstart() callback of "{}": {}, the job is discarded. {}'
 					.format(job.name, err, traceback.format_exc(5)), file=sys.stderr)
 				errinf = getattr(err, 'errno', None)
@@ -1239,7 +1351,7 @@ class ExecPool(object):
 				completed.add(job)
 				continue
 
-			exectime = time.time() - job.tstart
+			exectime = time.perf_counter() - job.tstart
 			# Update memory statistics (if required) and skip jobs that do not exceed the specified time/memory constraints
 			if not job.terminates and (not job.timeout or exectime < job.timeout
 			) and (not self.memlimit or job.mem < self.memlimit):
@@ -1283,7 +1395,7 @@ class ExecPool(object):
 				job.proc.kill()
 				completed.add(job)
 				if _DEBUG_TRACE:  # Note: anyway completing terminated jobs are traced
-					exectime = time.time() - job.tstart
+					exectime = time.perf_counter() - job.tstart
 					print('WARNING, "{}" #{} is killed because of the {} violation'
 						' consuming {:.4f} Gb with timeout of {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 						.format(job.name, job.proc.pid
@@ -1540,7 +1652,7 @@ class ExecPool(object):
 		if async:
 			# Start the execution timer
 			if self._tstart is None:
-				self._tstart = time.time()
+				self._tstart = time.perf_counter()
 			# Evaluate total memory consumed by the worker processes
 			if self.memlimit:
 				memall = 0.
@@ -1599,7 +1711,7 @@ class ExecPool(object):
 
 		self.__reviseWorkers()
 		while self.alive and (self._jobs or self._workers):
-			if timeout and time.time() - self._tstart > timeout:
+			if timeout and time.perf_counter() - self._tstart > timeout:
 				print('WARNING, the execution pool is terminated on timeout', file=sys.stderr)
 				self.__terminate()
 				return False

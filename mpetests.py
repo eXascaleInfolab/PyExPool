@@ -21,6 +21,9 @@ except ImportError:
 		mock = None  # Skip the unittests if the mock module is not installed
 from mpepool import AffinityMask, ExecPool, Job, Task, _CHAINED_CONSTRAINTS, _LIMIT_WORKERS_RAM, _RAM_SIZE, inBytes, inGigabytes
 import sys, time, subprocess, unittest
+# Consider compatibility with Python before v3.3
+if not hasattr(time, 'perf_counter'):
+	time.perf_counter = time.time
 try:
 	import psutil
 except ImportError as err:
@@ -117,14 +120,14 @@ class TestExecPool(unittest.TestCase):
 		worktime = max(1, _TEST_LATENCY) + (timeout * 2) // 1  # Job work time
 		assert _TEST_LATENCY * 3 < timeout < worktime, 'Testcase parameters validation failed'
 
-		tstart = time.time()
+		tstart = time.perf_counter()
 		jterm = Job('j_timeout', args=('sleep', str(worktime)), timeout=timeout)
 		self._execpool.execute(jterm)
 		jcompl = Job('j_complete', args=('sleep', '0'), timeout=timeout)
 		self._execpool.execute(jcompl)
 		# Verify successful completion of the execution pool
 		self.assertTrue(self._execpool.join())
-		etime = time.time() - tstart  # Execution time
+		etime = time.perf_counter() - tstart  # Execution time
 		self.assertFalse(self._execpool._workers)  # Workers shuold be empty
 		# Verify termination time
 		self.assertLess(etime, worktime)
@@ -146,7 +149,7 @@ class TestExecPool(unittest.TestCase):
 		worktime = max(1, _TEST_LATENCY) + (timeout * 2) // 1  # Job work time
 		assert _TEST_LATENCY * 3 < timeout < worktime, 'Testcase parameters validation failed'
 
-		tstart = time.time()
+		tstart = time.perf_counter()
 		self._execpool.execute(Job('ep_timeout', args=('sleep', str(worktime)), timeout=timeout))
 
 		runsCount={'count': 0}
@@ -158,7 +161,7 @@ class TestExecPool(unittest.TestCase):
 		self._execpool.execute(jrx)
 		# Verify termination of the execution pool
 		self.assertFalse(self._execpool.join(etimeout))
-		etime = time.time() - tstart  # Execution time
+		etime = time.perf_counter() - tstart  # Execution time
 		self.assertFalse(self._execpool._workers)  # Workers should be empty
 		# Verify termination time
 		self.assertLess(etime, worktime)
@@ -180,7 +183,7 @@ class TestExecPool(unittest.TestCase):
 		worktime = max(1, _TEST_LATENCY) + (timeout * 2) // 1  # Job work time
 		assert _TEST_LATENCY * 3 < timeout < worktime, 'Testcase parameters validation failed'
 
-		tstart = time.time()
+		tstart = time.perf_counter()
 		jm = Job('jmaster_timeout', args=('sleep', str(worktime))
 			, category='cat1', size=2, timeout=timeout)
 		self._execpool.execute(jm)
@@ -205,7 +208,7 @@ class TestExecPool(unittest.TestCase):
 
 		# Verify exec pool completion
 		self.assertTrue(self._execpool.join(etimeout))
-		etime = time.time() - tstart  # Execution time
+		etime = time.perf_counter() - tstart  # Execution time
 		# Verify timings
 		self.assertTrue(worktime <= etime < etimeout)
 		self.assertLess(jm.tstop - jm.tstart, worktime)
@@ -242,7 +245,7 @@ class TestExecPool(unittest.TestCase):
 		msmall = 256  # Small amount of memory for a job, bytes
 		# Start not more than 3 simultaneous workers
 		with ExecPool(max(_WPROCSMAX, 3), latency=_TEST_LATENCY, memlimit=epoolMem) as xpool:
-			tstart = time.time()
+			tstart = time.perf_counter()
 
 			jmsDb = Job('jmem_small_ba', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
 				, category='cat1', size=9, timeout=timeout)
@@ -276,7 +279,7 @@ class TestExecPool(unittest.TestCase):
 			time.sleep(worktime / 3)  # Wait for the Job starting and memory allocation
 			# Verify exec pool completion before the timeout
 			self.assertTrue(xpool.join(etimeout))
-			etime = time.time() - tstart  # Execution time
+			etime = time.perf_counter() - tstart  # Execution time
 
 			# Verify timings
 			self.assertLess(etime, etimeout)
@@ -315,7 +318,7 @@ class TestExecPool(unittest.TestCase):
 		msmall = inBytes(0.025)  # Small amount of memory for a job; Note: actual Python app consumes ~51 Mb for the allocated ~25 Mb
 		# Start not more than 3 simultaneous workers
 		with ExecPool(max(_WPROCSMAX, 3), latency=_TEST_LATENCY, memlimit=epoolMem) as xpool:
-			tstart = time.time()
+			tstart = time.perf_counter()
 			jgms1 = Job('jgroup_mem_small_1', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
 				, size=9, timeout=timeout, onstart=mock.MagicMock())
 			jgms2 = Job('jgroup_mem_small_2', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
@@ -337,7 +340,7 @@ class TestExecPool(unittest.TestCase):
 			# Verify exec pool completion before the timeout
 			self.assertTrue(xpool.join(etimeout))
 			# All jobs should be completed
-			etime = time.time() - tstart  # Execution time
+			etime = time.perf_counter() - tstart  # Execution time
 
 			# Verify timings, gracefull copletion of all jobs except the last one
 			self.assertLess(etime, etimeout)
@@ -384,7 +387,7 @@ class TestExecPool(unittest.TestCase):
 		msmall = inBytes(0.025)  # Small amount of memory for a job; Note: actual Python app consumes ~51 Mb for the allocated ~25 Mb
 		# Start not more than 3 simultaneous workers
 		with ExecPool(max(_WPROCSMAX, 4), latency=_TEST_LATENCY, memlimit=epoolMem) as xpool:
-			tstart = time.time()
+			tstart = time.perf_counter()
 
 			jgms1 = Job('jcgroup_mem_small_1', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
 				, size=5, timeout=timeout)
@@ -410,7 +413,7 @@ class TestExecPool(unittest.TestCase):
 			time.sleep(worktime / 4)  # Wait for the Job starting and memory allocation
 			# Verify exec pool completion before the timeout
 			self.assertTrue(xpool.join(etimeout))
-			etime = time.time() - tstart  # Execution time
+			etime = time.perf_counter() - tstart  # Execution time
 
 			# Verify timings, gracefull copletion of all jobs except the last one
 			self.assertLess(etime, etimeout)
@@ -563,7 +566,7 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 			else:
 				self.assertRaises(NameError, job._updateMem)
 
-			tstart = time.time()
+			tstart = time.perf_counter()
 			xpool.execute(job)
 			xpool.execute(jobx)
 			xpool.execute(jobtr)
@@ -578,7 +581,7 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 			# Verify exec pool completion before the timeout
 			time.sleep(worktime / 3)  # Wait for the Job starting and memory allocation
 			self.assertTrue(xpool.join(etimeout))
-			etime = time.time() - tstart  # Execution time
+			etime = time.perf_counter() - tstart  # Execution time
 			# Verify jobs execution time
 			self.assertLessEqual(jobtr.tstop - jobtr.tstart, etime)
 
