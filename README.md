@@ -55,16 +55,16 @@ Demo of the *scheduling with cache L1 maximization* for single-threaded processe
 Multi-Process Execution Pool *can be run without any external modules* with automatically disabled load balancing.  
 The external modules / apps are required only for the extended functionality:
 - [psutil](https://pypi.python.org/pypi/psutil) is required for the dynamic jobs balancing to perform the in-RAM computations (`_LIMIT_WORKERS_RAM = True`) and limit memory consumption of the workers.
-```
+```sh
 $ sudo pip install psutil
 ```
 > To perform in-memory computations dedicating almost all available RAM (specifying *memlimit ~= physical memory*), it is recommended to set swappiness to 1 .. 10: `$ sudo sysctl -w vm.swappiness=5` or set it permanently in `/etc/sysctl.conf`: `vm.swappiness = 5`.
 - [hwloc](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) (includes `lstopo`) is required to identify enumeration type of logical CPUs to perform correct CPU affinity masking. Required only for the automatic affinity masking with cache usage optimization and only if the CPU enumeration type is not specified manually.
-```
+```sh
 $ sudo apt-get install -y hwloc
 ```
 - [mock](https://pypi.python.org/pypi/mock) is required exclusively for the unit testing under Python2, `mock` is included in the standard lib of Python3.
-```
+```sh
 $ sudo pip install mock
 ```
 
@@ -162,21 +162,29 @@ Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout,
 	Task is a managing container for Jobs
 
 	name  - task name
-	timeout  - execution timeout. Default: 0, means infinity
-	onstart  - callback which is executed on the task starting (before the execution
+	onstart  - a callback, which is executed on the task start (before the execution
 		started) in the CONTEXT OF THE CALLER (main process) with the single argument,
 		the task. Default: None
 		ATTENTION: must be lightweight
-	ondone  - callback which is executed on successful completion of the task in the
+	ondone  - a callback, which is executed on the SUCCESSFUL completion of the task in the
+		CONTEXT OF THE CALLER (main process) with the single argument, the task. Default: None
+		ATTENTION: must be lightweight
+	onfinish  - a callback, which is executed on either completion or termination of the task in the
 		CONTEXT OF THE CALLER (main process) with the single argument, the task. Default: None
 		ATTENTION: must be lightweight
 	params  - additional parameters to be used in callbacks
+	latency: float  - lock timeout in seconds: None means infinite, <= 0 means non-bocking, > 0 is the actual timeout
+	task: Task  - optional supertask
 	stdout  - None or file name or PIPE for the buffered output to be APPENDED
 	stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 		ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited
 
+	# Automatically initialized and updated properties
 	tstart  - start time is filled automatically on the execution start (before onstart). Default: None
-	tstop  - termination / completion time after ondone
+	tstop  - termination / completion time after ondone.
+	numadded: uint  - the number of direct added subtasks
+	numdone: uint  - the number of completed DIRECT subtasks (each subtask may conatin multiple jobs or subsubtasks)
+	numterm: uint  - the number of terminated direct subtask
 	"""
 ```
 
@@ -462,8 +470,8 @@ def terminationHandler(signal=None, frame=None, terminate=True):
 	global execpool
 
 	if execpool:
-		del execpool  # Destructors are caled later
-		# Define _execpool to avoid unnessary trash in the error log, which might
+		del execpool  # Destructors are called later
+		# Define _execpool to avoid unnecessary trash in the error log, which might
 		# be caused by the attempt of subsequent deletion on destruction
 		execpool = None  # Note: otherwise _execpool becomes undefined
 	if terminate:
@@ -494,5 +502,5 @@ atexit.register(terminationHandler, terminate=False)
 
 
 ## Related Projects
-- [ExecTime](https://bitbucket.org/lumais/exectime)  -  *failover* lightweight resource consumption profiler (*timings and memory*), applicable to multiple processes with optional *per-process results labeling* and synchronized *output to the specified file* or `stderr`: https://bitbucket.org/lumais/exectime
+- [ExecTime](https://bitbucket.org/lumais/exectime)  -  *failover* lightweight resource consumption profiler (*timings and memory*), applicable to multiple processes with optional *per-process results labeling* and synchronized *output to the specified file* or `stderr`
 - [PyCABeM](https://github.com/eXascaleInfolab/PyCABeM) - Python Benchmarking Framework for the Clustering Algorithms Evaluation. Uses extrinsic (NMIs) and intrinsic (Q) measures for the clusters quality evaluation considering overlaps (nodes membership by multiple clusters).
