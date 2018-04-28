@@ -592,14 +592,14 @@ class TestTasks(unittest.TestCase):
 	def test_taskDone(self):
 		with ExecPool(2, latency=_TEST_LATENCY) as xpool:
 			# Prepare jobs task with the postprocessing
-			timeout = max(0.5, _TEST_LATENCY * 3)
+			worktime = max(0.5, _TEST_LATENCY * 3)
 			task = Task('TimeoutTask', onstart=mock.MagicMock(), ondone=mock.MagicMock(), params=0)
-			job1 = Job('j1', args=('sleep', str(timeout)), task=task, onstart=mock.MagicMock(), ondone=mock.MagicMock())
-			job2 = Job('j2', args=('sleep', str(timeout)), task=task, ondone=mock.MagicMock(), timeout=timeout*2)
+			job1 = Job('j1', args=('sleep', str(worktime)), task=task, onstart=mock.MagicMock(), ondone=mock.MagicMock())
+			job2 = Job('j2', args=('sleep', str(worktime)), task=task, ondone=mock.MagicMock(), timeout=worktime*2)
 
 			xpool.execute(job1)
 			xpool.execute(job2)
-			xpool.join(timeout*2)
+			xpool.join(worktime*2)
 
 			job1.onstart.assert_called_once_with(job1)
 			job1.ondone.assert_called_once_with(job1)
@@ -612,21 +612,61 @@ class TestTasks(unittest.TestCase):
 	def test_taskTimeout(self):
 		with ExecPool(2, latency=_TEST_LATENCY) as xpool:
 			# Prepare jobs task with the postprocessing
-			timeout = max(0.5, _TEST_LATENCY * 3)
-			task = Task('TimeoutTask', onstart=mock.MagicMock(), ondone=mock.MagicMock(), params=0)
-			worktime = (timeout + _TEST_LATENCY) * 3  # Note: should be larger than 3*latency
-			job1 = Job('j1', args=('sleep', str(timeout)), task=task, onstart=mock.MagicMock(), ondone=mock.MagicMock())
-			job2 = Job('j2', args=('sleep', str(worktime)), task=task, ondone=mock.MagicMock(), timeout=timeout)
+			worktime = max(0.5, _TEST_LATENCY * 3)
+			task = Task('TimeoutTask', onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock())
+			timelong = (worktime + _TEST_LATENCY) * 3  # Note: should be larger than 3*latency
+			job1 = Job('j1', args=('sleep', str(worktime)), task=task, onstart=mock.MagicMock(), ondone=mock.MagicMock())
+			job2 = Job('j2', args=('sleep', str(timelong)), task=task, ondone=mock.MagicMock(), timeout=worktime)
 
 			xpool.execute(job1)
 			xpool.execute(job2)
-			xpool.join(timeout*2)
+			xpool.join(worktime*2)
 
 			job1.onstart.assert_called_once_with(job1)
 			job1.ondone.assert_called_once_with(job1)
 			job2.ondone.assert_not_called()
 			task.onstart.assert_called_once_with(task)
 			task.ondone.assert_not_called()
+			task.onfinish.assert_called_once_with(task)
+			self.assertEqual(task.numadded, 2)
+			self.assertEqual(task.numdone, 1)
+			self.assertEqual(task.numterm, 1)
+
+
+	@unittest.skipUnless(mock is not None, 'Requires defined mock')
+	def test_subtasksTimeout(self):
+		with ExecPool(2, latency=_TEST_LATENCY) as xpool:
+			# Prepare jobs task with the postprocessing
+			worktime = max(0.5, _TEST_LATENCY * 3)
+			t1 = Task('Task1', onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock())
+			timelong = (worktime + _TEST_LATENCY) * 3  # Note: should be larger than 3*latency
+			j1 = Job('j1', args=('sleep', str(worktime)), task=t1, onstart=mock.MagicMock(), ondone=mock.MagicMock())
+			st1 = Task('Subtask1', onstart=mock.MagicMock(), task=t1, ondone=mock.MagicMock(), onfinish=mock.MagicMock())
+			st1j1 = Job('st1j1', args=('sleep', str(timelong)), task=st1, onstart=mock.MagicMock(), ondone=mock.MagicMock(), timeout=worktime)
+			st1j2 = Job('st1j2', args=('sleep', str(worktime)), task=st1, ondone=mock.MagicMock())
+
+			xpool.execute(j1)
+			xpool.execute(st1j1)
+			xpool.execute(st1j2)
+			xpool.join(worktime*2)
+
+			j1.onstart.assert_called_once_with(j1)
+			st1j1.onstart.assert_called_once_with(st1j1)
+			st1.onstart.assert_called_once_with(st1)
+			t1.onstart.assert_called_once_with(t1)
+
+			st1j2.ondone.assert_called_once_with(st1j2)
+			st1j1.ondone.assert_not_called()
+			st1.ondone.assert_not_called()
+			st1.onfinish.assert_called_once_with(st1)
+			self.assertEqual(st1.numadded, 2)
+			self.assertEqual(st1.numdone, 1)
+			self.assertEqual(st1.numterm, 1)
+			t1.ondone.assert_not_called()
+			t1.onfinish.assert_called_once_with(t1)
+			self.assertEqual(t1.numadded, 2)
+			self.assertEqual(t1.numdone, 1)
+			self.assertEqual(t1.numterm, 1)
 
 
 if __name__ == '__main__':

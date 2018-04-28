@@ -198,43 +198,49 @@ class Task(object):
 
 	"""Task is a managing container for Jobs"""
 	# , timeout=0  - execution timeout in seconds. Default: 0, means infinity
-	def __init__(self, name, onstart=None, ondone=None, onfinish=None, params=None, latency=2, stdout=sys.stdout, stderr=sys.stderr):
+	def __init__(self, name, onstart=None, ondone=None, onfinish=None, params=None, task=None, latency=2, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize task, which is a group of jobs to be executed
 
 		name  - task name
-		onstart  - callback which is executed on the task start (before the execution
+		onstart  - a callback, which is executed on the task start (before the execution
 			started) in the CONTEXT OF THE CALLER (main process) with the single argument,
 			the task. Default: None
 			ATTENTION: must be lightweight
-		ondone  - callback which is executed on the SUCCESSFUL completion of the task in the
+		ondone  - a callback, which is executed on the SUCCESSFUL completion of the task in the
 			CONTEXT OF THE CALLER (main process) with the single argument, the task. Default: None
 			ATTENTION: must be lightweight
-		onfinish  - callback which is executed on either completion or termination of the task in the
+		onfinish  - a callback, which is executed on either completion or termination of the task in the
 			CONTEXT OF THE CALLER (main process) with the single argument, the task. Default: None
 			ATTENTION: must be lightweight
 		params  - additional parameters to be used in callbacks
 		latency: float  - lock timeout in seconds: None means infinite, <= 0 means non-bocking, > 0 is the actual timeout
+		task: Task  - optional supertask
 		stdout  - None or file name or PIPE for the buffered output to be APPENDED
 		stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited
 
 		tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 		tstop  - termination / completion time after ondone.
-		numdone  - the number of completed DIRECT subtasks (each subtask may conatin multiple jobs or subsubtasks)
+		numadded: uint  - the number of direct added subtasks
+		numdone: uint  - the number of completed DIRECT subtasks (each subtask may conatin multiple jobs or subsubtasks)
+		numterm: uint  - the number of terminated direct subtask
 		"""
-		assert isinstance(name, str) and (latency is None or latency >= 0), 'Arguments are invalid'
+		assert isinstance(name, str) and (latency is None or latency >= 0) and (
+			task is None or (isinstance(task, Task) and task != self)), 'Arguments are invalid'
 		self._lock = Lock()  # Lock for the embrasing jobs
 		self._items = dict()  # Dictionary of subtasks with termination counter
 		self.name = name
-		# self.timeout = timeout
-		self.params = params
-		self.latency = latency
 		# Add member handlers if required
 		self.onstart = types.MethodType(onstart, self) if onstart else None  # Bind the callback to the object
 		self.ondone = types.MethodType(ondone, self) if ondone else None  # Bind the callback to the object
 		self.onfinish = types.MethodType(onfinish, self) if onfinish else None  # Bind the callback to the object
+		# self.timeout = timeout
+		self.params = params
+		self.latency = latency
+		self.task = task
 		self.stdout = stdout
 		self.stderr = stderr
+
 		self.tstart = None
 		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
 		self.numadded = 0  # The number of added direct subtasks (the same subtask/job can be readded several times)
@@ -262,6 +268,9 @@ class Task(object):
 			# Consider onstart callback
 			if self.onstart:
 				applyCallback(self.onstart, self.name)
+			# Consider super task
+			if self.task:
+				self.task.add(self)
 		elif subtask in self._items:
 			return
 		if self._lock.acquire(timeout=self.latency):
@@ -298,15 +307,20 @@ class Task(object):
 			self._lock.release()
 		# Consider onfinish callback
 		if self.numterm + self.numdone == self.numadded:
-			if succeed and self.ondone:
-				assert not self._items, 'All subtasks should be already finished'
+			if succeed and self.ondone and not self._items:
+				#assert not self._items, 'All subtasks should be already finished;  remained {} items: {}'.format(
+				#	len(self._items), ', '.join([st.name for st in self._items]))
 				applyCallback(self.ondone, self.name)
 			self.tstop = time.perf_counter()
 			if self.onfinish:
 				applyCallback(self.onfinish, self.name)
+			# Consider super task
+			if self.task:
+				self.task.finished(self, not self._items)
 		else:
-			assert self._items, ('Uncomplete subtasks should be remained;'
-				' numterm: {}, numdone: {}, numadded: {}'.format(self.numterm, self.numdone, self.numadded))
+			assert self.numterm + self.numdone < self.numadded and self._items, (
+				'Uncomplete subtasks should be remained; numterm: {}, numdone: {}, numadded: {}'
+				.format(self.numterm, self.numdone, self.numadded))
 
 
 	def uncompleted(self, recursive=False):
