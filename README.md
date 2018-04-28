@@ -156,7 +156,7 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 
 ### Task
 ```python
-Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout, stderr=sys.stderr):
+Task(name, onstart=None, ondone=None, onfinish=None, params=None, task=None, latency=2, stdout=sys.stdout, stderr=sys.stderr):
 	"""Initialize task, which is a group of jobs to be executed
 
 	Task is a managing container for Jobs
@@ -173,8 +173,8 @@ Task(name, timeout=0, onstart=None, ondone=None, params=None, stdout=sys.stdout,
 		CONTEXT OF THE CALLER (main process) with the single argument, the task. Default: None
 		ATTENTION: must be lightweight
 	params  - additional parameters to be used in callbacks
-	latency: float  - lock timeout in seconds: None means infinite, <= 0 means non-bocking, > 0 is the actual timeout
 	task: Task  - optional supertask
+	latency: float  - lock timeout in seconds: None means infinite, <= 0 means non-bocking, > 0 is the actual timeout
 	stdout  - None or file name or PIPE for the buffered output to be APPENDED
 	stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 		ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited

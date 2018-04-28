@@ -213,12 +213,13 @@ class Task(object):
 			CONTEXT OF THE CALLER (main process) with the single argument, the task. Default: None
 			ATTENTION: must be lightweight
 		params  - additional parameters to be used in callbacks
-		latency: float  - lock timeout in seconds: None means infinite, <= 0 means non-bocking, > 0 is the actual timeout
 		task: Task  - optional supertask
+		latency: float  - lock timeout in seconds: None means infinite, <= 0 means non-bocking, > 0 is the actual timeout
 		stdout  - None or file name or PIPE for the buffered output to be APPENDED
 		stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited
-
+		
+		# Automatically initialized and updated properties
 		tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 		tstop  - termination / completion time after ondone.
 		numadded: uint  - the number of direct added subtasks
