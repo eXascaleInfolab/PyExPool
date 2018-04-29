@@ -324,21 +324,61 @@ class Task(object):
 				.format(self.numterm, self.numdone, self.numadded))
 
 
-	def uncompleted(self, recursive=False):
+	def uncompleted(self, recursive=False, header=False, pid=False, duration=False, memory=False):
 		"""Fetch names of the uncompleted tasks
 		
 		Args:
-			recursive (bool, optional): Defaults to False. Fetch uncompleted subtasks recursively
+			recursive (bool, optional): Defaults to False. Fetch uncompleted subtasks recursively.
+			header (bool, optional): Defaults to False. Include header for the displaying attributes.
+			pid (bool, optional): Defaults to False. Show process id of for the job, None for the task.
+			duration (bool, optional): Defaults to False. Show duration of the execution.
+			memory (bool, optional): Defaults to False. Show memory consumption the job, None for the task.
+				Note: the value as specified by the Job.mem, which is not the peak RSS.
 		
 		Returns:
-			hierarchical dictionary of the uncompleted task names, each name is str
+			hierarchical dictionary of the uncompleted task names and other attributes, each items is tuple or str
 		"""
+		extinfo = pid or duration or memory
+		if duration:
+			ctime = time.perf_counter()  # Current time
+
+		def subtaskInfo(subtask):
+			isjob = isinstance(subtask, Job)
+			assert isjob or isinstance(subtask, Task), 'Unexpected type of the subtask: ' + type(subtask).__name__
+			if extinfo:
+				res = [subtask.name]
+				if pid:
+					res.append(None if not isjob or subtask.proc is None else subtask.proc.pid)
+				if duration:
+					res.append(None if subtask.tstart is None else ctime - subtask.tstart)
+				if memory:
+					res.append(None if not isjob else subtask.mem)
+				return res
+			return subtask.name
+
+		# Form the Header if required
+		res = []
+		if header:
+			if extinfo:
+				hdritems = ['Name']
+				if pid:
+					hdritems.append('PID')
+				if duration:
+					hdritems.append('Duration')
+				if memory:
+					hdritems.append('Memory')
+				res.append(hdritems)
+			else:
+				res.append('Name')
 		if not self._lock.acquire(timeout=self.latency):
 			raise RuntimeError('Lock acquasition failed on uncompleted() in "{}"'.format(self.name))
 		try:
-			return [subtask.name if not recursive or isinstance(subtask, Job) else subtask.uncompleted(recursive) for subtask in self._items]
+			# List should be generated on place while all the tasks are present
+			res += [subtaskInfo(subtask) if not recursive or isinstance(subtask, Job)
+				else subtask.uncompleted(recursive) for subtask in self._items]
 		finally:
 			self._lock.release()
+		return res
 		
 
 
