@@ -1,0 +1,9 @@
+# Optional Python Modules
+# Jobs autobalancing on execution
+psutil>=5.2
+# Future utils for Python2/3 compatibility
+future>=0.16.0
+# Web UI
+bottle>=0.12.13
+# Unit tests (only for Python2)
+mock>=2.0.0
