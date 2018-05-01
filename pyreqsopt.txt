@@ -2,11 +2,11 @@
 # Jobs autobalancing on execution
 psutil>=5.2
 # Future utils for Python2/3 compatibility
-future>=0.16.0
+future>=0.16
 # Enum class for Python2 to be compatible with Python3
-enum34>=1.1.6
+enum34>=1.1
 # Web UI
-bottle>=0.12.13
+bottle>=0.12
 #flask>=1.0.1
 # Unit tests (only for Python2)
-mock>=2.0.0
+mock>=2.0

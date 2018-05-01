@@ -110,9 +110,9 @@ setup(
 	#
 	# For an analysis of "install_requires" vs pip's requirements files see:
 	# https://packaging.python.org/en/latest/requirements.html
-	install_requires=['psutil','bottle'
+	install_requires=['psutil>=5','bottle'
 		# For Python2
-		,'future', 'enum34'],  # Optional
+		,'future', 'enum34>=1'],  # Optional
 
 	# List additional groups of dependencies here (e.g. development
 	# dependencies). Users will be able to install these using the "extras"
@@ -124,7 +124,7 @@ setup(
 	# projects.
 	extras_require={  # Optional
 		#'dev': ['check-manifest'],
-		'test': ['mock'],  # Only for Python 2
+		'test': ['mock>=2'],  # Only for Python 2
 	},
 
 	#package_dir={'pyexpool': '.'},
