@@ -1079,16 +1079,16 @@ class ExecPool(object):
 			# Reverse the list for the efficient filling retaining the columns order
 			cols.reverse()
 			# Fill data falues
-			if UiResCol.duration._name_ in cols:
+			if UiResCol.duration.name in cols:
 				ctime = time.perf_counter()
 			i = 0  # enumeration of workes and jobs
 			fltStatus = self._uicmd.params.get(UiResOpt.fltStatus, [])
 			# Display only executing jobs (workers) by default
 			jobs = [] if fltStatus else [self._workers]  # [self._workers, self._jobs]
 			if not jobs:
-				if UiResFltStatus.exec._name_ in fltStatus:
+				if UiResFltStatus.work.name in fltStatus:
 					jobs.append(self._workers)
-				if UiResFltStatus.defer._name_ in fltStatus:
+				if UiResFltStatus.defer.name in fltStatus:
 					jobs.append(self._jobs)
 			for job in jobs:
 				i += 1
@@ -1096,18 +1096,18 @@ class ExecPool(object):
 				drow = data[-1]
 				while cols:
 					cl = cols.pop()
-					if cl == UiResCol.pid._name_:
+					if cl == UiResCol.pid.name:
 						drow.append('' if not job.proc else str(job.proc.pid))
-					elif cl == UiResCol.state._name_:
-						drow.append('x' if jobs is self._workers else 'd')
-					elif cl == UiResCol.duration._name_:
+					elif cl == UiResCol.state.name:
+						drow.append('w' if jobs is self._workers else 'd')
+					elif cl == UiResCol.duration.name:
 						drow.append('' if not job.tstart else str(ctime - job.tstart))
-					elif cl == UiResCol.memory._name_:
+					elif cl == UiResCol.memory.name:
 						if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
 							drow.append('' if not job.mem else str(job.mem))
-					elif cl == UiResCol.task._name_:
+					elif cl == UiResCol.task.name:
 						drow.append(job.task)
-					elif cl == UiResCol.category._name_:
+					elif cl == UiResCol.category.name:
 						if _CHAINED_CONSTRAINTS:
 							drow.append(job.category)
 					else:

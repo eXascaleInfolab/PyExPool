@@ -23,29 +23,60 @@ from functools import partial  # Customly parameterized routes
 try:
     from enum import IntEnum
 except ImportError:
-    # As a falback make a manual wrapper with the essential functionality
-    class Enum(object):
-        def __init__(self, value, names, module=IntEnum.__module__, qualname='.'.join((IntEnum.__module__
-                , IntEnum.__class__.__name__)), type=type(IntEnum), start=1):
-            IntEnum.__name__ = value
-            if isinstance(names, str):
-                names = [name.rstrip(',') for name in names.split()]
-            IntEnum.__members__ = {}
-            if names and not isinstance(names, dict) and (
-            not isinstance(names, list) or isinstance(names[0], str)):
-                for i, name in enumerate(names, start):
-                    IntEnum.__members__[name] = i
-                    IntEnum.__members__[name]._name_ = name  # For the Enum attributes compatibility
-            IntEnum.__dict__.update(IntEnum.__members__)
-            IntEnum.__module__ = module
-            # self.qualname = IntEnum.__class__.__name__
-            # self.type = IntEnum
+	# As a falback make a manual wrapper with the essential functionality
+	def IntEnum(clsname, names, module=__name__, start=1):
+		"""IntEnum-like class builder
+		
+		Args:
+			clsname (str): class name
+			names (str|list|dict): enum members, optionally enumerated
+			module (str): class module
+			start (int, optional): stating value for the default enumeration
+		
+		Returns:
+			Clsname: IntEnum-like class Clsname
+
+		>>> IntEnum('UiResFmt', 'json htm txt').htm.name
+		'htm'
+
+		>>> IntEnum('UiResFltStatus', 'work defer').defer.name
+		'defer'
+		"""
+
+		def valobj(clsname, name, val):
+			"""Build object with the specivied class name, name and value attributes
+			
+			Args:
+				clsname (str): name of the embracing class
+				name (str): object name
+				val: the value to be assigned
+			
+			Returns:
+				required object of the type '<clsname>.<name>'
+			"""
+			# assert isinstance(clsname, str) and isinstance(name, str)
+			return type('.'.join((clsname, name)), (object,), {'name': name, 'value': val})()
+
+		dnames = {}  # Constructing members of the enum-like object
+		if names: 
+			if isinstance(names, str):
+				names = [name.rstrip(',') for name in names.split()]
+			if not isinstance(names, dict) and (not isinstance(names, list) or isinstance(names[0], str)):
+				#{'name': name, 'value': i}
+				dnames = {name: valobj(clsname, name, i) for i, name in enumerate(names, start)}
+			else:
+				dnames = {name: valobj(clsname, name, i) for i, name in dict(names).items()}
+		cls = type(clsname, (object,), dnames)
+		# Consider some specific attributes of the enum
+		cls.__members__ = dnames
+		return cls
+
 # Internal format serialization to JSON/HTM/TXT
 import json
 try:
-    from html import escape
+	from html import escape
 except ImportError:
-    from cgi import escape  # Consider both both Python2/3
+	from cgi import escape  # Consider both both Python2/3
 
 """UI Command Identifier associated with the REST URL"""
 UiCmdId = IntEnum('UiCmdId', 'LIST_JOBS')
@@ -60,7 +91,8 @@ UiResFmt = IntEnum('UiResFmt', 'json htm txt')
 UiResCol = IntEnum('UiResCol', 'pid state duration memory task category')
 
 """UI Command: Result filteration by the job status: executing (worker job), defered (scheduled ojb)"""
-UiResFltStatus = IntEnum('UiResFltStatus', 'exec defer')
+# Note: 'exec' is a keyword in Python 2 and can't be used as an obect attribute
+UiResFltStatus = IntEnum('UiResFltStatus', 'work defer')
 
 class UiCmd(object):
 	"""UI Command (for the MVC controller)"""
@@ -116,12 +148,12 @@ class WebUiApp(threading.Thread):
         # Initialize web app before starting the thread
 		webuiapp = bottle.default_app()  # The same as bottle.Bottle()
 		mroot = partial(WebUiApp.root, self.cmd)
-		webuiapp.route('/', callback=mroot, name=UiCmdId.LIST_JOBS._name_)
-		webuiapp.route('/jobs', callback=mroot, name=UiCmdId.LIST_JOBS._name_)
+		webuiapp.route('/', callback=mroot, name=UiCmdId.LIST_JOBS.name)
+		webuiapp.route('/jobs', callback=mroot, name=UiCmdId.LIST_JOBS.name)
 		# TODO, add interfaces to inspect tasks and selected jobs/tasks:
-		# webuiapp.route('/job/<name>', callback=mroot, name=UiCmdId.JOB_INFO._name_)
-		# webuiapp.route('/tasks', callback=mroot, name=UiCmdId.LIST_TASKS._name_)
-		# webuiapp.route('/task/<name>', callback=mroot, name=UiCmdId.TASK_INFO._name_)
+		# webuiapp.route('/job/<name>', callback=mroot, name=UiCmdId.JOB_INFO.name)
+		# webuiapp.route('/tasks', callback=mroot, name=UiCmdId.LIST_TASKS.name)
+		# webuiapp.route('/task/<name>', callback=mroot, name=UiCmdId.TASK_INFO.name)
 		kwargs.update({'host': host, 'port': port})
 		super(WebUiApp, self).__init__(group=group, target=bottle.run, name=name, args=args, kwargs=kwargs)
 		self.daemon = daemon
@@ -161,7 +193,7 @@ class WebUiApp(threading.Thread):
 			# Parse URL parametrs and form the UI command parameters
 			fmt = UiResFmt.htm
 			qdict = bottle.request.query
-			fmtKey = UiResOpt.fmt._name_
+			fmtKey = UiResOpt.fmt.name
 			if fmtKey in qdict:
 				try:
 					fmt = UiResFmt[qdict[fmtKey]]
@@ -172,10 +204,10 @@ class WebUiApp(threading.Thread):
 					# raise HTTPResponse(body='Invalid URL parameter value of "fmt": ' + qdict['fmt'], status=400)
 			if cmd.params:
 				cmd.params.clear()
-			cols = qdict.get(UiResOpt.cols._name_)
+			cols = qdict.get(UiResOpt.cols.name)
 			if cols:
 				cmd.params[UiResOpt.cols] = cols.split(',')
-			fltStatus = qdict.get(UiResOpt.fltStatus._name_)
+			fltStatus = qdict.get(UiResOpt.fltStatus.name)
 			if fltStatus:
 				cmd.params[UiResOpt.fltStatus] = fltStatus.split(',')
 			# Wait for the command execution and notification
@@ -217,3 +249,16 @@ class WebUiApp(threading.Thread):
 # @route('/create', apply=[sqlite_plugin])
 # def create(db):
 #     db.execute('INSERT INTO ...')
+
+
+if __name__ == '__main__':
+	"""Doc tests execution"""
+	import doctest
+	import sys
+	#doctest.testmod()  # Detailed tests output
+	flags = doctest.REPORT_NDIFF | doctest.REPORT_ONLY_FIRST_FAILURE | doctest.IGNORE_EXCEPTION_DETAIL
+	failed, total = doctest.testmod(optionflags=flags)
+	if failed:
+		print("Doctest FAILED: {} failures out of {} tests".format(failed, total), file=sys.stderr)
+	else:
+		print('Doctest PASSED')

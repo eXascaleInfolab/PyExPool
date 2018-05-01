@@ -33,6 +33,7 @@ setup(
 		#   3 - Alpha
 		#   4 - Beta
 		#   5 - Production/Stable
+		#   6 - Mature
 		'Development Status :: 4 - Beta',
 
 		'Environment :: Plugins',
@@ -44,7 +45,6 @@ setup(
 		'Intended Audience :: Information Technology',
 		'Intended Audience :: Science/Research',
 		'Intended Audience :: System Administrators',
-
 
 		# Pick your license as you wish
 		'License :: OSI Approved :: Apache Software License',
@@ -70,8 +70,8 @@ setup(
 		'Programming Language :: Python :: 3.6',
 		'Programming Language :: Python :: 3.7',
 		
-		#'Programming Language :: Python :: Implementation :: CPython',
-		#'Programming Language :: Python :: Implementation :: PyPy'
+		'Programming Language :: Python :: Implementation :: CPython',
+		'Programming Language :: Python :: Implementation :: PyPy',
 
 		'Topic :: Software Development :: Libraries :: Application Frameworks',
 		'Topic :: System :: Benchmark',
@@ -79,7 +79,7 @@ setup(
 		'Topic :: Software Development :: Testing',
 		'Topic :: Software Development :: Libraries :: Python Modules',
 		'Topic :: Software Development',
-		'Topic :: Scientific/Engineering :: Information Analysis',
+		# 'Topic :: Scientific/Engineering :: Information Analysis',
 		'Topic :: Scientific/Engineering',
 		# 'Topic :: Office/Business',
 		# 'Topic :: Utilities',
