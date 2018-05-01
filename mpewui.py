@@ -85,6 +85,8 @@ class WebUiApp(threading.Thread):
 	"""WebUI App sarting in the dedicated thread and providing remote interface to inspect ExecPool"""
 	def __init__(self, host='localhost', port=8080, name=None, daemon=None, group=None, args=(), kwargs={}):
 		"""WebUI App constructor
+
+		ATTENTION: Once constructed, the WebUI App lives in the dedicated thread until the main program exit.
 		
 		Args:
 			uihost (str)  - Web UI host
@@ -108,6 +110,7 @@ class WebUiApp(threading.Thread):
 		mroot = partial(WebUiApp.root, self.cmd)
 		webuiapp.route('/', callback=mroot, name=UiCmdId.LIST_JOBS._name_)
 		webuiapp.route('/jobs', callback=mroot, name=UiCmdId.LIST_JOBS._name_)
+		# TODO, add interfaces to inspect tasks and selected jobs/tasks:
 		# webuiapp.route('/job/<name>', callback=mroot, name=UiCmdId.JOB_INFO._name_)
 		# webuiapp.route('/tasks', callback=mroot, name=UiCmdId.LIST_TASKS._name_)
 		# webuiapp.route('/task/<name>', callback=mroot, name=UiCmdId.TASK_INFO._name_)

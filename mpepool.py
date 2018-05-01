@@ -1071,7 +1071,7 @@ class ExecPool(object):
 			return
 		if self._uicmd.id == UiCmdId.LIST_ALL:
 			# Fill headers
-			data.append(['name'])
+			data.append(['#','name'])  # Number and Name
 			params = self._uicmd.params
 			if not params:
 				params.update(UiResCol.__members__)
@@ -1079,14 +1079,16 @@ class ExecPool(object):
 			# Fill data falues
 			if UiResCol.duration._name_ in params:
 				ctime = time.perf_counter()
+			i = 0  # enumeration of workes and jobs
 			for jobs in (self._workers, self._jobs):
 				for job in jobs:
-					data.append[[job.name]]
+					i += 1
+					data.append[[i, job.name]]
 					drow = data[-1]
 					if UiResCol.pid._name_ in params:
 						drow.append('' if not job.proc else str(job.proc.pid))
 					if UiResCol.state._name_ in params:
-						drow.append('w')
+						drow.append('w' if jobs is self._workers else 'j')
 					if UiResCol.duration._name_ in params:
 						drow.append('' if not job.tstart else str(ctime - job.tstart))
 					if (_LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS) and UiResCol.memory._name_ in params:

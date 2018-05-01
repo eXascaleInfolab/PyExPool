@@ -335,6 +335,8 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 WebUiApp(host='localhost', port=8080, name=None, daemon=None, group=None, args=(), kwargs={})
 	"""WebUI App sarting in the dedicated thread and providing remote interface to inspect ExecPool
 
+	ATTENTION: Once constructed, the WebUI App lives in the dedicated thread until the main program exit.
+
 	Args:
 		uihost (str)  - Web UI host
 		uiport (uint16)  - Web UI port
@@ -427,7 +429,7 @@ The workflow consists of the following steps:
 1. Create and schedule Jobs with required parameters, callbacks and optionally packing them into Tasks.
 1. Wait on Execution pool until all the jobs are completed or terminated, or until the global timeout is elapsed.
 
-See [unit tests (TestExecPool)](mpetests.py) for the advanced examples.
+See [unit tests](mpetests.py) (`TestExecPool`, `TestProcMemTree`, `TestTasks` classes) for the advanced examples.
 
 
 ### Usage Example
