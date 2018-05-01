@@ -136,9 +136,10 @@ setup(
 	# MANIFEST.in as well.
 	package_data={  # Optional
 		# 'sample': ['package_data.dat'],
-		'pyexpool': ['README.md', 'images/*'],
-		# '.': ['README.md', 'images/*']
+		# 'pyexpool': ['README.md', 'images/*'],
+		'': ['README.md', 'images/*']  # ! Include specified files from the current directory
 	},
+	# include_package_data=True,  # Deprecated
 
 	# Although 'package_data' is the preferred approach, in some case you may
 	# need to place data files outside of your packages. See:
@@ -146,8 +147,8 @@ setup(
 	#
 	# In this case, 'data_file' will be installed into '<sys.prefix>/my_data'
 	# data_files specifies a sequence of (directory, files) pairs in the following way
-	# data_files=[('', ['README.md', 'images/*']),
-	# 	('images', ['images/*']),
+	# data_files=[('', ['README.md']),
+	# 	('images', ["images/*.png"]),
 	# ],  # Optional
 
 	# To provide executable scripts, use entry points in preference to the
