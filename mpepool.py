@@ -117,34 +117,7 @@ def timeheader(timestamp=time.gmtime()):
 _WEBUI = True
 if _WEBUI:
 	try:
-		import bottle
-		import threading  # Run bottle in the dedicated thread
-		from functools import partial  # Customly parameterized routes
-
-		try:
-			from enum import IntEnum
-		except ImportError:
-			class Enum(object):
-				def __init__(self, value, names, module=IntEnum.__module__, qualname='.'.join((IntEnum.__module__
-						, IntEnum.__class__.__name__)), type=type(IntEnum), start=1):
-					IntEnum.__name__ = value
-					if isinstance(names, str):
-						names = [name.rstrip(',') for name in names.split()]
-					IntEnum.__members__ = {}
-					if names and not isinstance(names, dict) and (
-					not isinstance(names, list) or isinstance(names[0], str)):
-						for i, name in enumerate(names, start):
-							IntEnum.__members__[name] = i
-					IntEnum.__dict__.update(IntEnum.__members__)
-					IntEnum.__module__ = module
-					# self.qualname = IntEnum.__class__.__name__
-					# self.type = IntEnum
-
-		import json
-		try:
-			from html import escape
-		except ImportError:
-			from cgi import escape
+		from mpewui import UiThread, UiCmdId, UiResCol  # UiCmd, websrvrun
 	except ImportError as wuerr:
 		_WEBUI = False
 
@@ -175,12 +148,12 @@ if not (_WEBUI and _LIMIT_WORKERS_RAM):
 # category and heavier than the origin violating the constraints
 _CHAINED_CONSTRAINTS = True
 
-
 _RAM_SIZE = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / 1024.**3  # RAM (physical memory) size in Gb
 # Dedicate at least 256 Mb for the OS consuming not more than 98% of RAM
 _RAM_LIMIT = _RAM_SIZE * 0.98 - 0.25  # Maximal consumption of RAM in Gb (< _RAM_SIZE to avoid/reduce swapping)
 _AFFINITYBIN = 'taskset'  # System app to set CPU affinity if required, should be preliminarry installed (taskset is present by default on NIX systems)
 _DEBUG_TRACE = False  # Trace start / stop and other events to stderr;  1 - brief, 2 - detailed, 3 - in-cycles
+
 
 def secondsToHms(seconds):
 	"""Convert seconds to hours, mins, secs
@@ -426,6 +399,8 @@ class Task(object):
 			raise RuntimeError('Lock acquasition failed on uncompleted() in "{}"'.format(self.name))
 		try:
 			# List should be generated on place while all the tasks are present
+			# Note: list extension should prevent lazy evaluation of the list generator
+			# otherwise the explicit conversion to the list should be performed here (within the lock)
 			res += [subtaskInfo(subtask) if not recursive or isinstance(subtask, Job)
 				else subtask.uncompleted(recursive) for subtask in self._items]
 		finally:
@@ -965,156 +940,6 @@ class AffinityMask(object):
 				cpumask = ','.join(cpus)
 		return cpumask
 
-UiCmdId = IntEnum('UiCmdId', 'LIST_ALL')
-# UiResOpt = IntEnum('UiResOpt', 'fmt cols')
-UiResFmt = IntEnum('UiResFmt', 'json htm txt')
-UiResCol = IntEnum('UiResCol', 'pid state duration memory task category')
-
-class UiCmd(object):
-	# Valid Command IDs:
-	# ids = {'list_all'}
-
-	"""UI Command (for the MVC controller)"""
-	def __init__(self, cid, params=set(), data=[]):
-		"""UI command
-		
-		Args:
-			cid (UiCmdId): command identifier
-			params (set, optional): Defaults to None. Command parameters
-			data (list, optional): Defaults to None. Resulting data
-
-			Automatically created attributes:
-			cond (Condition): synchronizing Condition
-		"""
-		#dshape (set(str), optional): Defaults to None. Expected data shape (columns of the returning table)
-		# self.lock = threading.Lock()
-		self.cond = threading.Condition()  # (self.lock)
-		self.id = cid
-		# self.dshape = dshape
-		# assert (params in None or isinstance(params, set)) and (data in None or isinstance(data, set)), (
-		# 	'Unexpected type of arguments, params: {}, data: {}'.format(type(params).__name__, type(data).__name__))
-		assert isinstance(params, set) and isinstance(data, list), (
-			'Unexpected type of arguments, params: {}, data: {}'.format(type(params).__name__, type(data).__name__))
-		self.params = params
-		self.data = data
-
-
-class UiThread(threading.Thread):
-	"""UI Thread taking commands from the client and forwaring to the ExecPool"""
-	def __init__(self, cmd, group=None, target=None, name=None, daemon=None, args=(), kwargs={}):
-		"""UI Thread constructor
-		
-		Args:
-			cmd (UiCmd): Defaults to None. UI command to be executed including the reserved
-				attribute for the invocation result.
-			group (optional): Defaults to None. Reserved for future extension
-				when a ThreadGroup class is implemented.
-			target (callable, optional): Defaults to None. The callable object to be invoked by the run() method.
-			name (optional): Defaults to None. The thread name. By default, a unique name
-				is constructed of the form “Thread-N” where N is a small decimal number.
-			daemon (bool, optional): Defaults to None. Start the thread in the daemon mode to
-				be automatcally terminated on the main app exit.
-			args (tuple, optional): Defaults to (). The argument tuple for the target invocation.
-			kwargs (dict, optional): Defaults to {}. A dictionary of keyword arguments for the target invocation.
-		"""
-		# self.lock = threading.Lock()
-		self.cond = threading.Condition()  # (self.lock)
-		# assert cmd is None or isinstance(cmd, UiCmd), 'Unexpected type of cmd: ' + type(cmd).__name__
-		assert isinstance(cmd, UiCmd), 'Unexpected type of cmd: ' + type(cmd).__name__
-		self.cmd = cmd
-
-		webuiapp = bottle.default_app()  # The same as bottle.Bottle()
-		mroot = partial(UiThread.root, self.cmd)
-		webuiapp.route('/', callback=mroot, name=self.cmd.id)
-		# webuiapp.route('/task/<name>', callback=mroot, name=self.cmd.id)
-
-		super(UiThread, self).__init__(group=group, target=target, name=name, args=args, kwargs=kwargs)
-		self.daemon = daemon
-
-
-	@staticmethod
-	def root(cmd):
-		"""Default command of the UI (UiCmdId.LIST_ALL)
-
-		URL parameters:
-			fmt = {json, htm, txt}  - format of the result
-			cols:
-				[name]  - job name, always present
-				pid  - process id
-				state = {'w', 's'}  - execution state (working, shceduled)
-				duration  - cuttent execution time
-				memory  - consuming memory as specified by Job
-				task  - task name if assigned
-				category  - job category if specified
-		
-		Args:
-			cmd (UiCmd): UI command to be executed
-		
-		Returns:
-			Jobs listing for the specified detalizaion in the specified format
-		"""
-		with cmd.cond:
-			cmd.cid = UiCmdId.LIST_ALL
-			# The arguments extracted from the URL.
-			#bottle.request.url_args
-			# Raw URL params as str
-			# bottle.request.query_string
-			# URL params as MultiDict
-			fmt = UiResFmt.htm
-			qdict = bottle.request.query
-			if 'fmt' in qdict:
-				try:
-					fmt = UiResFmt[qdict['fmt'].upper()]
-					del qdict['fmt']
-				except KeyError:
-					bottle.response.status = 400
-					return 'Invalid URL parameter value of "fmt": ' + qdict['fmt']
-					# raise HTTPResponse(body='Invalid URL parameter value of "fmt": ' + qdict['fmt'], status=400)
-			if cmd.params:
-				cmd.params.clear()
-			cols = qdict.get('cols')
-			if cols:
-				cmd.params.update(cols.split(','))
-			# Wait for the command execution and notification
-			cmd.cond.wait()
-			# Read the result and transfer to the client
-			if not cmd.data:
-				return ''
-			# Expected format of data is a table: header, rows
-			if fmt == UiResFmt.json:
-				return json.dumps(cmd.data)
-			elif fmt == UiResFmt.txt:
-				return '\n'.join(['\t'.join([str(v) for v in cols]) for cols in cmd.data])
-			#elif fmt == UiResFmt.htm:
-			else:
-				return ''.join('<table>',
-					'\n'.join([''.join('<tr>', ''.join(
-						[''.join(('<td>', escape(str(v), True), '</td>')) for v in cols]
-						), '</tr>') for cols in cmd.data])
-					, '</table>')
-
-
-	# @staticmethod
-	# def taskInfo(cmd, name):
-	# 	pass
-
-
-	@bottle.error(404)
-	@staticmethod
-	def error404(error, msg=''):
-		if msg:
-			return 'The URL is invalid: ' + msg
-		else:
-			return 'Nothing here, sorry'
-
-# @webuiapp.route('/')
-# def root():
-# 	return 'Root'
-
-# @route('/create', apply=[sqlite_plugin])
-# def create(db):
-#     db.execute('INSERT INTO ...')
-
 
 class ExecPool(object):
 	"""Execution Pool of workers for jobs
@@ -1132,7 +957,7 @@ class ExecPool(object):
 	assert _JMEMTRR >= 1, 'Memory threshold retio should be >= 1'
 
 	def __init__(self, wksnum=max(_CPUS-1, 1), afnmask=None, memlimit=0., latency=0., name=None
-		, uihost='localhost', uiport=8080):  # afnstep=None, uidir=None
+		, webuiapp=None):  # afnstep=None, uidir=None
 		"""Execution Pool constructor
 
 		wksnum  - number of resident worker processes, >=1. The reasonable value is
@@ -1162,10 +987,6 @@ class ExecPool(object):
 			0 means automatically defined value (recommended, typically 2-3 sec)
 		name  - name of the execution pool to distinguish traces from subsequently
 			created execution pools (only on creation or termination)
-
-		Attributes for the optional minimalistic Web UI, actual only if _WEBUI is set
-		uihost: str  - Web UI host
-		uiport: uint16  - Web UI port
 
 		Internal attributes:
 		alive  - whether the execution pool is alive or terminating, bool.
@@ -1223,32 +1044,32 @@ class ExecPool(object):
 		if _WEBUI:
 			# self.host = uihost
 			# self.port = uiport
-			self.uicmd = UiCmd(None)
+			uiapp = UiThread(host='localhost', port=8080, name='MpepoolWebUI', daemon=True)
+			self._uicmd = uiapp.cmd
 			# Note: daemon threads are terminated on the app exit
-			self._uiapp = UiThread(target=bottle.run, cmd=self.uicmd, name='MpepoolWebUI'
-				, daemon=True, kwargs={'host': uihost, 'port': uiport})
 			# self._uiq = Queue()
 			# Note: When a process exits, it attempts to terminate all of its daemonic child processes.
 			#self._uiapp = Process(target=bottle.run, name='MpepoolWebUI', daemon=True
 			#	, kwargs={'host': uihost, 'port': uiport})
 			#self._uiapp.daemon=True
-			self._uiapp.start()
+			uiapp.start()
 
 
 	def __reviseUi(self):
 		"""Check and handle UI commands"""
 		# Process on the next iteration if the client request is not ready
-		if self.uicmd.id is None or not self.uicmd.cond.acquire(blocking=False):
+		#assert _WEBUI, 'WEBUI is expected to be defined'
+		if self._uicmd.id is None or not self._uicmd.cond.acquire(blocking=False):
 			return
-		data = self.uicmd.data
+		data = self._uicmd.data
 		if data:
 			del data[:]
 		if not (self._workers and self._jobs):
 			return
-		if self.uicmd.id == UiCmdId.LIST_ALL:
+		if self._uicmd.id == UiCmdId.LIST_ALL:
 			# Fill headers
 			data.append(['name'])
-			params = self.uicmd.params
+			params = self._uicmd.params
 			if not params:
 				params.update(UiResCol.__members__)
 			data[0].extend(params)
@@ -1271,11 +1092,11 @@ class ExecPool(object):
 						drow.append(job.task)
 					if _CHAINED_CONSTRAINTS and UiResCol.category._name_ in params:
 						drow.append(job.category)
-			self.uicmd.id = None  # Reset command id for the completed command
-			self.uicmd.cond.notify()
+			self._uicmd.id = None  # Reset command id for the completed command
+			self._uicmd.cond.notify()
 		else:
-			print('WARNING, Unknown command requested: {}. {}'.format(self.uicmd.id, traceback.format_exc(5)), file=sys.stderr)
-		self.uicmd.cond.release()
+			print('WARNING, Unknown command requested: {}. {}'.format(self._uicmd.id, traceback.format_exc(5)), file=sys.stderr)
+		self._uicmd.cond.release()
 
 
 	def __enter__(self):
@@ -2013,7 +1834,8 @@ class ExecPool(object):
 				return False
 			time.sleep(self.latency)
 			self.__reviseWorkers()
-			self.__reviseUi()
+			if _WEBUI:
+				self.__reviseUi()
 		self._tstart = None  # Be ready for the following execution
 
 		assert not self._jobs and not self._workers, 'All jobs should be finalized'
