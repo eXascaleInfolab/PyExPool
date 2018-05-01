@@ -60,12 +60,12 @@ class UiCmd(object):
 		"""UI command
 		
 		Args:
-			cid (UiCmdId): command identifier
-			params (set, optional): Defaults to None. Command parameters
-			data (list, optional): Defaults to None. Resulting data
+			cid (UiCmdId)  - Command identifier
+			params (set)  - Command parameters
+			data (list)  - Resulting data
 
-			Automatically created attributes:
-			cond (Condition): synchronizing Condition
+		Internal attributes:
+			cond (Condition)  - synchronizing condition
 		"""
 		#dshape (set(str), optional): Defaults to None. Expected data shape (columns of the returning table)
 		# self.lock = threading.Lock()
@@ -87,19 +87,19 @@ class WebUiApp(threading.Thread):
 		"""WebUI App constructor
 		
 		Args:
-			uihost: str  - Web UI host
-			uiport: uint16  - Web UI port
-			name (optional): Defaults to None. The thread name. By default, a unique name
+			uihost (str)  - Web UI host
+			uiport (uint16)  - Web UI port
+			name  - The thread name. By default, a unique name
 				is constructed of the form “Thread-N” where N is a small decimal number.
-			daemon (bool, optional): Defaults to None. Start the thread in the daemon mode to
+			daemon (bool)  - Start the thread in the daemon mode to
 				be automatcally terminated on the main app exit.
-			group (optional): Defaults to None. Reserved for future extension
+			group  - Reserved for future extension
 				when a ThreadGroup class is implemented.
-			args (tuple, optional): Defaults to (). The argument tuple for the target invocation.
-			kwargs (dict, optional): Defaults to {}. A dictionary of keyword arguments for the target invocation.
+			args (tuple)  - The argument tuple for the target invocation.
+			kwargs (dict)  - A dictionary of keyword arguments for the target invocation.
 
-		Automatically created attributes:
-			cmd (UiCmd): UI command to be executed, which includes (reserved) attribute(s) for the invocation result.
+		Internal attributes:
+			cmd (UiCmd)  - UI command to be executed, which includes (reserved) attribute(s) for the invocation result.
 		"""
 		# target (callable, optional): Defaults to None. The callable object to be invoked by the run() method.
 		self.cmd = UiCmd(None)  # Shared data between the UI WebApp and MpePool backend

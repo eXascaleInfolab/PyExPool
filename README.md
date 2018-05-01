@@ -110,7 +110,7 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 	Job is executed in a separate process via Popen or Process object and is
 	managed by the Process Pool Executor
 
-	# Main parameters
+	Main parameters:
 	name  - job name
 	workdir  - working directory for the corresponding process, None means the dir of the benchmarking
 	args  - execution arguments including the executable itself for the process
@@ -138,7 +138,7 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 		ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited.
 		The path is interpreted in the CONTEXT of the CALLER
 
-	# Scheduling parameters
+	Scheduling parameters:
 	omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled
 		and the process has multiple treads
 	category  - classification category, typically semantic context or part of the name;
@@ -156,7 +156,7 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 			(including the origin itself)
 		2  - mem for the whole spawned process tree including the origin process
 
-	# Execution parameters, initialized automatically on execution
+	Internal attributes, initialized automatically on execution:
 	tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 	tstop  - termination / completion time after ondone
 		NOTE: onstart() and ondone() callbacks execution is included in the job execution time
@@ -192,7 +192,7 @@ Task(name, onstart=None, ondone=None, onfinish=None, params=None, task=None, lat
 	stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 		ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited
 
-	# Automatically initialized and updated properties
+	Internal attributes, initialized automatically on execution:
 	tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 	tstop  - termination / completion time after ondone.
 	numadded: uint  - the number of direct added subtasks
@@ -336,19 +336,19 @@ WebUiApp(host='localhost', port=8080, name=None, daemon=None, group=None, args=(
 	"""WebUI App sarting in the dedicated thread and providing remote interface to inspect ExecPool
 
 	Args:
-		uihost: str  - Web UI host
-		uiport: uint16  - Web UI port
-		name (optional): Defaults to None. The thread name. By default, a unique name
+		uihost (str)  - Web UI host
+		uiport (uint16)  - Web UI port
+		name  - The thread name. By default, a unique name
 			is constructed of the form “Thread-N” where N is a small decimal number.
-		daemon (bool, optional): Defaults to None. Start the thread in the daemon mode to
+		daemon (bool)  - Start the thread in the daemon mode to
 			be automatcally terminated on the main app exit.
-		group (optional): Defaults to None. Reserved for future extension
+		group  - Reserved for future extension
 			when a ThreadGroup class is implemented.
-		args (tuple, optional): Defaults to (). The argument tuple for the target invocation.
-		kwargs (dict, optional): Defaults to {}. A dictionary of keyword arguments for the target invocation.
+		args (tuple)  - The argument tuple for the target invocation.
+		kwargs (dict)  - A dictionary of keyword arguments for the target invocation.
 
-	Automatically created attributes:
-		cmd (UiCmd): UI command to be executed, which includes (reserved) attribute(s) for the invocation result.
+	Internal attributes:
+		cmd (UiCmd)  - UI command to be executed, which includes (reserved) attribute(s) for the invocation result.
 	"""
 ```
 
@@ -358,12 +358,12 @@ UiCmd(cid, params=set(), data=[])
 	"""UI command
 
 	Args:
-		cid (UiCmdId): command identifier
-		params (set, optional): Defaults to None. Command parameters
-		data (list, optional): Defaults to None. Resulting data
+		cid (UiCmdId)  - Command identifier
+		params (set)  - Command parameters
+		data (list)  - Resulting data
 
-		Automatically created attributes:
-		cond (Condition): synchronizing Condition
+	Internal attributes:
+		cond (Condition)  - synchronizing condition
 	"""
 ```
 
