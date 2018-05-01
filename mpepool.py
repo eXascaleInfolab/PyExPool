@@ -117,7 +117,7 @@ def timeheader(timestamp=time.gmtime()):
 _WEBUI = True
 if _WEBUI:
 	try:
-		from mpewui import WebUiApp, UiCmdId, UiResCol  # UiCmd, websrvrun
+		from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResCol, UiResFltStatus  # UiCmd, websrvrun
 	except ImportError as wuerr:
 		_WEBUI = False
 
@@ -1072,31 +1072,46 @@ class ExecPool(object):
 		if self._uicmd.id == UiCmdId.LIST_ALL:
 			# Fill headers
 			data.append(['#','name'])  # Number and Name
-			params = self._uicmd.params
-			if not params:
-				params.update(UiResCol.__members__)
-			data[0].extend(params)
+			cols = self._uicmd.params.get(UiResOpt.cols, [])
+			if not cols:
+				cols.extend(UiResCol.__members__)
+			data[0].extend(cols)
+			# Reverse the list for the efficient filling retaining the columns order
+			cols.reverse()
 			# Fill data falues
-			if UiResCol.duration._name_ in params:
+			if UiResCol.duration._name_ in cols:
 				ctime = time.perf_counter()
 			i = 0  # enumeration of workes and jobs
-			for jobs in (self._workers, self._jobs):
-				for job in jobs:
-					i += 1
-					data.append[[i, job.name]]
-					drow = data[-1]
-					if UiResCol.pid._name_ in params:
+			fltStatus = self._uicmd.params.get(UiResOpt.fltStatus, [])
+			# Display only executing jobs (workers) by default
+			jobs = [] if fltStatus else [self._workers]  # [self._workers, self._jobs]
+			if not jobs:
+				if UiResFltStatus.exec._name_ in fltStatus:
+					jobs.append(self._workers)
+				if UiResFltStatus.defer._name_ in fltStatus:
+					jobs.append(self._jobs)
+			for job in jobs:
+				i += 1
+				data.append[[i, job.name]]
+				drow = data[-1]
+				while cols:
+					cl = cols.pop()
+					if cl == UiResCol.pid._name_:
 						drow.append('' if not job.proc else str(job.proc.pid))
-					if UiResCol.state._name_ in params:
-						drow.append('w' if jobs is self._workers else 'j')
-					if UiResCol.duration._name_ in params:
+					elif cl == UiResCol.state._name_:
+						drow.append('x' if jobs is self._workers else 'd')
+					elif cl == UiResCol.duration._name_:
 						drow.append('' if not job.tstart else str(ctime - job.tstart))
-					if (_LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS) and UiResCol.memory._name_ in params:
-						drow.append('' if not job.mem else str(job.mem))
-					if UiResCol.task._name_ in params:
+					elif cl == UiResCol.memory._name_:
+						if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
+							drow.append('' if not job.mem else str(job.mem))
+					elif cl == UiResCol.task._name_:
 						drow.append(job.task)
-					if _CHAINED_CONSTRAINTS and UiResCol.category._name_ in params:
-						drow.append(job.category)
+					elif cl == UiResCol.category._name_:
+						if _CHAINED_CONSTRAINTS:
+							drow.append(job.category)
+					else:
+						print('WARNING, Unknown column requested: {}. {}'.format(cl, traceback.format_exc(5)), file=sys.stderr)
 			self._uicmd.id = None  # Reset command id for the completed command
 			self._uicmd.cond.notify()
 		else:

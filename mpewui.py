@@ -13,7 +13,7 @@
 """
 from __future__ import print_function, division  # Required for stderr output, must be the first import
 # Extrenal API (exporting functions)
-__all__ = ['WebUiApp', 'UiCmd', 'UiCmdId', 'UiResCol']
+__all__ = ['WebUiApp', 'UiCmdId', 'UiResOpt', 'UiResCol', 'UiResFltStatus']
 
 
 import bottle
@@ -48,20 +48,29 @@ try:
 except ImportError:
     from cgi import escape  # Consider both both Python2/3
 
-
+"""UI Command Identifier associated with the REST URL"""
 UiCmdId = IntEnum('UiCmdId', 'LIST_JOBS')
-# UiResOpt = IntEnum('UiResOpt', 'fmt cols')
+
+"""UI Command parameters"""
+UiResOpt = IntEnum('UiResOpt', 'fmt cols fltStatus')
+
+"""UI Command: Result format parameter values"""
 UiResFmt = IntEnum('UiResFmt', 'json htm txt')
+
+"""UI Command: Result columns parameter values for the Jobs listing"""
 UiResCol = IntEnum('UiResCol', 'pid state duration memory task category')
+
+"""UI Command: Result filteration by the job status: executing (worker job), defered (scheduled ojb)"""
+UiResFltStatus = IntEnum('UiResFmt', 'exec defer')
 
 class UiCmd(object):
 	"""UI Command (for the MVC controller)"""
-	def __init__(self, cid, params=set(), data=[]):
+	def __init__(self, cid, params=dict(), data=[]):
 		"""UI command
 		
 		Args:
 			cid (UiCmdId)  - Command identifier
-			params (set)  - Command parameters
+			params (dict)  - Command parameters
 			data (list)  - Resulting data
 
 		Internal attributes:
@@ -70,9 +79,9 @@ class UiCmd(object):
 		#dshape (set(str), optional): Defaults to None. Expected data shape (columns of the returning table)
 		# self.lock = threading.Lock()
 		self.cond = threading.Condition()  # (self.lock)
-		# assert (params in None or isinstance(params, set)) and (data in None or isinstance(data, set)), (
+		# assert (params in None or isinstance(params, dict)) and (data in None or isinstance(data, set)), (
 		# 	'Unexpected type of arguments, params: {}, data: {}'.format(type(params).__name__, type(data).__name__))
-		assert (cid is None or isinstance(cid, UiCmdId)) and isinstance(params, set) and isinstance(data, list), (
+		assert (cid is None or isinstance(cid, UiCmdId)) and isinstance(params, dict) and isinstance(data, list), (
 			'Unexpected type of arguments, id: {}, params: {}, data: {}'.format(
             type(id).__name__, type(params).__name__, type(data).__name__))
 		self.id = cid
@@ -142,26 +151,34 @@ class WebUiApp(threading.Thread):
 		"""
 		with cmd.cond:
 			cmd.cid = UiCmdId.LIST_JOBS
-			# The arguments extracted from the URL.
-			#bottle.request.url_args
-			# Raw URL params as str
+			# Parameters fetching options:
+			# 1. The arguments extracted from the URL:
+			# bottle.request.url_args
+			# 2. Raw URL params as str:
 			# bottle.request.query_string
-			# URL params as MultiDict
+			# 3. URL params as MultiDict:
+			# bottle.request.query
+
+			# Parse URL parametrs and form the UI command parameters
 			fmt = UiResFmt.htm
 			qdict = bottle.request.query
-			if 'fmt' in qdict:
+			fmtKey = UiResOpt.fmt._name_
+			if fmtKey in qdict:
 				try:
-					fmt = UiResFmt[qdict['fmt'].upper()]
-					del qdict['fmt']
+					fmt = UiResFmt[qdict[fmtKey]]
+					del qdict[fmtKey]
 				except KeyError:
 					bottle.response.status = 400
-					return 'Invalid URL parameter value of "fmt": ' + qdict['fmt']
+					return 'Invalid URL parameter value of "{}": {}'.format(fmtKey, qdict[fmtKey])
 					# raise HTTPResponse(body='Invalid URL parameter value of "fmt": ' + qdict['fmt'], status=400)
 			if cmd.params:
 				cmd.params.clear()
-			cols = qdict.get('cols')
+			cols = qdict.get(UiResOpt.cols._name_)
 			if cols:
-				cmd.params.update(cols.split(','))
+				cmd.params[UiResOpt.cols] = cols.split(',')
+			fltStatus = qdict.get(UiResOpt.fltStatus._name_)
+			if fltStatus:
+				cmd.params[UiResOpt.fltStatus] = fltStatus.split(',')
 			# Wait for the command execution and notification
 			cmd.cond.wait()
 			# Read the result and transfer to the client
