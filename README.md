@@ -427,7 +427,7 @@ The workflow consists of the following steps:
 1. Create and schedule Jobs with required parameters, callbacks and optionally packing them into Tasks.
 1. Wait on Execution pool until all the jobs are completed or terminated, or until the global timeout is elapsed.
 
-See [unit tests (TestExecPool)](mpepool.py) for the advanced examples.
+See [unit tests (TestExecPool)](mpetests.py) for the advanced examples.
 
 
 ### Usage Example
