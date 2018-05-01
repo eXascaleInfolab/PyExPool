@@ -13,7 +13,7 @@
 """
 from __future__ import print_function, division  # Required for stderr output, must be the first import
 # Extrenal API (exporting functions)
-__all__ = ['UiThread', 'UiCmd', 'UiCmdId', 'UiResCol']
+__all__ = ['WebUiApp', 'UiCmd', 'UiCmdId', 'UiResCol']
 
 
 import bottle
@@ -81,10 +81,10 @@ class UiCmd(object):
 		self.data = data
 
 
-class UiThread(threading.Thread):
-	"""UI Thread taking commands from the client and forwaring to the ExecPool"""
+class WebUiApp(threading.Thread):
+	"""WebUI App sarting in the dedicated thread and providing remote interface to inspect ExecPool"""
 	def __init__(self, host='localhost', port=8080, name=None, daemon=None, group=None, args=(), kwargs={}):
-		"""UI Thread constructor
+		"""WebUI App constructor
 		
 		Args:
 			uihost: str  - Web UI host
@@ -105,14 +105,14 @@ class UiThread(threading.Thread):
 		self.cmd = UiCmd(None)  # Shared data between the UI WebApp and MpePool backend
         # Initialize web app before starting the thread
 		webuiapp = bottle.default_app()  # The same as bottle.Bottle()
-		mroot = partial(UiThread.root, self.cmd)
+		mroot = partial(WebUiApp.root, self.cmd)
 		webuiapp.route('/', callback=mroot, name=UiCmdId.LIST_JOBS._name_)
 		webuiapp.route('/jobs', callback=mroot, name=UiCmdId.LIST_JOBS._name_)
 		# webuiapp.route('/job/<name>', callback=mroot, name=UiCmdId.JOB_INFO._name_)
 		# webuiapp.route('/tasks', callback=mroot, name=UiCmdId.LIST_TASKS._name_)
 		# webuiapp.route('/task/<name>', callback=mroot, name=UiCmdId.TASK_INFO._name_)
 		kwargs.update({'host': host, 'port': port})
-		super(UiThread, self).__init__(group=group, target=bottle.run, name=name, args=args, kwargs=kwargs)
+		super(WebUiApp, self).__init__(group=group, target=bottle.run, name=name, args=args, kwargs=kwargs)
 		self.daemon = daemon
 
 

@@ -14,6 +14,9 @@ A Lightweight Multi-Process Execution Pool with load balancing and customizable 
 	- [Job](#job)
 	- [Task](#task)
 	- [ExecPool](#execpool)
+	- [Optional Extensions](#optional-extensions)
+		- [WebUiApp](#webuiapp)
+		- [UICmd](#uicmd)
 	- [Accessory Routines](#accessory-routines)
 - [Usage](#usage)
 	- [Usage Example](#usage-example)
@@ -34,8 +37,8 @@ A Lightweight Multi-Process Execution Pool with load balancing to schedule Jobs 
 > Automatic rescheduling of the workers on low memory condition for the in-RAM computations is an optional and the only feature that requires an external package, [psutil](https://pypi.python.org/pypi/psutil).  
 All scheduling jobs share the same CPU affinity policy, which is convenient for the benchmarking, but not so suitable for scheduling both single and multi-threaded apps with distinct demands for the CPU cache.
 
-Implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/eXascaleInfolab/PyCABeM)), not as a separate library.  
-The main purpose of this single-file module is the **asynchronous execution of modules and external executables with custom resource consumption constraints, cache / parallelization tuning and automatic balancing of the worker processes for the in memory computations on the single server**.  
+All main functionality is implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/eXascaleInfolab/PyCABeM)), not as a separate library. Additionally, an optional minimalistic Web interface to inspect the load balancer and execution pool is supplied in the separate file.   
+The main purpose of the main single-file module is the **asynchronous execution of modules and external executables with custom resource consumption constraints, cache / parallelization tuning and automatic balancing of the worker processes for the in memory computations on the single server**.  
 If the asynchronous execution of *Python functions* is required, usage of external modules is not a problem and the automatic jobs scheduling for the in-RAM computations is not necessary, then a more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library. If a distributed task queue is required with advanced monitoring and reporting facilities then [Celery](http://www.celeryproject.org/) might be a good choice. For the parallel execution of the shell scripts a good option can be the [GNU parallel](https://en.wikipedia.org/wiki/GNU_parallel).
 
 The **load balancing** is enabled when the global variables `_LIMIT_WORKERS_RAM` and `_CHAINED_CONSTRAINTS` are set, jobs `.category` and relative `.size` (if known) specified. The balancing is performed to use as much RAM and CPU resources as possible performing in-RAM computations and meeting the specified timeout and memory constraints for each job and for the whole pool.  
@@ -262,42 +265,43 @@ AffinityMask(afnstep, first=True, sequential=cpusequential())
 
 ### ExecPool
 ```python
-ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., name=None)
+ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., name=None, webuiapp=None)
 	"""Multi-process execution pool of jobs
 
-		wksnum  - number of resident worker processes, >=1. The reasonable value is
-			<= logical CPUs (returned by cpu_count()) = NUMA nodes * node CPUs,
-			where node CPUs = CPU cores * HW treads per core.
-			The recomended value is max(cpu_count() - 1, 1) to leave one logical
-			CPU for the benchmarking framework and OS applications.
+	wksnum  - number of resident worker processes, >=1. The reasonable value is
+		<= logical CPUs (returned by cpu_count()) = NUMA nodes * node CPUs,
+		where node CPUs = CPU cores * HW treads per core.
+		The recomended value is max(cpu_count() - 1, 1) to leave one logical
+		CPU for the benchmarking framework and OS applications.
 
-			To guarantee minimal average RAM per a process, for example 2.5 Gb
-			without _LIMIT_WORKERS_RAM flag (not using psutil for the dynamic
-			control of memory consumption):
-				wksnum = min(cpu_count(), max(ramfracs(2.5), 1))
-		afnmask  - affinity mask for the worker processes, AffinityMask
-			None if not applied
-		memlimit  - limit total amount of Memory (automatically reduced to
-			the amount of physical RAM if the larger value is specified) in gigabytes
-			that can be used by worker processes to provide in-RAM computations, >= 0.
-			Dynamically reduces the number of workers to consume not more memory
-			than specified. The workers are rescheduled starting from the
-			most memory-heavy processes.
-			NOTE:
-				- applicable only if _LIMIT_WORKERS_RAM
-				- 0 means unlimited (some jobs might be [partially] swapped)
-				- value > 0 is automatically limited with total physical RAM to process
-					jobs in RAM almost without the swapping
-		latency  - approximate minimal latency of the workers monitoring in sec, float >= 0;
-			0 means automatically defined value (recommended, typically 2-3 sec)
-		name  - name of the execution pool to distinguish traces from subsequently
-			created execution pools (only on creation or termination)
+		To guarantee minimal average RAM per a process, for example 2.5 Gb
+		without _LIMIT_WORKERS_RAM flag (not using psutil for the dynamic
+		control of memory consumption):
+			wksnum = min(cpu_count(), max(ramfracs(2.5), 1))
+	afnmask  - affinity mask for the worker processes, AffinityMask
+		None if not applied
+	memlimit  - limit total amount of Memory (automatically reduced to
+		the amount of physical RAM if the larger value is specified) in gigabytes
+		that can be used by worker processes to provide in-RAM computations, >= 0.
+		Dynamically reduces the number of workers to consume not more memory
+		than specified. The workers are rescheduled starting from the
+		most memory-heavy processes.
+		NOTE:
+			- applicable only if _LIMIT_WORKERS_RAM
+			- 0 means unlimited (some jobs might be [partially] swapped)
+			- value > 0 is automatically limited with total physical RAM to process
+				jobs in RAM almost without the swapping
+	latency  - approximate minimal latency of the workers monitoring in sec, float >= 0;
+		0 means automatically defined value (recommended, typically 2-3 sec)
+	name  - name of the execution pool to distinguish traces from subsequently
+		created execution pools (only on creation or termination)
+	webuiapp: WebUiApp  - WebUI app to inspect load balancer remotely
 
-		Internal attributes:
-		alive  - whether the execution pool is alive or terminating, bool.
-			Should be reseted to True on resuse after the termination.
-			NOTE: should be reseted to True if the execution pool is reused
-			after the joining or termination.
+	Internal attributes:
+	alive  - whether the execution pool is alive or terminating, bool.
+		Should be reseted to True on resuse after the termination.
+		NOTE: should be reseted to True if the execution pool is reused
+		after the joining or termination.
 	"""
 
 	execute(job, async=True):
@@ -323,6 +327,44 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 
 	__finalize__():
 		"""Force termination of the pool"""
+```
+
+### Optional Extensions
+#### WebUiApp
+```python
+WebUiApp(host='localhost', port=8080, name=None, daemon=None, group=None, args=(), kwargs={})
+	"""WebUI App sarting in the dedicated thread and providing remote interface to inspect ExecPool
+
+	Args:
+		uihost: str  - Web UI host
+		uiport: uint16  - Web UI port
+		name (optional): Defaults to None. The thread name. By default, a unique name
+			is constructed of the form “Thread-N” where N is a small decimal number.
+		daemon (bool, optional): Defaults to None. Start the thread in the daemon mode to
+			be automatcally terminated on the main app exit.
+		group (optional): Defaults to None. Reserved for future extension
+			when a ThreadGroup class is implemented.
+		args (tuple, optional): Defaults to (). The argument tuple for the target invocation.
+		kwargs (dict, optional): Defaults to {}. A dictionary of keyword arguments for the target invocation.
+
+	Automatically created attributes:
+		cmd (UiCmd): UI command to be executed, which includes (reserved) attribute(s) for the invocation result.
+	"""
+```
+
+#### UiCmd
+```python
+UiCmd(cid, params=set(), data=[])
+	"""UI command
+
+	Args:
+		cid (UiCmdId): command identifier
+		params (set, optional): Defaults to None. Command parameters
+		data (list, optional): Defaults to None. Resulting data
+
+		Automatically created attributes:
+		cond (Condition): synchronizing Condition
+	"""
 ```
 
 ### Accessory Routines

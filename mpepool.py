@@ -117,7 +117,7 @@ def timeheader(timestamp=time.gmtime()):
 _WEBUI = True
 if _WEBUI:
 	try:
-		from mpewui import UiThread, UiCmdId, UiResCol  # UiCmd, websrvrun
+		from mpewui import WebUiApp, UiCmdId, UiResCol  # UiCmd, websrvrun
 	except ImportError as wuerr:
 		_WEBUI = False
 
@@ -212,7 +212,8 @@ class Task(object):
 
 	"""Task is a managing container for Jobs"""
 	# , timeout=0  - execution timeout in seconds. Default: 0, means infinity
-	def __init__(self, name, onstart=None, ondone=None, onfinish=None, params=None, task=None, latency=2, stdout=sys.stdout, stderr=sys.stderr):
+	def __init__(self, name, onstart=None, ondone=None, onfinish=None, params=None
+		, task=None, latency=2, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize task, which is a group of jobs to be executed
 
 		name  - task name
@@ -987,7 +988,7 @@ class ExecPool(object):
 			0 means automatically defined value (recommended, typically 2-3 sec)
 		name  - name of the execution pool to distinguish traces from subsequently
 			created execution pools (only on creation or termination)
-		webuiapp: UiThread  - WebUI app to inspect load balancer remotely
+		webuiapp: WebUiApp  - WebUI app to inspect load balancer remotely
 
 		Internal attributes:
 		alive  - whether the execution pool is alive or terminating, bool.
@@ -1045,8 +1046,8 @@ class ExecPool(object):
 		self._uicmd = None
 		global _WEBUI
 		if _WEBUI and webuiapp is not None:
-			assert isinstance(webuiapp, UiThread), 'Unexpected type of webuiapp: ' + type(webuiapp).__name__
-			#uiapp = UiThread(host='localhost', port=8080, name='MpepoolWebUI', daemon=True)
+			assert isinstance(webuiapp, WebUiApp), 'Unexpected type of webuiapp: ' + type(webuiapp).__name__
+			#uiapp = WebUiApp(host='localhost', port=8080, name='MpepoolWebUI', daemon=True)
 			self._uicmd = webuiapp.cmd
 			if not webuiapp.is_alive():
 				try:
