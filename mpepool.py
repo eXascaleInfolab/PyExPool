@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
 """
 :Description:  Multi-Process Execution Pool to schedule Jobs execution with per-job timeout,
 optionally grouping them into Tasks and specifying optional execution parameters
@@ -44,6 +43,7 @@ considering NUMA architecture:
 	ScienceWise <http://sciencewise.info/>
 :Date: 2015-07 v1, 2017-06 v2
 """
+# Possible naming: pyexpool / mpepool / xplobal / muexpolb
 
 from __future__ import print_function, division  # Required for stderr output, must be the first import
 import sys
@@ -211,12 +211,12 @@ class Task(object):
 	# 				task.terminate()
 
 	"""Task is a managing container for Jobs"""
-	# , timeout=0  - execution timeout in seconds. Default: 0, means infinity
-	def __init__(self, name, onstart=None, ondone=None, onfinish=None, params=None
+	def __init__(self, name, timeout=0, onstart=None, ondone=None, onfinish=None, params=None
 		, task=None, latency=2, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize task, which is a group of jobs to be executed
 
 		name  - task name
+		timeout  - execution timeout in seconds. Default: 0, means infinity. ATTENTION: not implemented
 		onstart  - a callback, which is executed on the task start (before the execution
 			started) in the CONTEXT OF THE CALLER (main process) with the single argument,
 			the task. Default: None

@@ -1,4 +1,4 @@
-# Optional Python Modules
+# Optional Python Modules for PyExPool (pyexpool / mpepool / xplobal / muexpolb)
 # Jobs autobalancing on execution
 psutil>=5.2
 # Future utils for Python2/3 compatibility

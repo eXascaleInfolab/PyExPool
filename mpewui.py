@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
 """
 :Description:  Minimalistic Web User Interface for the Multiprocess Execution Pool.
     The functionality includes only fetching of the specified atrifutes of the
@@ -61,7 +60,7 @@ UiResFmt = IntEnum('UiResFmt', 'json htm txt')
 UiResCol = IntEnum('UiResCol', 'pid state duration memory task category')
 
 """UI Command: Result filteration by the job status: executing (worker job), defered (scheduled ojb)"""
-UiResFltStatus = IntEnum('UiResFmt', 'exec defer')
+UiResFltStatus = IntEnum('UiResFltStatus', 'exec defer')
 
 class UiCmd(object):
 	"""UI Command (for the MVC controller)"""
