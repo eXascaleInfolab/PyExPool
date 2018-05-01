@@ -956,8 +956,8 @@ class ExecPool(object):
 	_JMEMTRR = 1.5
 	assert _JMEMTRR >= 1, 'Memory threshold retio should be >= 1'
 
-	def __init__(self, wksnum=max(_CPUS-1, 1), afnmask=None, memlimit=0., latency=0., name=None
-		, webuiapp=None):  # afnstep=None, uidir=None
+	def __init__(self, wksnum=max(_CPUS-1, 1), afnmask=None, memlimit=0., latency=0., name=None, webuiapp=None):
+		# afnstep=None, uidir=None
 		"""Execution Pool constructor
 
 		wksnum  - number of resident worker processes, >=1. The reasonable value is
@@ -987,6 +987,7 @@ class ExecPool(object):
 			0 means automatically defined value (recommended, typically 2-3 sec)
 		name  - name of the execution pool to distinguish traces from subsequently
 			created execution pools (only on creation or termination)
+		webuiapp: UiThread  - WebUI app to inspect load balancer remotely
 
 		Internal attributes:
 		alive  - whether the execution pool is alive or terminating, bool.
@@ -1040,25 +1041,26 @@ class ExecPool(object):
 				' computations: {:.6f} -> {:.6f} Gb'.format('' if not self.name else ' ' + self.name
 				, memlimit, self.memlimit), file=sys.stderr)
 
-		# Initialize WebUI
-		if _WEBUI:
-			# self.host = uihost
-			# self.port = uiport
-			uiapp = UiThread(host='localhost', port=8080, name='MpepoolWebUI', daemon=True)
-			self._uicmd = uiapp.cmd
-			# Note: daemon threads are terminated on the app exit
-			# self._uiq = Queue()
-			# Note: When a process exits, it attempts to terminate all of its daemonic child processes.
-			#self._uiapp = Process(target=bottle.run, name='MpepoolWebUI', daemon=True
-			#	, kwargs={'host': uihost, 'port': uiport})
-			#self._uiapp.daemon=True
-			uiapp.start()
+		# Initialize WebUI if it has been supplied
+		self._uicmd = None
+		global _WEBUI
+		if _WEBUI and webuiapp is not None:
+			assert isinstance(webuiapp, UiThread), 'Unexpected type of webuiapp: ' + type(webuiapp).__name__
+			#uiapp = UiThread(host='localhost', port=8080, name='MpepoolWebUI', daemon=True)
+			self._uicmd = webuiapp.cmd
+			if not webuiapp.is_alive():
+				try:
+					webuiapp.start()
+				except RuntimeError as err:
+					print('WARNING, webuiapp can not be started. Disabled: {}. {}'.format(
+						err, traceback.format_exc(5)), file=sys.stderr)
+					_WEBUI = False
 
 
 	def __reviseUi(self):
 		"""Check and handle UI commands"""
 		# Process on the next iteration if the client request is not ready
-		#assert _WEBUI, 'WEBUI is expected to be defined'
+		assert self._uicmd is not None, 'self._uicmd is expected to be defined'
 		if self._uicmd.id is None or not self._uicmd.cond.acquire(blocking=False):
 			return
 		data = self._uicmd.data
@@ -1834,7 +1836,8 @@ class ExecPool(object):
 				return False
 			time.sleep(self.latency)
 			self.__reviseWorkers()
-			if _WEBUI:
+			# Revise UI command(s) if the WebUI app has been connected
+			if self._uicmd is not None:
 				self.__reviseUi()
 		self._tstart = None  # Be ready for the following execution
 
