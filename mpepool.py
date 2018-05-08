@@ -1479,56 +1479,69 @@ class ExecPool(object):
 		"""Trace failed tasks with their jobs and jobs not belonging to any tasks"""
 		print('\nFAILED jobs not assigned to tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		# Header of the jobs
-		indent = '  '  # Indent for each level of the Task/Jobs tree
+		indent = '   '  # Indent for each level of the Task/Jobs tree
 		colsep = '\t'  # Table column separator
 		print(indent, colsep.join(JobInfo.__slots__), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-		taskmbs = dict()  # Task members to group jobs with tasks by the tasks
+		tinfe0 = dict()  # Task information extended, bottom level
 		# Body of the jobs data as a table
 		for fji in self.failures:
 			data = infodata(fji)
-			if data is None:
-				continue
+			# Note: data should not be None here 
+			# if data is None:
+			# 	continue
 			assert isinstance(data, tuple), 'Unexpected data type: ' + type(data).__name__
 			if fji.task is None:
 				print(indent, colsep.join([str(v) for v in data]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 			else:
-				taskmbs.setdefault(fji.task, [JobInfo.__slots__]).append(data)
+				tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=[TaskInfo.__slots__], members=[JobInfo.__slots__]))
+				if len(tie.props) == 1:
+					# Note: infodata(TaskInfo) should not be None here 
+					tie.props.append(infodata(TaskInfo(task)))
+				tie.members.append(data)
 
 		print('\nFAILED tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		# Iteratively form the hierarchy of failed tasks from the bottom level
-		suptasks = True  # Super tasks exist
-		while True:
-			suptasks = False
-			tmbs = dict()
-			for task in taskmbs:
-				data = infodata(TaskInfo(task))
-				if data is None or data.task is None:
-					tmbs[task] = taskmbs[task]
-					continue
-				suptasks = True
-				assert isinstance(data, tuple), 'Unexpected data type: ' + type(data).__name__
-				tie = tmbs.setdefault(data.task, TaskInfoExt(props=[TaskInfo.__slots__], members=[taskmbs[task][0]]))
-				tie.props.append(data)
-				tie.members.append(taskmbs[task][1:])
-			taskmbs = tmbs
-		del tmbs
+		ties = dict()
+		for task, tie in viewitems(tinfe0):
+			if task.task is None 
+				ties[task] = tie
+			else:
+				while(task.task is not None):
+					task = task.task
+					if ties.get(task) is None:
+						# Note: data should not be None here 
+						data = infodata(TaskInfo(task))
+						assert isinstance(data, tuple), 'Unexpected data type: ' + type(data).__name__
+						tie = TaskInfoExt(props=[TaskInfo.__slots__, data], members=[tie])
+						ties[task] = tie
+					else:
+						newtie = ties[task]
+						newtie.members.append(tie)
+						tie = newtie
+		del tinfe0
 
-		def printDepth(tinfext, indent=indent):
-			assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
-			for tie in tinfext:
-
-				print(indent, colsep.join([str(v) for v in tie.props[i]]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-				print(indent * 2, colsep.join([str(v) for v in tie.members[i]]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-
-
-
+		def printDepth(tinfext, cindent=indent):
+			"""Print TaskUnfoExt hierarchy in the depth first manner
+			
+			Args:
+				tinfext: TaskInfoExt  - extended task info to be unfolded and printed
+				cindent: str  - current indent for the output hierarchy formatting
+			"""
+			for props in tinfext.props:
+				print(cindent, colsep.join([str(v) for v in props]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+			# assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
+			nonlocal indent
+			cindent += indent
+			for tie in tinfext.members:
+				if isinstance(tie, TaskInfoExt):
+					printDepth(tie, cindent)
+				else:
+					for mb in tie:
+						print(cindent, colsep.join([str(v) for v in mb]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 
 		# Print hierarchy of tasks from the root (top) level
-		for tie in viewvalues(taskmbs):
-
-
-		rtasks = [t for t in self.tasks if t.task is None]  # Root tasks
-		# Group 
+		for tie in viewvalues(ties):
+			printDepth(tie, indent=indent)
 
 
 	def __postpone(self, job, priority=False):
