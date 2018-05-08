@@ -1359,6 +1359,7 @@ class ExecPool(object):
 	def _traceFailures(self):
 		"""Trace failed tasks with their jobs and jobs not belonging to any tasks"""
 		def tblfmt(v):
+			"""Table-like formatting of the value"""
 			if v is None:
 				v = '-'
 			if isinstance(v, str):
@@ -1387,10 +1388,10 @@ class ExecPool(object):
 					header = False
 				print(indent, colsep.join([tblfmt(v) for v in data]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 			else:
-				tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=[TaskInfo.__slots__], members=[JobInfo.__slots__]))
-				if len(tie.props) == 1:
-					# Note: infodata(TaskInfo) should not be None here 
-					tie.props.append(infodata(TaskInfo(task)))
+				tie = tinfe0.get(fji.task)
+				if tie is None:
+					tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=[TaskInfo.__slots__
+						, infodata(TaskInfo(fji.task))], members=[JobInfo.__slots__]))
 				tie.members.append(data)
 
 		if tinfe0:
@@ -1423,7 +1424,7 @@ class ExecPool(object):
 				cindent: str  - current indent for the output hierarchy formatting
 			"""
 			for props in tinfext.props:
-				print(cindent, colsep.join([str(v) for v in props]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+				print(cindent, colsep.join([tblfmt(v) for v in props]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 			# assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
 			nonlocal indent
 			cindent += indent
@@ -1431,12 +1432,11 @@ class ExecPool(object):
 				if isinstance(tie, TaskInfoExt):
 					printDepth(tie, cindent)
 				else:
-					for mb in tie:
-						print(cindent, colsep.join([str(v) for v in mb]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+					print(cindent, colsep.join([tblfmt(v) for v in tie]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 
 		# Print hierarchy of tasks from the root (top) level
 		for tie in viewvalues(ties):
-			printDepth(tie, indent=indent)
+			printDepth(tie, cindent=indent)
 
 
 	def __postpone(self, job, priority=False):
