@@ -267,6 +267,8 @@ class WebUiApp(threading.Thread):
 
 	@staticmethod
 	def jobs(cmd):
+		with cmd.cond:
+			cmd.id = UiCmdId.LIST_JOBS
 
 
 	# @staticmethod

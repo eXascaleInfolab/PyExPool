@@ -204,6 +204,8 @@ opt: bool  - target property of the filter is optional, i.e. omit the fileter if
 ExecItemFilterVal = namedtuple('ExecItemFilterVal', 'beg end opt')
 
 
+# NOTE: additional paramter(s) can be added to output additional virtual properties like duration,
+# which can be implemented as bool parameter to emulate properties specified by propflt
 def infodata(obj, propflt=None, objflt=None):
 	"""Convert the object to the tuple filtering specified properties and itselt
 
@@ -268,23 +270,6 @@ prop: list(tuple)  - task info properties
 members: list(tuple)  - task info members
 """
 TaskInfoExt = namedtuple('TaskInfoExt', 'props members')
-
-
-# ExecItemData(object):
-# 	"""Data of the executing item (task/job)"""
-# 	def __init__(self, props, members=None):
-# 		"""Initialization of the data of the executing item
-#		
-# 		Args:
-# 			props: dict(name: str, value)  - properties of the item
-# 			members: list(ExecItemData)  - data of the member items (subtasks/subjobs)
-# 		"""
-# 		assert isinstance(props, dict) and props and (
-# 			members is None or isinstance(members, dict)), 'Invalid arguments'
-# 		self.props = props
-# 		if members:
-# 			self.members = members
-
 
 class Task(object):
 	# _tasks = []
@@ -361,47 +346,6 @@ class Task(object):
 		# 		_tasks.append(self)
 		# 		Task._taskManager = threading.Thread(name="TaskManager", target=Task._taskTerminator
 		# 			, kwargs={'tasks': Task._tasks, 'latency': latency})
-
-
-	# def data(propflt=None, selfflt=None):
-	# 	"""Convert the object to the tuple filtering specified properties and itselt
-	#
-	# 	Args:
-	# 		propflt: set(prop: str)  - property filter to include only the specified properties
-	# 		selfflt: dict(prop: str, (optional: bool, boundbeg, boundend))  - include the item
-	# 			only if the specified properties belong to the specified range,
-	# 			member items are processed irrespectively of the item inclusion
-	#	
-	# 	Returns:
-	# 		dict | list: filtered hierarchy of this task and it's subtasks (members) as a dict,
-	# 		which contains at most two attributes for each item (props, members)
-	# 		or value of the members (list) is the item is filtered out
-	# 	"""
-	# 	def fltprops(propflt, selfflt):
-	# 		"""[summary]
-	#		
-	# 		Args:
-	# 			propflt ([type]): [description]
-	# 			selfflt ([type]): [description]
-	#		
-	# 		Returns:
-	# 			[type]: [description]
-	# 		"""
-	# 		res = dict()
-	# 		#if not selfflt or selfflt(self):
-	# 		return res
-	#	
-	# 	props = self.__dict__ if not propflt else fltprops(propflt, selfflt)
-	# 	members = None
-	# 	if self._items:
-	# 		members = []
-	# 		for mb, mbterms in viewitems(self._items):
-	# 			mdat = mb.data(propflt, selfflt)
-	# 			if isinstance(mdat, dict) and (not propflt or ):
-	#
-	# 			members.extend()
-	#	
-	# 	return members if not props else ExecItemData(props=props, members=members)
 
 
 	def add(self, subtask):
@@ -1121,70 +1065,6 @@ class JobInfo(object):
 		self.task = job.task
 		self.category = job.category
 
-	
-	# def data(self, propflt=None, objflt=None):
-	# 	"""Convert object to the dict filtering specified properties and members including itselt
-	#
-	# 	Args:
-	# 		propflt: tuple(prop: str)  - property filter to include only the specified properties
-	# 		objflt: dict(prop: str, val: ExecItemFilterVal)  - include the item
-	# 			only if the specified properties belong to the specified range,
-	# 			member items are processed irrespectively of the item inclusion
-	#
-	# 		NOTE: property names should exactly match the __slots__
-	#	
-	# 	Returns:
-	# 		tuple  - filtered properties of the task or None
-	#
-	# 	Raises:
-	# 		AttributeError  - propflt item does not belong to the JobInfo slots
-	# 	"""
-	# 	# Pass the selffilter or return None
-	# 	if objflt:
-	# 		for prop, opts in viewitems(objflt):
-	# 			assert isinstance(prop, str) and isinstance(opts, ExecItemFilterVal
-	# 				), 'Invalid type of argumetns:  prop: {}, opts: {}'.format(
-	# 				type(prop).__name__, type(opts).__name__)
-	# 			pval = None if prop not in self.__slots__ else self.__getattribute__(prop)
-	# 			# Use task name for the task property
-	# 			if isinstance(pval, Task):
-	# 				pval = pval.name
-	# 			if _DEBUG_TRACE and pval is None:
-	# 				print('  WARNING, objflt item does not belong to the JobInfo slots: ' + prop, file=sys.stderr)
-	# 			if not opts.opt and prop not in self.__slots__ or (
-	# 			not opts.end and pval != opts.beg) or pval < opts.beg or pval >= opts.end:
-	# 				return None
-	# 	return tuple([self.__getattribute__(prop) if prop != 'task' or self.__getattribute__(prop) is None
-	# 		else self.__getattribute__(prop).name for prop in (propflt if propflt else self.__slots__)])
-
-
-	# def __init__(self, name, pid=None, tstart=None, tstop=None, memsize=None, memkind=None, task=None, category=None):
-	# 	"""JobInfo initialization
-	#
-	# 	Args:
-	# 		name (str): job name
-	# 		pid (int, optional): process id
-	# 		tstart (float, optional): job execution start time
-	# 		tstop (float, optional): job execution stop time
-	# 		memsize (float, optional): memory consumption as reported by the Job
-	# 			NOTE: differs from RSS
-	# 		memkind ({0,1,2}, optional): kind of the reported memory consumption
-	# 		task (optional): owner task of the job
-	# 		category (optional): job category
-	# 	"""
-	# 	assert isinstance(name, str) and (pid is None or isinstance(pid, int)) and (
-	# 		tstart is None or tstart >= 0) and (tstop is None or tstop >= 0) and (
-	# 		memsize is None or isinstance(memsize, float)) and (memkind is None or memkind in (0, 1, 2)
-	# 		), 'Argument types are invalid'
-	# 	self.name = name
-	# 	self.pid = pid
-	# 	self.tstart = tstart
-	# 	self.tstop = tstop
-	# 	self.memsize = memsize
-	# 	self.memkind = memkind
-	# 	self.task = task
-	# 	self.category = category
-
 
 class ExecPool(object):
 	"""Execution Pool of workers for jobs
@@ -1349,11 +1229,11 @@ class ExecPool(object):
 			# Note: restarting jobs are restarted at once (on the same iteration) after
 			# they have been notified as completed.
 			# - total execution time, memory consumption vs available, ...
-			data['summary'] = {
-				'workers': {
-					''
-				}
-			}
+			# data['summary'] = {
+			# 	'workers': {
+			# 		''
+			# 	}
+			# }
 			data.append(['#','name'])  # Number and Name
 			data[0].extend(cols)
 			for job in jobs:
@@ -1477,13 +1357,22 @@ class ExecPool(object):
 
 	def _traceFailures(self):
 		"""Trace failed tasks with their jobs and jobs not belonging to any tasks"""
-		print('\nFAILED jobs not assigned to tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		def tblfmt(v):
+			if v is None:
+				v = '-'
+			if isinstance(v, str):
+				return v.rjust(9)
+			elif not isinstance(v, float):
+				return '{:9}'.format(v)
+			else:
+				return '{:.3f}'.format(v)
+
 		# Header of the jobs
-		indent = '   '  # Indent for each level of the Task/Jobs tree
-		colsep = '\t'  # Table column separator
-		print(indent, colsep.join(JobInfo.__slots__), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		indent = '  '  # Indent for each level of the Task/Jobs tree
+		colsep = ' '  # Table column separator
 		tinfe0 = dict()  # Task information extended, bottom level
 		# Body of the jobs data as a table
+		header = True  # Show header for the initial output
 		for fji in self.failures:
 			data = infodata(fji)
 			# Note: data should not be None here 
@@ -1491,7 +1380,11 @@ class ExecPool(object):
 			# 	continue
 			assert isinstance(data, tuple), 'Unexpected data type: ' + type(data).__name__
 			if fji.task is None:
-				print(indent, colsep.join([str(v) for v in data]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+				if header:
+					print('\nFAILED jobs not assigned to tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+					print(indent, colsep.join([tblfmt(v) for v in JobInfo.__slots__]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+					header = False
+				print(indent, colsep.join([tblfmt(v) for v in data]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 			else:
 				tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=[TaskInfo.__slots__], members=[JobInfo.__slots__]))
 				if len(tie.props) == 1:
@@ -1499,11 +1392,12 @@ class ExecPool(object):
 					tie.props.append(infodata(TaskInfo(task)))
 				tie.members.append(data)
 
-		print('\nFAILED tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		if tinfe0:
+			print('\nFAILED tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		# Iteratively form the hierarchy of failed tasks from the bottom level
 		ties = dict()
 		for task, tie in viewitems(tinfe0):
-			if task.task is None 
+			if task.task is None:
 				ties[task] = tie
 			else:
 				while(task.task is not None):
