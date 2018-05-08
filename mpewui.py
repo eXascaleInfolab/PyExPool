@@ -17,6 +17,7 @@ __all__ = ['WebUiApp', 'UiCmdId', 'UiResOpt', 'UiResCol', 'UiResFltStatus']
 
 import bottle
 # from bottle import run as websrvrun
+# import signal  # Required for the correct handling of KeyboardInterrupt: https://docs.python.org/2/library/thread.html
 import threading  # Run bottle in the dedicated thread
 from functools import partial  # Customly parameterized routes
 # Constants Definitions
@@ -62,7 +63,7 @@ except ImportError:
 			if isinstance(names, str):
 				names = [name.rstrip(',') for name in names.split()]
 			if not isinstance(names, dict) and (not isinstance(names, list) or isinstance(names[0], str)):
-				#{'name': name, 'value': i}
+				# {'name': name, 'value': i}
 				dnames = {name: valobj(clsname, name, i) for i, name in enumerate(names, start)}
 			else:
 				dnames = {name: valobj(clsname, name, i) for i, name in dict(names).items()}
@@ -79,7 +80,7 @@ except ImportError:
 	from cgi import escape  # Consider both both Python2/3
 
 """UI Command Identifier associated with the REST URL"""
-UiCmdId = IntEnum('UiCmdId', 'LIST_JOBS')
+UiCmdId = IntEnum('UiCmdId', 'SUMMARY LIST_JOBS')  # 'JOB_INFO', 'LIST_TASKS', 'TASK_INFO'
 
 """UI Command parameters"""
 UiResOpt = IntEnum('UiResOpt', 'fmt cols fltStatus')
@@ -88,36 +89,34 @@ UiResOpt = IntEnum('UiResOpt', 'fmt cols fltStatus')
 UiResFmt = IntEnum('UiResFmt', 'json htm txt')
 
 """UI Command: Result columns parameter values for the Jobs listing"""
-UiResCol = IntEnum('UiResCol', 'pid state duration memory task category')
+UiResCol = IntEnum('UiResCol', 'pid state tstart tstop duration memory task category')
 
-"""UI Command: Result filteration by the job status: executing (worker job), defered (scheduled ojb)"""
+"""UI Command: Result filteration by the job status: executing (worker job), deferred (scheduled ojb)"""
 # Note: 'exec' is a keyword in Python 2 and can't be used as an obect attribute
 UiResFltStatus = IntEnum('UiResFltStatus', 'work defer')
 
 class UiCmd(object):
 	"""UI Command (for the MVC controller)"""
-	def __init__(self, cid, params=dict(), data=[]):
+	def __init__(self, cid, data=dict()):
 		"""UI command
 		
 		Args:
 			cid (UiCmdId)  - Command identifier
-			params (dict)  - Command parameters
-			data (list)  - Resulting data
+			data (dict)  - request (parameters) to the ExecPool on it's call and
+				resulting (response) data (or empty dict) afterwards
 
 		Internal attributes:
 			cond (Condition)  - synchronizing condition
 		"""
+		# params (dict)  - Command parameters, params=dict();   and isinstance(params, dict)
 		#dshape (set(str), optional): Defaults to None. Expected data shape (columns of the returning table)
 		# self.lock = threading.Lock()
 		self.cond = threading.Condition()  # (self.lock)
-		# assert (params in None or isinstance(params, dict)) and (data in None or isinstance(data, set)), (
-		# 	'Unexpected type of arguments, params: {}, data: {}'.format(type(params).__name__, type(data).__name__))
-		assert (cid is None or isinstance(cid, UiCmdId)) and isinstance(params, dict) and isinstance(data, list), (
-			'Unexpected type of arguments, id: {}, params: {}, data: {}'.format(
-            type(id).__name__, type(params).__name__, type(data).__name__))
+		assert (cid is None or isinstance(cid, UiCmdId)) and isinstance(data, dict), (
+			'Unexpected type of arguments, id: {}, data: {}'.format(type(id).__name__, type(data).__name__))
 		self.id = cid
 		# self.dshape = dshape
-		self.params = params
+		# self.params = params
 		self.data = data
 
 
@@ -147,8 +146,8 @@ class WebUiApp(threading.Thread):
 		self.cmd = UiCmd(None)  # Shared data between the UI WebApp and MpePool backend
         # Initialize web app before starting the thread
 		webuiapp = bottle.default_app()  # The same as bottle.Bottle()
-		mroot = partial(WebUiApp.root, self.cmd)
-		webuiapp.route('/', callback=mroot, name=UiCmdId.LIST_JOBS.name)
+		mroot = partial(WebUiApp.root, self.cmd)  # Define partial function with the substituted first parameter
+		webuiapp.route('/', callback=mroot, name=UiCmdId.SUMMARY.name)  
 		webuiapp.route('/jobs', callback=mroot, name=UiCmdId.LIST_JOBS.name)
 		# TODO, add interfaces to inspect tasks and selected jobs/tasks:
 		# webuiapp.route('/job/<name>', callback=mroot, name=UiCmdId.JOB_INFO.name)
@@ -159,16 +158,47 @@ class WebUiApp(threading.Thread):
 		self.daemon = daemon
 
 
+	@bottle.get('/favicon.ico')
+	def favicon():
+		return server_static('/images/favicon.ico')
+
+
+	@bottle.error(404)
+	@staticmethod
+	def error404(error, msg=''):
+		if msg:
+			return 'The URL is invalid: ' + msg
+		else:
+			return 'Nothing here, sorry'
+
+
 	@staticmethod
 	def root(cmd):
-		"""Default command of the UI (UiCmdId.LIST_JOBS)
+		"""Default command of the UI (UiCmdId.SUMMARY)
+
+		Shows:
+		- execpool name if any
+		- the curent number of workers and the total number of them
+		- the amount of consuming memory by the workers and the specified memory constraint
+		- duration of the execution
+		- failed jobs, ordered in the historical order by the termination time (tstop):
+				[name  - job name, always present]
+				pid  - process id
+				tstart  - start time of the job
+				//tstop  - termination time of the job
+				duration  - cuttent execution time
+				memory  - consuming memory as specified by Job
+				//memkind  - kind of the reporting memory
+				task  - task name if assigned
+				category  - job category if specified
+			
 
 		URL parameters:
 			fmt (UiResFmt values) = {json, htm, txt}  - format of the result
 			cols (UiResCol values):
-				[name]  - job name, always present
+				[name  - job name, always present]
 				pid  - process id
-				state = {'w', 's'}  - execution state (working, shceduled)
+				# state = {'w', 's'}  - execution state (working, shceduled)
 				duration  - cuttent execution time
 				memory  - consuming memory as specified by Job
 				task  - task name if assigned
@@ -180,13 +210,14 @@ class WebUiApp(threading.Thread):
 		Returns:
 			Jobs listing for the specified detalizaion in the specified format
 		"""
+		# return 'Root works'
 		with cmd.cond:
-			cmd.cid = UiCmdId.LIST_JOBS
+			cmd.id = UiCmdId.SUMMARY
 			# Parameters fetching options:
 			# 1. The arguments extracted from the URL:
-			# bottle.request.url_args
+			# bottle.request.url_args		# Empty
 			# 2. Raw URL params as str:
-			# bottle.request.query_string
+			# bottle.request.query_string	# OK
 			# 3. URL params as MultiDict:
 			# bottle.request.query
 
@@ -194,6 +225,7 @@ class WebUiApp(threading.Thread):
 			fmt = UiResFmt.htm
 			qdict = bottle.request.query
 			fmtKey = UiResOpt.fmt.name
+			# return "query dict: {}, dict.keys: {}, dict[fmt]: {}".format(qdict.items(), qdict.keys(), qdict[fmtKey])
 			if fmtKey in qdict:
 				try:
 					fmt = UiResFmt[qdict[fmtKey]]
@@ -202,16 +234,20 @@ class WebUiApp(threading.Thread):
 					bottle.response.status = 400
 					return 'Invalid URL parameter value of "{}": {}'.format(fmtKey, qdict[fmtKey])
 					# raise HTTPResponse(body='Invalid URL parameter value of "fmt": ' + qdict['fmt'], status=400)
-			if cmd.params:
-				cmd.params.clear()
+			# Prepare .data for the request parameters storage
+			if cmd.data:
+				cmd.data.clear()
 			cols = qdict.get(UiResOpt.cols.name)
 			if cols:
-				cmd.params[UiResOpt.cols] = cols.split(',')
+				cmd.data[UiResOpt.cols] = cols.split(',')
 			fltStatus = qdict.get(UiResOpt.fltStatus.name)
 			if fltStatus:
-				cmd.params[UiResOpt.fltStatus] = fltStatus.split(',')
+				cmd.data[UiResOpt.fltStatus] = fltStatus.split(',')
 			# Wait for the command execution and notification
+			# return "cmd.id: {}, cmd.data: {}, keys: {}, vals: {}".format(cmd.id, cmd.data.items(), cmd.data.keys(), cmd.data.values())
 			cmd.cond.wait()
+			# Now .data contains the response results
+			return "cmd.data: {}".format(cmd.data)
 			# Read the result and transfer to the client
 			if not cmd.data:
 				return ''
@@ -229,18 +265,13 @@ class WebUiApp(threading.Thread):
 					, '</table>')
 
 
+	@staticmethod
+	def jobs(cmd):
+
+
 	# @staticmethod
 	# def taskInfo(cmd, name):
 	# 	pass
-
-
-	@bottle.error(404)
-	@staticmethod
-	def error404(error, msg=''):
-		if msg:
-			return 'The URL is invalid: ' + msg
-		else:
-			return 'Nothing here, sorry'
 
 # @webuiapp.route('/')
 # def root():

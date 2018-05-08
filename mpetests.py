@@ -11,6 +11,9 @@
 
 from __future__ import print_function, division  # Required for stderr output, must be the first import
 from sys import executable as PYEXEC  # Full path to the current Python interpreter
+# import signal  # Intercept kill signals
+# import atexit  # At exit termination handleing
+# from functools import partial  # Partially predefined functions (callbacks)
 try:
 	from unittest import mock
 except ImportError:
@@ -18,7 +21,7 @@ except ImportError:
 		# Note: mock is not available under default Python2 / pypy installation
 		import mock
 	except ImportError:
-		mock = None  # Skip the unittests if the mock module is not installed
+		mock = None  # Skip unittests operating with the mock if it is not installed
 from mpepool import AffinityMask, ExecPool, Job, Task, _CHAINED_CONSTRAINTS, _LIMIT_WORKERS_RAM, _RAM_SIZE, inBytes, inGigabytes
 import sys, time, subprocess, unittest
 # Consider compatibility with Python before v3.3
@@ -80,6 +83,9 @@ class TestExecPool(unittest.TestCase):
 		#	os.kill(os.getpid(), signal)
 
 		if cls._execpool:
+			# print('WARNING{}, execpool is terminating by the signal {} ({})'
+			# 	.format('' if not cls._execpool.name else ' ' + cls._execpool.name, signal
+			# 	, cls._signals.get(signal, '-')))  # Note: this is a trace log record
 			del cls._execpool  # Destructors are caled later
 			# Define _execpool to avoid unnessary trash in the error log, which might
 			# be caused by the attempt of subsequent deletion on destruction
@@ -91,6 +97,23 @@ class TestExecPool(unittest.TestCase):
 	@classmethod
 	def setUpClass(cls):
 		cls._execpool = ExecPool(_WPROCSMAX, latency=_TEST_LATENCY)
+
+		# Note: signals are redundant since the timeout are tiny
+		# # Fill signals mapping {value: name}
+		# cls._signals = {sv: sn for sn, sv in signal.__dict__.items()
+		# 	if sn.startswith('SIG') and not sn.startswith('SIG_')}
+
+		# # Substitute class parameter to terminationHandler 
+		# termHandler = partial(cls.terminationHandler, cls)
+		# # Set handlers of external signals
+		# signal.signal(signal.SIGTERM, termHandler)
+		# signal.signal(signal.SIGHUP, termHandler)
+		# signal.signal(signal.SIGINT, termHandler)
+		# signal.signal(signal.SIGQUIT, termHandler)
+		# signal.signal(signal.SIGABRT, termHandler)
+
+		# # Set termination handler for the internal termination
+		# atexit.register(termHandler, terminate=False)
 
 
 	@classmethod
@@ -156,7 +179,7 @@ class TestExecPool(unittest.TestCase):
 		def updateruns(job):
 			job.params['count'] += 1
 
-		jrx = Job('ep_timeout_jrx', args=('sleep', str(worktime)), timeout=etimeout / 2, ontimeout=True
+		jrx = Job('ep_timeout_jrx', args=('sleep', str(worktime)), timeout=etimeout / 2, restartonto=True
 			, params=runsCount, onstart=updateruns)  # Reexecuting job
 		self._execpool.execute(jrx)
 		# Verify termination of the execution pool
@@ -667,6 +690,83 @@ class TestTasks(unittest.TestCase):
 			self.assertEqual(t1.numadded, 2)
 			self.assertEqual(t1.numdone, 1)
 			self.assertEqual(t1.numterm, 1)
+
+
+# import threading  # To request URL in parallel with execpool joining
+from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt, UiResFltStatus  # UiResCol
+try:
+	# from urllib.parse import urlparse, urlencode
+	from urllib.request import urlopen #, Request
+	from urllib.error import HTTPError
+except ImportError:
+	# from urlparse import urlparse
+	# from urllib import urlencode
+	from urllib2 import urlopen, HTTPError  # , Request
+
+_webuiapp = None  # Global WebUI application
+
+class TestWebUI(unittest.TestCase):
+	"""WebUI tests"""
+
+	@classmethod
+	def setUpClass(cls):
+		cls.host = 'localhost'
+		cls.port = 8080
+		global _webuiapp
+		if _webuiapp is None:
+			_webuiapp = WebUiApp(host=cls.host, port=cls.port, name='MpeWebUI', daemon=True)
+		cls._execpool = ExecPool(2, latency=_TEST_LATENCY, name='MpePoolWUI', webuiapp=_webuiapp)
+
+
+	@classmethod
+	def tearDownClass(cls):
+		if cls._execpool:
+			del cls._execpool  # Destructors are caled later
+			# Define _execpool to avoid unnessary trash in the error log, which might
+			# be caused by the attempt of subsequent deletion on destruction
+			cls._execpool = None  # Note: otherwise _execpool becomes undefined
+
+
+	def setUp(self):
+		assert not self._execpool._workers, 'Worker processes should be empty for each new test case'
+		self._execpool.alive = True  # Set alive flag after the termination
+
+
+	def tearDown(self):
+		assert not self._execpool._workers and not self._execpool._jobs, (
+			'All jobs should be completed in the end of each testcase (workers: "{}"; jobs: "{}")'
+			.format(', '.join([job.name for job in self._execpool._workers])
+			, ', '.join([job.name for job in self._execpool._jobs])))
+
+
+	# @unittest.skipUnless(mock is not None, 'Requires defined mock')
+	def test_listJobs(self):
+		timeout = 10  # Note: should be larger than 3*latency
+		# worktime = max(1, _TEST_LATENCY) + (timeout * 2) // 1  # Job work time
+		worktime = 0.75 * timeout  # Job work time
+		assert _TEST_LATENCY * 3 < timeout and _TEST_LATENCY * 3 < worktime, 'Testcase parameters validation failed'
+
+		j1 = Job('j1', args=('sleep', str(worktime)), timeout=timeout)  # , onstart=mock.MagicMock()
+		j2 = Job('j2', args=('sleep', str(worktime*2)), timeout=timeout)  # , onstart=mock.MagicMock()
+		j3 = Job('j3', args=('sleep', str(worktime)), timeout=timeout)  # , onstart=mock.MagicMock()
+		time.sleep(_TEST_LATENCY)
+		self._execpool.execute(j1)
+		self._execpool.execute(j2)
+		self._execpool.execute(j3)
+
+		# Fetch data in the concurrent thread
+		# global _webuiapp
+		# _webuiapp.cmd.id = UiCmdId.SUMMARY
+		# http://localhost:8080/?fmt=json&fltStatus=work,defer
+		# url = ''.join(('http://', self.host, str(self.port), '/?'
+		# 	, UiResOpt.fmt.name	,'=', UiResFmt.json.name
+		# 	, '&', UiResOpt.fltStatus.name, '=', UiResFltStatus.work.name, ',', UiResFltStatus.defer.name))
+		# json = urlopen(url).read().decode('utf-8')
+		# print(json)
+
+		# Verify successful completion of the execution pool
+		self.assertTrue(self._execpool.join())
+
 
 
 if __name__ == '__main__':

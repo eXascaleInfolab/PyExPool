@@ -12,16 +12,25 @@ from setuptools import setup
 setup(
 	name='pyexpool',  # This is the name of your PyPI-package.
 	version='2.2.0',  # Update the version number for new releases
-	description='A lightweight multi-process Execution Pool with load balancing and customizable resource consumption constraints.',  # Required, "Summary" metadata field
+	description=('A lightweight multi-process Execution Pool with load balancing'
+	' and customizable resource consumption constraints.'),  # Required, "Summary" metadata field
 	long_description=(
-	'PyExPool is a concurrent asynchronous execution pool with custom resource'
+	'PyExPool is a concurrent execution pool with custom resource'
     ' constraints (memory, timeouts, affinity, CPU cores and caching) and load'
     ' balancing of the external applications on NUMA architecture.  '
 	'All main functionality is implemented as a single-file module to be easily'
 	' included into your project and customized as a part of your distribution '
 	'(like in [PyCaBeM](https://github.com/eXascaleInfolab/PyCABeM)), not as a'
 	' separate library. Additionally, an optional minimalistic Web interface is'
-	' provided in the separate file to inspect the load balancer and execution pool.'),
+	' provided in the separate file to inspect the load balancer and execution pool.'
+	' Typically, PyExPool is used as an application framework for benchmarking or'
+	' heavy-loaded multi-process execution activities on consrained computational'
+	' resources.'
+	'\n\n'
+	'See details on the [PyExPool page](https://github.com/eXascaleInfolab/PyExPool)'
+	' and star the project if you like it! For any futher assistance you can drop me'
+	' a email or write [me on Linkein](https://linkedin.com/in/artemvl).'
+	),
 	long_description_content_type='text/markdown',
 	url='https://github.com/eXascaleInfolab/PyExPool',
 	author='Artem Lutov',
@@ -63,8 +72,8 @@ setup(
 		'Programming Language :: Python :: 2',
 		'Programming Language :: Python :: 2.7',
 		'Programming Language :: Python :: 3',
-		'Programming Language :: Python :: 3.2',
-		'Programming Language :: Python :: 3.3',
+		# 'Programming Language :: Python :: 3.2',
+		# 'Programming Language :: Python :: 3.3',
 		'Programming Language :: Python :: 3.4',
 		'Programming Language :: Python :: 3.5',
 		'Programming Language :: Python :: 3.6',
@@ -89,7 +98,7 @@ setup(
 	# project page. What does your project relate to?
 	#
 	# Note that this is a string of words separated by whitespace, not a list.
-	keywords='execution-pool load-balancer execution-constraints NUMA concurrent async multi-process benchmarking',  # Optional
+	keywords='execution-pool load-balancer execution-constraints NUMA concurrent multi-process benchmarking',  # Optional
 
 	# You can just specify package directories manually here if your project is
 	# simple. Or you can use find_packages().
@@ -137,7 +146,9 @@ setup(
 	package_data={  # Optional
 		# 'sample': ['package_data.dat'],
 		# 'pyexpool': ['README.md', 'images/*'],
-		'': ['README.md', 'images/*']  # ! Include specified files from the current directory
+		# '': ['README.md', 'images/*'],  # ! Include specified files from the current directory
+		# Note: images are relatively heavy
+		'': ['README.md']  # ! Include specified files from the current directory
 	},
 	# include_package_data=True,  # Deprecated
 
@@ -174,10 +185,10 @@ setup(
 	# maintainers, and where to support the project financially. The key is
 	# what's used to render the link text on PyPI.
 	project_urls={  # Optional
-		'Bug Reports': 'https://github.com/eXascaleInfolab/PyExPool/issues',
+		'Bug Reports & Proposals': 'https://github.com/eXascaleInfolab/PyExPool/issues',
 		# 'Funding': 'https://donate.pypi.org',
 		# 'Say Thanks!': 'http://saythanks.io/to/example',
 		'Source': 'https://github.com/eXascaleInfolab/PyExPool',
-		'Company': 'https://exascale.info/'
+		'Visit our eXascale Infolab': 'https://exascale.info/'
 	},
 )

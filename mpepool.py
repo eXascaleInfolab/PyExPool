@@ -62,14 +62,15 @@ import traceback  # Stacktrace
 import subprocess
 import errno
 # # Anync Tasks management
-# import threading  # Used only for the asyncronous Tasks termination by timeout
+# import threading  # Used only for the concurrent Tasks termination by timeout
 # import signal  # Required for the correct handling of KeyboardInterrupt: https://docs.python.org/2/library/thread.html
 
 from multiprocessing import cpu_count, Lock, Queue  #, active_children, Value, Process
+from collections import namedtuple  # ExecItemFilterVal, TaskInfoExt
 
 # Required to efficiently traverse items of dictionaries in both Python 2 and 3
 try:
-	from future.utils import viewvalues  #, viewitems  #, viewkeys, viewvalues  # External package: pip install future
+	from future.utils import viewvalues, viewitems  #, viewkeys, viewvalues  # External package: pip install future
 	from future.builtins import range  #, list
 except ImportError:
 	def viewMethod(obj, method):
@@ -89,7 +90,7 @@ except ImportError:
 			ometh = getattr(obj, method)
 		return ometh
 
-	#viewitems = lambda dct: viewMethod(dct, 'items')()
+	viewitems = lambda dct: viewMethod(dct, 'items')()
 	#viewkeys = lambda dct: viewMethod(dct, 'keys')()
 	viewvalues = lambda dct: viewMethod(dct, 'values')()
 
@@ -184,7 +185,7 @@ def applyCallback(callback, owner):
 	
 	Args:
 		callback (function): callback (self.onXXX)
-		owner (str): owner name of the callback (self.name)
+		owner (str): owner name of the callback (self.name), required only for tracing
 	"""
 	assert callable(callback) and isinstance(owner, str), 'A valid callback and owner name are expected'
 	try:
@@ -192,7 +193,98 @@ def applyCallback(callback, owner):
 	except Exception as err:  #pylint: disable=W0703
 		print('ERROR in {}() callback of the "{}": {}, discarded. {}'
 			.format(callback.__name__, owner, err, traceback.format_exc(5)), file=sys.stderr)
+
+
+"""Filter value of the Executing Item (Task/Job)
+
+beg  - begin of the range bound
+end  - end of the range bound
+opt: bool  - target property of the filter is optional, i.e. omit the fileter if the property is absent or None
+"""
+ExecItemFilterVal = namedtuple('ExecItemFilterVal', 'beg end opt')
+
+
+def infodata(obj, propflt=None, objflt=None):
+	"""Convert the object to the tuple filtering specified properties and itselt
+
+	Args:
+		obj: XobjInfo  - the object to be filtered and converted to the tuple
+		propflt: tuple(prop: str)  - property filter to include only the specified properties
+		objflt: dict(prop: str, val: ExecItemFilterVal)  - include the item
+			only if the specified properties belong to the specified range,
+			member items are processed irrespectively of the item inclusion
+
+		NOTE: property names should exactly match the obj.__slots__
+	
+	Returns:
+		tuple  - filtered properties of the task or None
+
+	Raises:
+		AttributeError  - propflt item does not belong to the JobInfo slots
+	"""
+	assert hasattr(obj, '__slots__'), 'The object should contain slots'
+	# Pass the objflt or return None
+	if objflt:
+		for prop, opts in viewitems(objflt):
+			assert isinstance(prop, str) and isinstance(opts, ExecItemFilterVal
+				), 'Invalid type of argumetns:  prop: {}, opts: {}'.format(
+				type(prop).__name__, type(opts).__name__)
+			pval = None if prop not in obj.__slots__ else obj.__getattribute__(prop)
+			# Use task name for the task property
+			if isinstance(pval, Task):
+				pval = pval.name
+			if _DEBUG_TRACE and pval is None:
+				print('  WARNING, objflt item does not belong to the JobInfo slots: ' + prop, file=sys.stderr)
+			if not opts.opt and prop not in obj.__slots__ or (
+			not opts.end and pval != opts.beg) or pval < opts.beg or pval >= opts.end:
+				return None
+	return tuple([obj.__getattribute__(prop) if prop != 'task' or obj.__getattribute__(prop) is None
+		else obj.__getattribute__(prop).name for prop in (propflt if propflt else obj.__slots__)])
+
+
+class TaskInfo(object):
+	"""Task information to be reported by the request"""
+	__slots__ = ('name', 'tstart', 'tstop', 'numadded', 'numdone', 'numterm', 'task')
+
+	def __init__(self, task):
+		"""TaskInfo initialization
 		
+		Args:
+			task: Task  - a task from which the info is fetched
+		"""
+		assert isinstance(task, Task), 'Unexpected type of the task: ' + type(task).__name__
+		self.name = task.name
+		self.tstart = task.tstart
+		self.tstop = task.tstop
+		self.numadded = task.numadded
+		self.numdone = task.numdone
+		self.numterm = task.numterm
+		self.task = task.task
+
+
+"""Task information extended with member items (subtasks/jobs)
+
+prop: list(tuple)  - task info properties
+members: list(tuple)  - task info members
+"""
+TaskInfoExt = namedtuple('TaskInfoExt', 'props members')
+
+
+# ExecItemData(object):
+# 	"""Data of the executing item (task/job)"""
+# 	def __init__(self, props, members=None):
+# 		"""Initialization of the data of the executing item
+#		
+# 		Args:
+# 			props: dict(name: str, value)  - properties of the item
+# 			members: list(ExecItemData)  - data of the member items (subtasks/subjobs)
+# 		"""
+# 		assert isinstance(props, dict) and props and (
+# 			members is None or isinstance(members, dict)), 'Invalid arguments'
+# 		self.props = props
+# 		if members:
+# 			self.members = members
+
 
 class Task(object):
 	# _tasks = []
@@ -217,7 +309,7 @@ class Task(object):
 
 		name  - task name
 		timeout  - execution timeout in seconds. Default: 0, means infinity. ATTENTION: not implemented
-		onstart  - a callback, which is executed on the task start (before the execution
+		onstart  - a callback, which is executed on the task start (before the subtasks/jobs execution
 			started) in the CONTEXT OF THE CALLER (main process) with the single argument,
 			the task. Default: None
 			ATTENTION: must be lightweight
@@ -244,7 +336,8 @@ class Task(object):
 		assert isinstance(name, str) and (latency is None or latency >= 0) and (
 			task is None or (isinstance(task, Task) and task != self)), 'Arguments are invalid'
 		self._lock = Lock()  # Lock for the embrasing jobs
-		self._items = dict()  # Dictionary of subtasks with termination counter
+		# dict(subtask: Task | Job, accterms: uint)
+		self._items = dict()  # Dictionary of non-finished subtasks with the direct termination counter
 		self.name = name
 		# Add member handlers if required
 		self.onstart = types.MethodType(onstart, self) if onstart else None  # Bind the callback to the object
@@ -259,7 +352,7 @@ class Task(object):
 
 		self.tstart = None
 		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
-		self.numadded = 0  # The number of added direct subtasks (the same subtask/job can be readded several times)
+		self.numadded = 0  # The number of added direct subtasks, the same subtask/job can be readded several times
 		self.numdone = 0  # The number of completed direct subtasks
 		self.numterm = 0  # Total number of terminated direct subtasks
 		# Consider subtasks termination by timeout
@@ -268,6 +361,48 @@ class Task(object):
 		# 		_tasks.append(self)
 		# 		Task._taskManager = threading.Thread(name="TaskManager", target=Task._taskTerminator
 		# 			, kwargs={'tasks': Task._tasks, 'latency': latency})
+
+
+	# def data(propflt=None, selfflt=None):
+	# 	"""Convert the object to the tuple filtering specified properties and itselt
+	#
+	# 	Args:
+	# 		propflt: set(prop: str)  - property filter to include only the specified properties
+	# 		selfflt: dict(prop: str, (optional: bool, boundbeg, boundend))  - include the item
+	# 			only if the specified properties belong to the specified range,
+	# 			member items are processed irrespectively of the item inclusion
+	#	
+	# 	Returns:
+	# 		dict | list: filtered hierarchy of this task and it's subtasks (members) as a dict,
+	# 		which contains at most two attributes for each item (props, members)
+	# 		or value of the members (list) is the item is filtered out
+	# 	"""
+	# 	def fltprops(propflt, selfflt):
+	# 		"""[summary]
+	#		
+	# 		Args:
+	# 			propflt ([type]): [description]
+	# 			selfflt ([type]): [description]
+	#		
+	# 		Returns:
+	# 			[type]: [description]
+	# 		"""
+	# 		res = dict()
+	# 		#if not selfflt or selfflt(self):
+	# 		return res
+	#	
+	# 	props = self.__dict__ if not propflt else fltprops(propflt, selfflt)
+	# 	members = None
+	# 	if self._items:
+	# 		members = []
+	# 		for mb, mbterms in viewitems(self._items):
+	# 			mdat = mb.data(propflt, selfflt)
+	# 			if isinstance(mdat, dict) and (not propflt or ):
+	#
+	# 			members.extend()
+	#	
+	# 	return members if not props else ExecItemData(props=props, members=members)
+
 
 	def add(self, subtask):
 		"""Add one more subtask to the task
@@ -339,13 +474,15 @@ class Task(object):
 				.format(self.numterm, self.numdone, self.numadded))
 
 
-	def uncompleted(self, recursive=False, header=False, pid=False, duration=False, memory=False):
+	def uncompleted(self, recursive=False, header=False, pid=False, tstart=False, tstop=False, duration=False, memory=False):
 		"""Fetch names of the uncompleted tasks
 		
 		Args:
 			recursive (bool, optional): Defaults to False. Fetch uncompleted subtasks recursively.
 			header (bool, optional): Defaults to False. Include header for the displaying attributes.
 			pid (bool, optional): Defaults to False. Show process id of for the job, None for the task.
+			tstart (bool, optional): Defaults to False. Show tstart of the execution.
+			tstop (bool, optional): Defaults to False. Show tstop of the execution.
 			duration (bool, optional): Defaults to False. Show duration of the execution.
 			memory (bool, optional): Defaults to False. Show memory consumption the job, None for the task.
 				Note: the value as specified by the Job.mem, which is not the peak RSS.
@@ -375,6 +512,10 @@ class Task(object):
 				res = [subtask.name]
 				if pid:
 					res.append(None if not isjob or subtask.proc is None else subtask.proc.pid)
+				if tstart:
+					res.append(subtask.tstart)
+				if tstop:
+					res.append(subtask.tstop)
 				if duration:
 					res.append(None if subtask.tstart is None else ctime - subtask.tstart)
 				if memory:
@@ -389,6 +530,10 @@ class Task(object):
 				hdritems = ['Name']
 				if pid:
 					hdritems.append('PID')
+				if tstart:
+					hdritems.append('Tstart')
+				if tstop:
+					hdritems.append('Tstop')
 				if duration:
 					hdritems.append('Duration')
 				if memory:
@@ -410,16 +555,17 @@ class Task(object):
 
 
 class Job(object):
-	_RTM = 0.85  # Memory retention ratio, used to not drop the memory info fast on temporal releases, E [0, 1)
-	assert 0 <= _RTM < 1, 'Memory retention ratio should E [0, 1)'
-
-	# Note: the same job can be executed as Popen or Process object, but ExecPool
-	# should use some wrapper in the latter case to manage it
 	"""Job is executed in a separate process via Popen or Process object and is
 	managed by the Process Pool Executor
 	"""
+	# Note: the same job can be executed as Popen or Process object, but ExecPool
+	# should use some wrapper in the latter case to manage it
+
+	_RTM = 0.85  # Memory retention ratio, used to not drop the memory info fast on temporal releases, E [0, 1)
+	assert 0 <= _RTM < 1, 'Memory retention ratio should E [0, 1)'
+
 	# NOTE: keyword-only arguments are specified after the *, supported only since Python 3
-	def __init__(self, name, workdir=None, args=(), timeout=0, ontimeout=False, task=None #,*
+	def __init__(self, name, workdir=None, args=(), timeout=0, restartonto=False, task=None #,*
 	, startdelay=0, onstart=None, ondone=None, params=None, category=None, size=0, slowdown=1.
 	, omitafn=False, memkind=1, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize job to be executed
@@ -430,10 +576,10 @@ class Job(object):
 		args  - execution arguments including the executable itself for the process
 			NOTE: can be None to make make a stub process and execute the callbacks
 		timeout  - execution timeout in seconds. Default: 0, means infinity
-		ontimeout  - action on timeout:
-			False  - terminate the job. Default
-			True  - restart the job
-		task  - origin task if this job is a part of the task
+		restartonto  - restart the job on timeout, Default: False. Can be used for
+			non-deterministic Jobs like generation of the synthetic networks to regenerate
+			the network on border cases overcoming gettig stuck on specific values of the rand variables.
+		task: Task  - origin task if this job is a part of the task
 		startdelay  - delay after the job process starting to execute it for some time,
 			executed in the CONTEXT OF THE CALLER (main process).
 			ATTENTION: should be small (0.1 .. 1 sec)
@@ -455,14 +601,16 @@ class Job(object):
 		Scheduling parameters:
 		omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled
 			and the process has multiple treads
-		category  - classification category, typically semantic context or part of the name;
-			used for _CHAINED_CONSTRAINTS to identify related jobs
+		category  - classification category, typically semantic context or part of the name,
+			used to identify related jobs;
+			requires _CHAINED_CONSTRAINTS
 		size  - expected relative memory complexity of the jobs of the same category,
 			typically it is size of the processing data, >= 0, 0 means undefined size
 			and prevents jobs chaining on constraints violation;
 			used on _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS
 		slowdown  - execution slowdown ratio, >= 0, where (0, 1) - speedup, > 1 - slowdown; 1 by default;
 			used for the accurate timeout estimation of the jobs having the same .category and .size.
+			requires _CHAINED_CONSTRAINTS
 		memkind  - kind of memory to be evaluated (average of virtual and resident memory
 			to not overestimate the instant potential consumption of RAM):
 			0  - mem for the process itself omitting the spawned sub-processes (if any)
@@ -471,13 +619,21 @@ class Job(object):
 			2  - mem for the whole spawned process tree including the origin process
 
 		Execution parameters, initialized automatically on execution:
-		tstart  - start time is filled automatically on the execution start (before onstart). Default: None
+		tstart  - start time, filled automatically on the execution start (before onstart). Default: None
 		tstop  - termination / completion time after ondone
 			NOTE: onstart() and ondone() callbacks execution is included in the job execution time
 		proc  - process of the job, can be used in the ondone() to read it's PIPE
 		mem  - consuming memory (smooth max of average of vms and rss, not just the current value)
 			or the least expected value inherited from the jobs of the same category having non-smaller size;
 			requires _LIMIT_WORKERS_RAM
+		terminates  - accumulated number of the received termination requests caused by the constraints violation
+			NOTE: > 0 (1 .. ExecPool._KILLDELAY) for the apps terminated by the execution pool
+				(resource constrains violation or ExecPool exception),
+				== 0 for the crashed apps
+		wkslim  - worker processes limit (max number) on the job postponing if any;
+			requires _LIMIT_WORKERS_RAM
+		chtermtime  - chained termination: None - disabled, False - by memory, True - by time;
+			requires _CHAINED_CONSTRAINTS
 		"""
 		assert isinstance(name, str) and timeout >= 0 and (task is None or isinstance(task, Task)
 			) and size >= 0 and slowdown > 0 and 0 <= memkind <= 2, 'Arguments are invalid'
@@ -490,7 +646,7 @@ class Job(object):
 		self.args = args
 		self.params = params
 		self.timeout = timeout
-		self.ontimeout = ontimeout
+		self.restartonto = restartonto
 		self.task = task
 		# Delay in the callers context after starting the job process. Should be small.
 		self.startdelay = startdelay  # 0.2  # Required to sync sequence of started processes
@@ -505,7 +661,7 @@ class Job(object):
 		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
 		# Internal attributes
 		self.proc = None  # Process of the job, can be used in the ondone() to read it's PIPE
-		self.terminates = 0  # The number of received termination requirests (generated because of the constraints violation)
+		self.terminates = 0  # Accumulated number of the received termination requests caused by the constraints violation
 		# Process-related file descriptors to be closed
 		self._fstdout = None
 		self._fstderr = None
@@ -942,6 +1098,94 @@ class AffinityMask(object):
 		return cpumask
 
 
+class JobInfo(object):
+	"""Job information to be reported by the request"""
+	__slots__ = ('name', 'pid', 'tstart', 'tstop', 'memsize', 'memkind', 'task', 'category')
+
+	def __init__(self, job, tstop=None):
+		"""JobInfo initialization
+		
+		Args:
+			job: Job  - a job from which the info is fetched
+			tstop: float  - job finishing time, actual for the terminating deferred jobs
+		"""
+		 # and (job.tstop is not None or tstop is not None
+		 #  or tstop is not set, type: {}, job.tstop: {}, tstop: {} ... , job.tstop, tstop
+		assert isinstance(job, Job), 'Unexpected type of the job: ' +  type(job).__name__
+		self.name = job.name
+		self.pid = None if not job.proc else job.proc.pid
+		self.tstart = job.tstart
+		self.tstop = job.tstop if job.tstop is not None else tstop
+		self.memsize = job.mem
+		self.memkind = job.memkind
+		self.task = job.task
+		self.category = job.category
+
+	
+	# def data(self, propflt=None, objflt=None):
+	# 	"""Convert object to the dict filtering specified properties and members including itselt
+	#
+	# 	Args:
+	# 		propflt: tuple(prop: str)  - property filter to include only the specified properties
+	# 		objflt: dict(prop: str, val: ExecItemFilterVal)  - include the item
+	# 			only if the specified properties belong to the specified range,
+	# 			member items are processed irrespectively of the item inclusion
+	#
+	# 		NOTE: property names should exactly match the __slots__
+	#	
+	# 	Returns:
+	# 		tuple  - filtered properties of the task or None
+	#
+	# 	Raises:
+	# 		AttributeError  - propflt item does not belong to the JobInfo slots
+	# 	"""
+	# 	# Pass the selffilter or return None
+	# 	if objflt:
+	# 		for prop, opts in viewitems(objflt):
+	# 			assert isinstance(prop, str) and isinstance(opts, ExecItemFilterVal
+	# 				), 'Invalid type of argumetns:  prop: {}, opts: {}'.format(
+	# 				type(prop).__name__, type(opts).__name__)
+	# 			pval = None if prop not in self.__slots__ else self.__getattribute__(prop)
+	# 			# Use task name for the task property
+	# 			if isinstance(pval, Task):
+	# 				pval = pval.name
+	# 			if _DEBUG_TRACE and pval is None:
+	# 				print('  WARNING, objflt item does not belong to the JobInfo slots: ' + prop, file=sys.stderr)
+	# 			if not opts.opt and prop not in self.__slots__ or (
+	# 			not opts.end and pval != opts.beg) or pval < opts.beg or pval >= opts.end:
+	# 				return None
+	# 	return tuple([self.__getattribute__(prop) if prop != 'task' or self.__getattribute__(prop) is None
+	# 		else self.__getattribute__(prop).name for prop in (propflt if propflt else self.__slots__)])
+
+
+	# def __init__(self, name, pid=None, tstart=None, tstop=None, memsize=None, memkind=None, task=None, category=None):
+	# 	"""JobInfo initialization
+	#
+	# 	Args:
+	# 		name (str): job name
+	# 		pid (int, optional): process id
+	# 		tstart (float, optional): job execution start time
+	# 		tstop (float, optional): job execution stop time
+	# 		memsize (float, optional): memory consumption as reported by the Job
+	# 			NOTE: differs from RSS
+	# 		memkind ({0,1,2}, optional): kind of the reported memory consumption
+	# 		task (optional): owner task of the job
+	# 		category (optional): job category
+	# 	"""
+	# 	assert isinstance(name, str) and (pid is None or isinstance(pid, int)) and (
+	# 		tstart is None or tstart >= 0) and (tstop is None or tstop >= 0) and (
+	# 		memsize is None or isinstance(memsize, float)) and (memkind is None or memkind in (0, 1, 2)
+	# 		), 'Argument types are invalid'
+	# 	self.name = name
+	# 	self.pid = pid
+	# 	self.tstart = tstart
+	# 	self.tstop = tstop
+	# 	self.memsize = memsize
+	# 	self.memkind = memkind
+	# 	self.task = task
+	# 	self.category = category
+
+
 class ExecPool(object):
 	"""Execution Pool of workers for jobs
 
@@ -995,6 +1239,10 @@ class ExecPool(object):
 			Should be reseted to True on resuse after the termination.
 			NOTE: should be reseted to True if the execution pool is reused
 			after the joining or termination.
+		failures: [JobInfo]  - failed (terminated or crashed) jobs with timestamps.
+			NOTE: failures contain both terminated, crashed jobs that jobs completed with non-zero return code
+			excluding the jobs terminated by timeout that have set .restartonto (will be restarted)
+		tasks: set(Task)  - tasks associated with the sheduled jobs
 		"""
 		assert (wksnum >= 1 and (afnmask is None or isinstance(afnmask, AffinityMask))
 			and memlimit >= 0 and latency >= 0 and (name is None or isinstance(name, str))
@@ -1034,8 +1282,11 @@ class ExecPool(object):
 		self.memlimit = 0. if not _LIMIT_WORKERS_RAM else max(0, min(memlimit, _RAM_LIMIT))  # in Gb
 		self.latency = latency if latency else 1 + (self.memlimit != 0.)  # Seconds of sleep on pooling
 		# Predefined private attributes
+		self._termlatency = min(0.2, self.latency)  # 200 ms, job process (worker) termination latency
 		self.__termlock = Lock()  # Lock for the __terminate() to avoid simultaneous call by the signal and normal execution flow
 		self.alive = True  # The execution pool is in the working state (has not been terminated)
+		self.failures = []
+		self.tasks = set()
 
 		if self.memlimit and self.memlimit != memlimit:
 			print('WARNING{}, total memory limit is reduced to guarantee the in-RAM'
@@ -1064,32 +1315,47 @@ class ExecPool(object):
 		assert self._uicmd is not None, 'self._uicmd is expected to be defined'
 		if self._uicmd.id is None or not self._uicmd.cond.acquire(blocking=False):
 			return
-		data = self._uicmd.data
-		if data:
-			del data[:]
 		if not (self._workers and self._jobs):
 			return
-		if self._uicmd.id == UiCmdId.LIST_ALL:
+		if self._uicmd.id == UiCmdId.SUMMARY:
+			# Read command parameters from the .data
+			data = self._uicmd.data
 			# Fill headers
-			data.append(['#','name'])  # Number and Name
-			cols = self._uicmd.params.get(UiResOpt.cols, [])
+			cols = data.get(UiResOpt.cols, [])
 			if not cols:
 				cols.extend(UiResCol.__members__)
-			data[0].extend(cols)
 			# Reverse the list for the efficient filling retaining the columns order
 			cols.reverse()
 			# Fill data falues
 			if UiResCol.duration.name in cols:
 				ctime = time.perf_counter()
 			i = 0  # enumeration of workes and jobs
-			fltStatus = self._uicmd.params.get(UiResOpt.fltStatus, [])
+			fltStatus = data.get(UiResOpt.fltStatus, [])
 			# Display only executing jobs (workers) by default
-			jobs = [] if fltStatus else [self._workers]  # [self._workers, self._jobs]
-			if not jobs:
+			jobs = [] if fltStatus else self._workers
+			if fltStatus:
 				if UiResFltStatus.work.name in fltStatus:
-					jobs.append(self._workers)
+					jobs.extend(self._workers)
 				if UiResFltStatus.defer.name in fltStatus:
-					jobs.append(self._jobs)
+					jobs.extend(self._jobs)
+			print("> uicmd.id: {}, type of jobs: {}, jobs: {}".format(self._uicmd.id, type(jobs), jobs), file=sys.stderr)
+			# Prepare .data for the response results
+			if data:
+				data.clear()
+			# Summary of the execution pool:
+			# - the number of workers and deffered/postponed jobs;
+			# - the number and statistics (timestamps of the start and end, exit code)
+			# of the terminated or crashed jobs that are not [going to be] restarted.
+			# Note: restarting jobs are restarted at once (on the same iteration) after
+			# they have been notified as completed.
+			# - total execution time, memory consumption vs available, ...
+			data['summary'] = {
+				'workers': {
+					''
+				}
+			}
+			data.append(['#','name'])  # Number and Name
+			data[0].extend(cols)
 			for job in jobs:
 				i += 1
 				data.append[[i, job.name]]
@@ -1123,15 +1389,7 @@ class ExecPool(object):
 		"""Context entrence"""
 		# Reuse execpool if possible
 		if not self.alive:
-			if not self._workers and not self._jobs:
-				print('WARNING{}, the non-cleared execution pool is reused'
-					.format('' if not self.name else ' ' + self.name))
-				self._tstart = None
-				self.alive = True
-			else:
-				raise ValueError('Terminating dirty execution pool can not be reentered:'
-					'  alive: {}, {} workers, {} jobs'.format(self.alive
-					, len(self._workers), len(self._jobs)))
+			self.clear()
 		return self
 
 
@@ -1167,33 +1425,40 @@ class ExecPool(object):
 			if acqlock:
 				self.__termlock.release()
 			return
+		tcur = time.perf_counter()  # Current time
 		print('WARNING{}, terminating the execution pool with {} nonstarted jobs and {} workers'
 			', executed {} h {} m {:.4f} s, callstack fragment:'
 			.format('' if not self.name else ' ' + self.name, len(self._jobs), len(self._workers)
-			, *secondsToHms(0 if self._tstart is None else time.perf_counter() - self._tstart)), file=sys.stderr)
+			, *secondsToHms(0 if self._tstart is None else tcur - self._tstart)), file=sys.stderr)
 		traceback.print_stack(limit=5, file=sys.stderr)
 
 		# Shut down all [nonstarted] jobs
 		for job in self._jobs:
+			# Add terminating deffered job to the list of failures
+			self.failures.append(JobInfo(job, tstop=tcur))
 			# Note: only executing jobs, i.e. workers might have activated affinity
 			print('  Scheduled nonstarted "{}" is removed'.format(job.name), file=sys.stderr)
 		self._jobs.clear()
 
 		# Shut down all workers
+		active = False
 		for job in self._workers:
-			print('  Terminating "{}" #{} ...'.format(job.name, job.proc.pid), file=sys.stderr)
-			job.proc.terminate()
+			if job.proc.poll() is None:  # poll None means the process has not been terminated / completed
+				job.terminates += 1
+				print('  Terminating "{}" #{} ...'.format(job.name, job.proc.pid), file=sys.stderr)
+				job.proc.terminate()
+				active = True
 		# Wait a few sec for the successful process termitaion before killing it
 		i = 0
-		active = True
 		while active and i < self._KILLDELAY:
+			time.sleep(self._termlatency)
 			i += 1
 			active = False
 			for job in self._workers:
-				if job.proc.poll() is None:
+				if job.proc.poll() is None:  # poll None means the process has not been terminated / completed
+					job.terminates += 1
+					job.proc.terminate()
 					active = True
-					break
-			time.sleep(self.latency)
 		# Kill nonterminated processes
 		if active:
 			for job in self._workers:
@@ -1207,6 +1472,63 @@ class ExecPool(object):
 		## Set _wkslim to 0 to not start any jobs
 		#self._wkslim = 0  # ATTENTION: reset of the _wkslim can break silent subsequent reuse of the execution pool
 		self.__termlock.release()
+		self._traceFailures()
+
+
+	def _traceFailures(self):
+		"""Trace failed tasks with their jobs and jobs not belonging to any tasks"""
+		print('\nFAILED jobs not assigned to tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		# Header of the jobs
+		indent = '  '  # Indent for each level of the Task/Jobs tree
+		colsep = '\t'  # Table column separator
+		print(indent, colsep.join(JobInfo.__slots__), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		taskmbs = dict()  # Task members to group jobs with tasks by the tasks
+		# Body of the jobs data as a table
+		for fji in self.failures:
+			data = infodata(fji)
+			if data is None:
+				continue
+			assert isinstance(data, tuple), 'Unexpected data type: ' + type(data).__name__
+			if fji.task is None:
+				print(indent, colsep.join([str(v) for v in data]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+			else:
+				taskmbs.setdefault(fji.task, [JobInfo.__slots__]).append(data)
+
+		print('\nFAILED tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		# Iteratively form the hierarchy of failed tasks from the bottom level
+		suptasks = True  # Super tasks exist
+		while True:
+			suptasks = False
+			tmbs = dict()
+			for task in taskmbs:
+				data = infodata(TaskInfo(task))
+				if data is None or data.task is None:
+					tmbs[task] = taskmbs[task]
+					continue
+				suptasks = True
+				assert isinstance(data, tuple), 'Unexpected data type: ' + type(data).__name__
+				tie = tmbs.setdefault(data.task, TaskInfoExt(props=[TaskInfo.__slots__], members=[taskmbs[task][0]]))
+				tie.props.append(data)
+				tie.members.append(taskmbs[task][1:])
+			taskmbs = tmbs
+		del tmbs
+
+		def printDepth(tinfext, indent=indent):
+			assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
+			for tie in tinfext:
+
+				print(indent, colsep.join([str(v) for v in tie.props[i]]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+				print(indent * 2, colsep.join([str(v) for v in tie.members[i]]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+
+
+
+
+		# Print hierarchy of tasks from the root (top) level
+		for tie in viewvalues(taskmbs):
+
+
+		rtasks = [t for t in self.tasks if t.task is None]  # Root tasks
+		# Group 
 
 
 	def __postpone(self, job, priority=False):
@@ -1244,17 +1566,15 @@ class ExecPool(object):
 			, 0 if not self.memlimit else job.mem, self.memlimit
 			, 0 if job.tstop is None else job.tstop - job.tstart, job.tstart, job.tstop, job.timeout))
 		# Postpone only the goup-terminated jobs by memory limit, not a single worker that exceeds the (time/memory) constraints
-		# (except the explicitly requirested restart via ontimeout, which results the priority rescheduling)
+		# (except the explicitly requirested restart via restartonto, which results the priority rescheduling)
 		# Note: job wkslim should be updated before adding to the _jobs to handle correctly the case when _jobs were empty
 		if _DEBUG_TRACE >= 2:
 			print('  Nonstarted initial jobs: ', ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs]))
-		# Note: it does not impact on the existence of zombie procs
-		## Reset proc to remove it from the subproceeses table and avoid zombies for the postponed jobs
+		# Note: terminate time is resetted on job start in case of restarting
+		## Reset job.proc to remove it from the subproceeses table and avoid zombies for the postponed jobs
+		## - it does not impact on the existence of zombie procs
 		#if job.terminates:
 		#	job.proc = None  # Reset old job process if any
-		#	#job.terminates = 0  # Reset termination requests counter
-		#	#job.tstop = None  # Reset the completion / termination time
-		#	#job.tstart = None  # Reset the start times
 		jobsnum = len(self._jobs)
 		i = 0
 		if priority:
@@ -1291,7 +1611,10 @@ class ExecPool(object):
 						# job to the place before the origin
 						if kend - k >= 2:  # There is no sence to reschedule pair of subsequent jobs
 							self._jobs.rotate(-k)
-							self._jobs.popleft()  # == pj; -1
+							# Move / reschedule the job
+							jmv = self._jobs.popleft()  # == pj; -1
+							assert jmv is pj, ('The rescheduling is invalid, unexpected job is removed:'
+								' {} instead of {}'.format(jmv.name, pj.name))
 							self._jobs.rotate(1 + k-i)  # Note: 1+ because one job is removed
 							self._jobs.appendleft(pj)
 							self._jobs.rotate(i-1)
@@ -1302,23 +1625,23 @@ class ExecPool(object):
 			print('  Nonstarted updated jobs: ', ', '.join(['{} ({})'.format(pjob.name, pjob.wkslim) for pjob in self._jobs]))
 
 
-	def __start(self, job, async=True):
+	def __start(self, job, concur=True):
 		"""Start the specified job by one of the worker processes
 
 		job  - the job to be executed, instance of Job
-		async  - async execution or wait intill execution completed
+		concur  - concurrent execution or wait till the job execution completion
 		return  - 0 on successful execution, proc.returncode otherwise
 		"""
 		assert isinstance(job, Job), 'Job type is invalid: {}'.format(job)
 		assert job.tstop is None or job.terminates, ('The starting job "{}" is'
 			' expected to be non-completed'.format(job.name))
 		wksnum = len(self._workers)  # The current number of worker processes
-		if (async and wksnum >= self._wkslim) or not self._wkslim or not self.alive:
+		if (concur and wksnum >= self._wkslim) or not self._wkslim or not self.alive:
 			# Note: can be cause by the execution pool termination
 			raise ValueError('Free workers should be available ({} busy workers of {}), alive: {}'
 				.format(wksnum, self._wkslim, self.alive))
 		#if _DEBUG_TRACE:
-		print('Starting "{}"{}, workers: {} / {}...'.format(job.name, '' if async else ' in sync mode'
+		print('Starting "{}"{}, workers: {} / {}...'.format(job.name, '' if concur else ' in sequential mode'
 			, wksnum, self._wkslim), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 
 		# Reset automatically defined values for the restarting job, which is possible only if it was terminated
@@ -1327,6 +1650,12 @@ class ExecPool(object):
 			job.proc = None  # Reset old job process if any
 			job.tstop = None  # Reset the completion / termination time
 			# Note: retain previous value of mem for better scheduling, it is the valid value for the same job
+		# Update execution pool tasks, should be done before the job.onstart()
+		# Note: the lock is not required here because tasks are also created in the main thread
+		if job.task is not None:
+			assert isinstance(job.task, Task), 'Unexpected type of the job task: ' + type(job.task).__name__
+			self.tasks.add(job.task)
+			# Note: the task started when the first job has been added to it before its jobs started
 		job.tstart = time.perf_counter()
 		if job.onstart:
 			if _DEBUG_TRACE >= 2:
@@ -1397,9 +1726,9 @@ class ExecPool(object):
 					# Note: it just interrupts job start, but does not cause termination of the whole (already terminated) execution pool
 					raise EnvironmentError((errno.EINTR, 'Jobs can not be started beause the execution pool has been terminated'))  # errno.ERESTART
 				job.proc = subprocess.Popen(job.args, bufsize=-1, cwd=job.workdir, stdout=fstdout, stderr=fstderr)  # bufsize=-1 - use system default IO buffer size
-				if async:
+				if concur:
 					self._workers.add(job)
-				# ATTENTION: the exception could be raised before the lock releasing on process creation
+				# ATTENTION: the exception can be raised before the lock releasing on process creation
 				self.__termlock.release()
 				acqlock = False  # Note: an exception can be thrown below, but the lock is already released and should not be released again
 				if iafn >= 0:
@@ -1425,25 +1754,39 @@ class ExecPool(object):
 			if job.proc is not None and job.proc.poll() is None:  # Note: this is an extra rare, but possible case
 				# poll None means the process has not been terminated / completed,
 				# which can be if sleep() generates exception or if the system
-				# interrupted called [and the sync] process already created
-				job.proc.terminate()
+				# interrupted called [and the sequential] process already created
+				active = True
+				i = 0
+				while active and i < self._KILLDELAY:
+					i += 1
+					active = False
+					if job.proc.poll() is None:  # poll None means the process has not been terminated / completed
+						job.terminates += 1
+						job.proc.terminate()
+						active = True
+					time.sleep(self._termlatency)
+				# Kill nonterminated process
+				if active:
+					if job.proc.poll() is None:
+						print('  Killing ~zombie "{}" #{} ...'.format(job.name, job.proc.pid), file=sys.stderr)
+						job.proc.kill()
 			self.__complete(job, False)
 			# ATTENTION: reraise exception for the BaseException but not Exception subclusses
 			# to have termination of the whole pool by the system interruption
 			if not isinstance(err, Exception):
 				raise
 		else:
-			if async:
+			if concur:
 				return 0
-			# Synchronous job processing
+			# Sequential non-concurrent job processing
 			err = None
 			try:
 				job.proc.wait()
 			except BaseException as err:  # Should not occur: subprocess.CalledProcessError
-				print('ERROR on the synchronous execution of "{}" occurred: {}, the job is discarded. {}'
+				print('ERROR on the sequential execution of "{}" occurred: {}, the job is discarded. {}'
 					.format(job.name, err, traceback.format_exc(5)), file=sys.stderr)
 			finally:
-				self.__complete(job)
+				self.__complete(job, not job.terminates and not job.proc.returncode)
 			# ATTENTION: reraise exception for the BaseException but not Exception subclusses
 			# to have termination of the whole pool by the system interruption
 			if err and not isinstance(err, Exception):
@@ -1468,7 +1811,13 @@ class ExecPool(object):
 				print('WARNING, affinity cleanup is requested to the job "{}" without the activated affinity'
 					.format(job.name), file=sys.stderr)
 				pass  # Do nothing if the affinity was not set for this process
+		if graceful is None:
+			graceful = not job.terminates and job.proc is not None and not job.proc.returncode
 		job.complete(graceful)
+		# Update failures list skipping the tasks restarting on timeout
+		if not graceful and (not job.restartonto or job.tstart is None or job.tstop is None
+		or job.tstop - job.tstart < job.timeout):
+			self.failures.append(JobInfo(job))  # Note: job.tstop should be defined here
 
 
 	def __reviseWorkers(self):
@@ -1484,12 +1833,14 @@ class ExecPool(object):
 		memall = 0.  # Consuming memory by workers
 		jtorigs = {}  # Timeout caused terminating origins (jobs) for the chained termination, {category: lightweightest_job}
 		jmorigs = {}  # Memory limit caused terminating origins (jobs) for the chained termination, {category: smallest_job}
+		terminating = False  # At least one worker is terminating
+		tcur = time.perf_counter()  # Current timestamp
 		for job in self._workers:
 			if job.proc.poll() is not None:  # Not None means the process has been terminated / completed
 				completed.add(job)
 				continue
 
-			exectime = time.perf_counter() - job.tstart
+			exectime = tcur - job.tstart
 			# Update memory statistics (if required) and skip jobs that do not exceed the specified time/memory constraints
 			if not job.terminates and (not job.timeout or exectime < job.timeout
 			) and (not self.memlimit or job.mem < self.memlimit):
@@ -1509,13 +1860,14 @@ class ExecPool(object):
 					continue
 
 			# Terminate the worker because of the timeout/memory constraints violation
+			terminating = True
 			job.terminates += 1
 			# Save the most lighgtweight terminating chain origins for timeouts and memory overusage by the single process
 			if _CHAINED_CONSTRAINTS and job.category is not None and job.size:
 				# ATTENTION: do not terminate related jobs of the process that should be restarted by timeout,
 				# because such processes often have non-deterministic behavior and specially scheduled to be
 				# rexecuted until success
-				if job.timeout and exectime >= job.timeout and not job.ontimeout:
+				if job.timeout and exectime >= job.timeout and not job.restartonto:
 					# Timeout constraints
 					jorg = jtorigs.get(job.category, None)
 					if jorg is None or job.size * job.slowdown < jorg.size * jorg.slowdown:
@@ -1533,7 +1885,6 @@ class ExecPool(object):
 				job.proc.kill()
 				completed.add(job)
 				if _DEBUG_TRACE:  # Note: anyway completing terminated jobs are traced
-					exectime = time.perf_counter() - job.tstart
 					print('WARNING, "{}" #{} is killed because of the {} violation'
 						' consuming {:.4f} Gb with timeout of {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 						.format(job.name, job.proc.pid
@@ -1560,6 +1911,7 @@ class ExecPool(object):
 						and job is not jorg
 						and job.size * job.slowdown >= jorg.size * jorg.slowdown):
 							job.chtermtime = True  # Chained termination by time
+							terminating = True
 							if job.terminates:
 								break  # Switch to the following job
 							# Terminate the worker
@@ -1575,6 +1927,7 @@ class ExecPool(object):
 							and job is not jorg
 							and not job.lessmem(jorg)):
 								job.chtermtime = False  # Chained termination by memory
+								terminating = True
 								if job.terminates:
 									break  # Switch to the following job
 								# Terminate the worker
@@ -1582,7 +1935,7 @@ class ExecPool(object):
 								job.proc.terminate()  # Schedule the worker completion to the next revise
 								memall -= job.mem  # Reduce total memory consumed by the active workers
 								break  # Switch to the following job
-			# Traverse over the nonstarted jobs with defined job category and size
+			# Traverse over the nonstarted jobs with defined job category and size removing too heavy jobs
 			if _DEBUG_TRACE >= 2:
 				print('  Updating chained constraints in nonstarted jobs: ', ', '.join([job.name for job in self._jobs]))
 			jrot = 0  # Accumulated rotation
@@ -1595,10 +1948,10 @@ class ExecPool(object):
 					for jorg in viewvalues(jtorigs):
 						if (job.category == jorg.category  # Skip already terminating items
 						and job.size * job.slowdown >= jorg.size * jorg.slowdown):
-							# Remove the item
+							# Remove the item adding it to the list of failed jobs
 							self._jobs.rotate(-ij)
 							jrot += ij
-							self._jobs.popleft()  # == job
+							self.failures.append(JobInfo(self._jobs.popleft(), tcur))  # == job
 							ij = -1  # Later +1 is added, so the index will be 0
 							print('WARNING, nonstarted "{}" with weight {} is cancelled by timeout chain from "{}" with weight {}'.format(
 								job.name, job.size * job.slowdown, jorg.name, jorg.size * jorg.slowdown), file=sys.stderr)
@@ -1608,10 +1961,10 @@ class ExecPool(object):
 						for jorg in viewvalues(jmorigs):
 							if (job.category == jorg.category  # Skip already terminating items
 							and not job.lessmem(jorg)):
-								# Remove the item
+								# Remove the item adding it to the list of failed jobs
 								self._jobs.rotate(-ij)
 								jrot += ij
-								self._jobs.popleft()  # == job
+								self.failures.append(JobInfo(self._jobs.popleft(), tcur))  # == job
 								ij = -1  # Later +1 is added, so the index will be 0
 								print('WARNING, nonstarted "{}" with size {} is cancelled by memory limit chain from "{}" with size {}'
 									' and mem {:.4f}'.format(job.name, job.size, jorg.name, jorg.size, jorg.mem), file=sys.stderr)
@@ -1619,7 +1972,7 @@ class ExecPool(object):
 				ij += 1
 			# Recover initial order of the jobs
 			self._jobs.rotate(jrot)
-		# Remove completed jobs from worker processes
+		# Remove terminated/completed jobs from worker processes
 		# ATTENTINON: it should be done after the _CHAINED_CONSTRAINTS check to
 		# mark the completed dependent jobs to not be restarted / postponed
 		# Note: jobs complete execution relatively seldom, so set with fast
@@ -1666,14 +2019,16 @@ class ExecPool(object):
 			# Terminate and remove worker processes of the postponing jobs
 			wkslim = self._wkslim - len(pjobs)  # New workers limit for the postponing job  # max(self._wkslim, len(self._workers))
 			assert wkslim >= 1, 'The number of workers should not be less than 1'
-			while pjobs:
-				job = pjobs.pop()
-				# Terminate the worker
-				job.terminates += 1
-				# Schedule the worker completion (including removement from the workers) to the next revise
-				job.proc.terminate()
-				# Upate wkslim
-				job.wkslim = wkslim
+			if pjobs:
+				terminating = True
+				while pjobs:
+					job = pjobs.pop()
+					# Terminate the worker
+					job.terminates += 1
+					# Schedule the worker completion (including removement from the workers) to the next revise
+					job.proc.terminate()
+					# Upate wkslim
+					job.wkslim = wkslim
 			# Update amount of estimated memall
 			memall = self.memlimit + memov  # Note: memov is negative here
 
@@ -1696,7 +2051,7 @@ class ExecPool(object):
 				, 0 if not self.memlimit else job.mem, self.memlimit
 				, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			# Skip memory limit and timeout violating jobs that do not require autorestart (applicable only for the timeout)
-			if (exectime >= job.timeout and not job.ontimeout) or (_CHAINED_CONSTRAINTS
+			if (exectime >= job.timeout and not job.restartonto) or (_CHAINED_CONSTRAINTS
 			and job.chtermtime is not None) or (self.memlimit and job.mem >= self.memlimit):
 				continue
 			# Reschedule job having the group violation of the memory limit
@@ -1704,10 +2059,10 @@ class ExecPool(object):
 			# Note: memall to not postpone the single existing job
 			if self.memlimit and ((memall and memall + job.mem * self._JMEMTRR >= self.memlimit)
 			or memfree - job.mem * self._JMEMTRR <= self._MEMLOW) and (
-			not job.timeout or exectime < job.timeout or job.ontimeout):
+			not job.timeout or exectime < job.timeout or job.restartonto):
 				self.__postpone(job)
 			# Restart the job on timeout if requested
-			elif exectime >= job.timeout and job.ontimeout:  # ATTENTION: restart on timeout only and if required
+			elif exectime >= job.timeout and job.restartonto:  # ATTENTION: restart on timeout only and if required
 				# Note: if the job was terminated by timeout then memory limit was not met
 				# Note: earlier executed job might not fit into the RAM now because of the inreasing mem consumption by the workers
 				#if _DEBUG_TRACE >= 3:
@@ -1732,46 +2087,68 @@ class ExecPool(object):
 		#	# Note: required to join terminated child procs and avoid zombies
 		#	active_children()   # Return list of all live children of the current process, joining any processes which have already finished
 
-		# Start subsequent job if it is required
+		# Start subsequent job or postpone it further
 		if _DEBUG_TRACE >= 2:
 			print('  Nonstarted jobs: ', ', '.join(['{} ({})'.format(job.name, job.wkslim) for job in self._jobs]))
-		while self._jobs and len(self._workers) < self._wkslim:
-			#if _DEBUG_TRACE >= 3:
-			#	print('  "{}" (expected totmem: {:.4f} / {:.4f} Gb) is being resheduled, {} nonstarted jobs: {}'
-			#		.format(self._jobs[0].name, 0 if not self.memlimit else memall + job.mem, self.memlimit
-			#		, len(self._jobs), ', '.join([j.name for j in self._jobs])), file=sys.stderr)
-			job = self._jobs.popleft()
-			# Jobs should use less memory than the limit, a worker process violating (time/memory) constaints are already filtered out
-			# Note: memall to not postpone the single existing job
-			if self.memlimit:
-				jmemx = (job.mem if job.mem else memall / (1 + len(self._workers))) * self._JMEMTRR  # Extended estimated job mem
-			if self.memlimit and ((memall and memall + jmemx >= self.memlimit
-			# Note: omit the low memory condition for a single worker, otherwise the pool can't be executed
-			) or (memfree - jmemx <= self._MEMLOW and self._workers)):
-				# Note: only restarted jobs have defined mem
-				# Postpone the job updating it's workers limit
-				assert job.mem < self.memlimit, 'The workers exceeding memory constraints were already filtered out'
-				self.__postpone(job)
-				break
-			elif not self.__start(job) and self.memlimit:
-				memall += job.mem  # Reuse .mem from the previous run if exists
+		if not terminating:  # Start only after the terminated jobs terminated and released the memory
+			while self._jobs and len(self._workers) < self._wkslim:
+				#if _DEBUG_TRACE >= 3:
+				#	print('  "{}" (expected totmem: {:.4f} / {:.4f} Gb) is being resheduled, {} nonstarted jobs: {}'
+				#		.format(self._jobs[0].name, 0 if not self.memlimit else memall + job.mem, self.memlimit
+				#		, len(self._jobs), ', '.join([j.name for j in self._jobs])), file=sys.stderr)
+				job = self._jobs.popleft()
+				# Jobs should use less memory than the limit, a worker process violating (time/memory) constaints are already filtered out
+				# Note: memall to not postpone the single existing job
+				if self.memlimit:
+					jmemx = (job.mem if job.mem else memall / (1 + len(self._workers))) * self._JMEMTRR  # Extended estimated job mem
+				if self.memlimit and ((memall and memall + jmemx >= self.memlimit
+				# Note: omit the low memory condition for a single worker, otherwise the pool can't be executed
+				) or (memfree - jmemx <= self._MEMLOW and self._workers)):
+					# Note: only restarted jobs have defined mem
+					# Postpone the job updating it's workers limit
+					assert job.mem < self.memlimit, 'The workers exceeding memory constraints were already filtered out'
+					self.__postpone(job)
+					break
+				elif not self.__start(job) and self.memlimit:
+					memall += job.mem  # Reuse .mem from the previous run if exists
 		assert (self._workers or not self._jobs) and self._wkslim, (
 			'Worker processes should always exist if nonstarted jobs are remained:'
 			'  workers: {}, wkslim: {}, jobs: {}'.format(len(self._workers)
 			, self._wkslim, len(self._jobs)))
 
 
-	def execute(self, job, async=True):
+	def clear(self):
+		"""Clear execution pool to reuse it
+		
+		Raises:
+			ValueError: attempt to clear a terminating execution pool
+		"""
+		if not self._workers and not self._jobs:
+			print('WARNING{}, a dirty execution pool is cleared'
+				.format('' if not self.name else ' ' + self.name)
+				, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+			self._tstart = None
+			self.alive = True
+			del self.failures[:]
+			self.tasks.clear()
+		else:
+			raise ValueError('Terminating dirty execution pool can not be resetted:'
+				'  alive: {}, {} workers, {} jobs'.format(self.alive
+				, len(self._workers), len(self._jobs)))
+		
+
+	def execute(self, job, concur=True):
 		"""Schecule the job for the execution
 
 		job  - the job to be executed, instance of Job
-		async  - async execution or wait until execution completed
-			 NOTE: sync tasks are started at once
+		concur  - concur execution or wait until execution completed
+			 NOTE: concurrent tasks are started at once
 		return  - 0 on successful execution, process return code otherwise
 		"""
 		if not self.alive:
 			print('WARNING, scheduling of the job "{}" is cancelled because'
-					' the execution pool is not alive'.format(job.name))
+				' the execution pool is not alive'.format(job.name)
+				, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 			return errno.EINTR
 		assert isinstance(job, Job) and job.name, (
 			'Job type is invalid or the instance is not initialized: {}'.format(job))
@@ -1784,13 +2161,13 @@ class ExecPool(object):
 		if _DEBUG_TRACE:
 			print('Scheduling the job "{}" with timeout {}'.format(job.name, job.timeout))
 		errcode = 0
+		# Start the execution timer
+		if self._tstart is None:
+			self._tstart = time.perf_counter()
 		# Initialize the [latest] value of job workers limit
 		if self.memlimit:
 			job.wkslim = self._wkslim
-		if async:
-			# Start the execution timer
-			if self._tstart is None:
-				self._tstart = time.perf_counter()
+		if concur:
 			# Evaluate total memory consumed by the worker processes
 			if self.memlimit:
 				memall = 0.
@@ -1827,7 +2204,7 @@ class ExecPool(object):
 				errcode = self.__start(job)
 		else:
 			errcode = self.__start(job, False)
-			# Note: sync job is completed automatically on any fails
+			# Note: sequential non-concurrent job is completed automatically on any fails
 		return errcode
 
 
@@ -1857,6 +2234,10 @@ class ExecPool(object):
 			# Revise UI command(s) if the WebUI app has been connected
 			if self._uicmd is not None:
 				self.__reviseUi()
+		self._traceFailures()
+		print('The execution pool "{}" is completed, duration: {} h {} m {:.4f} s'
+			, self.name, *secondsToHms(time.perf_counter() - self._tstart)
+			, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		self._tstart = None  # Be ready for the following execution
 
 		assert not self._jobs and not self._workers, 'All jobs should be finalized'
