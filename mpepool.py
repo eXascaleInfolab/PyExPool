@@ -1044,7 +1044,7 @@ class AffinityMask(object):
 
 class JobInfo(object):
 	"""Job information to be reported by the request"""
-	__slots__ = ('name', 'pid', 'tstart', 'tstop', 'memsize', 'memkind', 'task', 'category')
+	__slots__ = ('name', 'pid', 'code', 'tstart', 'tstop', 'memsize', 'memkind', 'task', 'category')
 
 	def __init__(self, job, tstop=None):
 		"""JobInfo initialization
@@ -1058,6 +1058,7 @@ class JobInfo(object):
 		assert isinstance(job, Job), 'Unexpected type of the job: ' +  type(job).__name__
 		self.name = job.name
 		self.pid = None if not job.proc else job.proc.pid
+		self.code = None if not job.proc else job.proc.returncode
 		self.tstart = job.tstart
 		self.tstop = job.tstop if job.tstop is not None else tstop
 		self.memsize = job.mem
