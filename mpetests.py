@@ -705,6 +705,7 @@ except ImportError:
 
 _webuiapp = None  # Global WebUI application
 
+@unittest.skip('Under development, currently used manually')
 class TestWebUI(unittest.TestCase):
 	"""WebUI tests"""
 

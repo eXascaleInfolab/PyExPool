@@ -159,6 +159,7 @@ class WebUiApp(threading.Thread):
 
 
 	@bottle.get('/favicon.ico')
+	@staticmethod
 	def favicon():
 		return server_static('/images/favicon.ico')
 

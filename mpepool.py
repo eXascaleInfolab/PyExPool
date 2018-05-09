@@ -64,6 +64,7 @@ import errno
 # # Anync Tasks management
 # import threading  # Used only for the concurrent Tasks termination by timeout
 # import signal  # Required for the correct handling of KeyboardInterrupt: https://docs.python.org/2/library/thread.html
+import itertools  # chain
 
 from multiprocessing import cpu_count, Lock, Queue  #, active_children, Value, Process
 from collections import namedtuple  # ExecItemFilterVal, TaskInfoExt
@@ -99,21 +100,6 @@ except ImportError:
 		range = xrange
 	except NameError:
 		pass  # xrange is not defined in Python3, which is fine
-
-
-def timeheader(timestamp=time.gmtime()):
-	"""Timestamp header string
-
-	timestamp  - timestamp
-
-	return  - timetamp string for the file header
-	"""
-	assert isinstance(timestamp, time.struct_time), 'Unexpected type of timestamp'
-	# ATTENTION: MPE pool timestamp [prefix] intentionally differs a bit from the
-	# benchmark timestamp to easily find/filter each of them
-	return time.strftime('# ----- %Y-%m-%d %H:%M:%S ' + '-'*30, timestamp)
-
-
 # Optional Web User Interface
 _WEBUI = True
 if _WEBUI:
@@ -132,6 +118,21 @@ if _LIMIT_WORKERS_RAM:
 		import psutil
 	except ImportError as lwerr:
 		_LIMIT_WORKERS_RAM = False
+
+
+
+def timeheader(timestamp=time.gmtime()):
+	"""Timestamp header string
+
+	timestamp  - timestamp
+
+	return  - timetamp string for the file header
+	"""
+	assert isinstance(timestamp, time.struct_time), 'Unexpected type of timestamp'
+	# ATTENTION: MPE pool timestamp [prefix] intentionally differs a bit from the
+	# benchmark timestamp to easily find/filter each of them
+	return time.strftime('# ----- %Y-%m-%d %H:%M:%S ' + '-'*30, timestamp)
+
 
 # Note: import occurs before the execution of the main application, so show
 # the timestamp to outline when the error occurred and separate reexecutions
@@ -180,12 +181,25 @@ def inBytes(gb):
 	return gb * 1024. ** 3
 
 
+def tblfmt(v):
+	"""Table-like formatting of the value"""
+	if isinstance(v, float):
+		return '{:.3f}'.format(v)
+	elif isinstance(v, int):
+		return '{:9}'.format(v)
+	if v is None:
+		v = '-'
+	elif not isinstance(v, str):
+		v = str(v)
+	return v.rjust(9)
+
+
 def applyCallback(callback, owner):
 	"""Process the callback call
 	
 	Args:
-		callback (function): callback (self.onXXX)
-		owner (str): owner name of the callback (self.name), required only for tracing
+		callback: function  - callback (self.onXXX)
+		owner: str  -owner name of the callback (self.name), required only for tracing
 	"""
 	assert callable(callback) and isinstance(owner, str), 'A valid callback and owner name are expected'
 	try:
@@ -210,13 +224,14 @@ def infodata(obj, propflt=None, objflt=None):
 	"""Convert the object to the tuple filtering specified properties and itselt
 
 	Args:
-		obj: XobjInfo  - the object to be filtered and converted to the tuple
+		obj: XobjInfo  - the object to be filtered and converted to the tuple, supposed
+			to be decorated with `propslist`
 		propflt: tuple(prop: str)  - property filter to include only the specified properties
 		objflt: dict(prop: str, val: ExecItemFilterVal)  - include the item
 			only if the specified properties belong to the specified range,
 			member items are processed irrespectively of the item inclusion
 
-		NOTE: property names should exactly match the obj.__slots__
+		NOTE: property names should exactly match the obj propeties (including __slots__)
 	
 	Returns:
 		tuple  - filtered properties of the task or None
@@ -224,28 +239,121 @@ def infodata(obj, propflt=None, objflt=None):
 	Raises:
 		AttributeError  - propflt item does not belong to the JobInfo slots
 	"""
-	assert hasattr(obj, '__slots__'), 'The object should contain slots'
+	#assert hasattr(obj, '__slots__'), 'The object should contain slots'
 	# Pass the objflt or return None
 	if objflt:
-		for prop, opts in viewitems(objflt):
-			assert isinstance(prop, str) and isinstance(opts, ExecItemFilterVal
-				), 'Invalid type of argumetns:  prop: {}, opts: {}'.format(
-				type(prop).__name__, type(opts).__name__)
-			pval = None if prop not in obj.__slots__ else obj.__getattribute__(prop)
+		for prop, pflt in viewitems(objflt):
+			assert isinstance(prop, str) and isinstance(pflt, ExecItemFilterVal
+				), 'Invalid type of argumetns:  prop: {}, pflt: {}'.format(
+				type(prop).__name__, type(pflt).__name__)
+			pval = None if prop not in obj else obj.__getattribute__(prop)
 			# Use task name for the task property
+			# Note: task resolution is required for the proper filtering
 			if isinstance(pval, Task):
 				pval = pval.name
 			if _DEBUG_TRACE and pval is None:
-				print('  WARNING, objflt item does not belong to the JobInfo slots: ' + prop, file=sys.stderr)
-			if not opts.opt and prop not in obj.__slots__ or (
-			not opts.end and pval != opts.beg) or pval < opts.beg or pval >= opts.end:
+				print('  WARNING, objflt item does not belong to the {}: {}'.format(
+					type(obj).__name__, prop), file=sys.stderr)
+			if (not pflt.opt and prop not in obj) or (
+			pflt.end is None and pval != pflt.beg) or pval < pflt.beg or pval >= pflt.end:
 				return None
-	return tuple([obj.__getattribute__(prop) if prop != 'task' or obj.__getattribute__(prop) is None
-		else obj.__getattribute__(prop).name for prop in (propflt if propflt else obj.__slots__)])
+	return tuple([obj.__getattribute__(prop) for prop in (propflt if propflt else obj.iterprop())])
 
 
+def propslist(cls):
+	"""Extends the class with properties listing capabilities:
+	- _props class attribute is added, which contains all public attributes of the class and all __slots__ members
+	- `in` operator support added to test membership in the _props
+	- iterprop() method to iterate over all properties (including the dynamically computed)
+	"""
+	def contains(self, prop):
+		"""Whether the specified property is persent"""
+		return self._props.endswith(prop) or self._props.find(prop + ' ') != -1
+
+	def iterprop(cls):
+		"""Properties generator/iterator"""
+		ib = 0
+		ie = cls._props.find(' ')
+		while ie != -1:
+			yield cls._props[ib:ie]
+			ib = ie + 1
+			ie = cls._props.find(' ', ib)
+		yield cls._props[ib:]
+
+	assert hasattr(cls, '__slots__'), 'The class should have slots: ' + cls.__name__
+	# List all public properties in the _props:str attribute retaining the order of __slots__
+	# and then defined computed properties.
+	# Note: double underscored attribute can't be defined externally
+	# since internally it is interpreted as _<ClsName>_<attribute>.
+	cslots = set(cls.__slots__)
+	cls._props = ' '.join(itertools.chain(cls.__slots__,
+		[m for m in dir(cls) if not m.startswith('_') if m not in cslots]))  # Note: dir() list also slots
+	# Define requied methods
+	# ATTENTION: the methods are bound automatically since they are defined before the class is created
+	cls.__contains__ = contains
+	cls.iterprop = types.MethodType(iterprop, cls)
+	return cls
+
+
+@propslist
+class JobInfo(object):
+	"""Job information to be reported by the request
+
+	ATTENTION: the class should not contain any public methods except the properties
+		otherwise _props should be computed differently
+
+	# Check `_props` definition
+	>>> JobInfo(Job('tjob'))._props
+	'name pid code tstart tstop memsize memkind task category duration'
+
+	# Check `contains` binding
+	>>> 'pid' in JobInfo(Job('tjob'))
+	True
+	>>> 'pi' in JobInfo(Job('tjob'))
+	False
+
+	# Check `iterprop` binding
+	>>> JobInfo(Job('tjob')).iterprop().next() == 'name'
+	True
+
+	# Check `iterprop` execution (generated iterator)
+	>>> ' '.join([p for p in JobInfo(Job('tjob')).iterprop()]) == JobInfo(Job('tjob'))._props
+	True
+	"""
+	__slots__ = ('name', 'pid', 'code', 'tstart', 'tstop', 'memsize', 'memkind', 'task', 'category')
+
+	def __init__(self, job, tstop=None):
+		"""JobInfo initialization
+		
+		Args:
+			job: Job  - a job from which the info is fetched
+			tstop: float  - job finishing time, actual for the terminating deferred jobs
+		"""
+		assert isinstance(job, Job), 'Unexpected type of the job: ' +  type(job).__name__
+		self.name = job.name
+		self.pid = None if not job.proc else job.proc.pid
+		self.code = None if not job.proc else job.proc.returncode
+		self.tstart = job.tstart
+		self.tstop = job.tstop if job.tstop is not None else tstop
+		self.memsize = job.mem
+		self.memkind = job.memkind
+		self.task = job.task
+		self.category = job.category
+
+
+	@property
+	def duration(self):
+		"""Execution duration"""
+		return None if self.tstop is None or self.tstart is None else self.tstop - self.tstart
+
+
+@propslist
 class TaskInfo(object):
-	"""Task information to be reported by the request"""
+	"""Task information to be reported by the request
+
+	ATTENTION: the class should not contain any public methods except the properties
+		otherwise _props should be computed differently
+	"""
 	__slots__ = ('name', 'tstart', 'tstop', 'numadded', 'numdone', 'numterm', 'task')
 
 	def __init__(self, task):
@@ -264,12 +372,39 @@ class TaskInfo(object):
 		self.task = task.task
 
 
+	@property
+	def duration(self):
+		"""Execution duration"""
+		return None if self.tstop is None or self.tstart is None else self.tstop - self.tstart
+
+
 """Task information extended with member items (subtasks/jobs)
 
 prop: list(tuple)  - task info properties
 members: list(tuple)  - task info members
 """
 TaskInfoExt = namedtuple('TaskInfoExt', 'props members')
+
+
+def printDepthFirst(tinfext, cindent='  ', indstep='  ', colsep=' '):
+	"""Print TaskUnfoExt hierarchy using the depth first traversing
+	
+	Args:
+		tinfext: TaskInfoExt  - extended task info to be unfolded and printed
+		cindent: str  - current indent for the output hierarchy formatting
+		indstep: str  - indent step for each subsequent level of the hierarchy
+		colsep: str  - column separator for the printing variables (columns)
+	"""
+	for props in tinfext.props:
+		print(cindent, colsep.join([tblfmt(v) for v in props]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+	# assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
+	cindent += indstep
+	for tie in tinfext.members:
+		if isinstance(tie, TaskInfoExt):
+			printDepthFirst(tie, cindent=cindent, indstep=indstep, colsep=colsep)
+		else:
+			print(cindent, colsep.join([tblfmt(v) for v in tie]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+
 
 class Task(object):
 	# _tasks = []
@@ -289,7 +424,7 @@ class Task(object):
 
 	"""Task is a managing container for Jobs"""
 	def __init__(self, name, timeout=0, onstart=None, ondone=None, onfinish=None, params=None
-		, task=None, latency=2, stdout=sys.stdout, stderr=sys.stderr):
+		, task=None, latency=1.5, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize task, which is a group of jobs to be executed
 
 		name  - task name
@@ -325,9 +460,9 @@ class Task(object):
 		self._items = dict()  # Dictionary of non-finished subtasks with the direct termination counter
 		self.name = name
 		# Add member handlers if required
-		self.onstart = types.MethodType(onstart, self) if onstart else None  # Bind the callback to the object
-		self.ondone = types.MethodType(ondone, self) if ondone else None  # Bind the callback to the object
-		self.onfinish = types.MethodType(onfinish, self) if onfinish else None  # Bind the callback to the object
+		self.onstart = None if not callable(onstart) else types.MethodType(onstart, self)  # Bind the callback to the object
+		self.ondone = None if not callable(ondone) else types.MethodType(ondone, self)  # Bind the callback to the object
+		self.onfinish = None if not callable(onfinish) else types.MethodType(onfinish, self)  # Bind the callback to the object
 		# self.timeout = timeout
 		self.params = params
 		self.latency = latency
@@ -346,6 +481,11 @@ class Task(object):
 		# 		_tasks.append(self)
 		# 		Task._taskManager = threading.Thread(name="TaskManager", target=Task._taskTerminator
 		# 			, kwargs={'tasks': Task._tasks, 'latency': latency})
+
+
+	def __str__(self):
+		"""A string representation, which is the .name if defined"""
+		return self.name if self.name is not None else self.__repr__()
 
 
 	def add(self, subtask):
@@ -418,6 +558,34 @@ class Task(object):
 				.format(self.numterm, self.numdone, self.numadded))
 
 
+	@staticmethod
+	def subtaskInfo(subtask):
+		"""Subtask tracing
+		
+		Args:
+			subtask (Task | Job): subtask to be traced
+		
+		Returns:
+			str | list: subtask information
+		"""
+		isjob = isinstance(subtask, Job)
+		assert isjob or isinstance(subtask, Task), 'Unexpected type of the subtask: ' + type(subtask).__name__
+		if extinfo:
+			res = [subtask.name]
+			if pid:
+				res.append(None if not isjob or subtask.proc is None else subtask.proc.pid)
+			if tstart:
+				res.append(subtask.tstart)
+			if tstop:
+				res.append(subtask.tstop)
+			if duration:
+				res.append(None if subtask.tstart is None else ctime - subtask.tstart)
+			if memory:
+				res.append(None if not isjob else subtask.mem)
+			return res
+		return subtask.name
+
+
 	def uncompleted(self, recursive=False, header=False, pid=False, tstart=False, tstop=False, duration=False, memory=False):
 		"""Fetch names of the uncompleted tasks
 		
@@ -440,32 +608,6 @@ class Task(object):
 		extinfo = pid or duration or memory
 		if duration:
 			ctime = time.perf_counter()  # Current time
-
-		def subtaskInfo(subtask):
-			"""Subtask tracing
-			
-			Args:
-				subtask (Task | Job): subtask to be traced
-			
-			Returns:
-				str | list: subtask information
-			"""
-			isjob = isinstance(subtask, Job)
-			assert isjob or isinstance(subtask, Task), 'Unexpected type of the subtask: ' + type(subtask).__name__
-			if extinfo:
-				res = [subtask.name]
-				if pid:
-					res.append(None if not isjob or subtask.proc is None else subtask.proc.pid)
-				if tstart:
-					res.append(subtask.tstart)
-				if tstop:
-					res.append(subtask.tstop)
-				if duration:
-					res.append(None if subtask.tstart is None else ctime - subtask.tstart)
-				if memory:
-					res.append(None if not isjob else subtask.mem)
-				return res
-			return subtask.name
 
 		# Form the Header if required
 		res = []
@@ -527,12 +669,12 @@ class Job(object):
 		startdelay  - delay after the job process starting to execute it for some time,
 			executed in the CONTEXT OF THE CALLER (main process).
 			ATTENTION: should be small (0.1 .. 1 sec)
-		onstart  - callback which is executed on the job starting (before the execution
+		onstart  - a callback, which is executed on the job starting (before the execution
 			started) in the CONTEXT OF THE CALLER (main process) with the single argument,
 			the job. Default: None
 			ATTENTION: must be lightweight
 			NOTE: can be executed a few times if the job is restarted on timeout
-		ondone  - callback which is executed on successful completion of the job in the
+		ondone  - a callback, which is executed on successful completion of the job in the
 			CONTEXT OF THE CALLER (main process) with the single argument, the job. Default: None
 			ATTENTION: must be lightweight
 		params  - additional parameters to be used in callbacks
@@ -595,8 +737,8 @@ class Job(object):
 		# Delay in the callers context after starting the job process. Should be small.
 		self.startdelay = startdelay  # 0.2  # Required to sync sequence of started processes
 		# Callbacks ------------------------------------------------------------
-		self.onstart = types.MethodType(onstart, self) if onstart else None
-		self.ondone = types.MethodType(ondone, self) if ondone else None
+		self.onstart = None if not callable(onstart) else types.MethodType(onstart, self)
+		self.ondone = None if not callable(ondone) else types.MethodType(ondone, self)
 		# I/O redirection ------------------------------------------------------
 		self.stdout = stdout
 		self.stderr = stderr
@@ -628,6 +770,11 @@ class Job(object):
 		# Update the task if any with this Job
 		if self.task:
 			self.task.add(self)
+
+
+	def __str__(self):
+		"""A string representation, which is the .name if defined"""
+		return self.name if self.name is not None else self.__repr__()
 
 
 	def _updateMem(self):
@@ -1042,31 +1189,6 @@ class AffinityMask(object):
 		return cpumask
 
 
-class JobInfo(object):
-	"""Job information to be reported by the request"""
-	__slots__ = ('name', 'pid', 'code', 'tstart', 'tstop', 'memsize', 'memkind', 'task', 'category')
-
-	def __init__(self, job, tstop=None):
-		"""JobInfo initialization
-		
-		Args:
-			job: Job  - a job from which the info is fetched
-			tstop: float  - job finishing time, actual for the terminating deferred jobs
-		"""
-		 # and (job.tstop is not None or tstop is not None
-		 #  or tstop is not set, type: {}, job.tstop: {}, tstop: {} ... , job.tstop, tstop
-		assert isinstance(job, Job), 'Unexpected type of the job: ' +  type(job).__name__
-		self.name = job.name
-		self.pid = None if not job.proc else job.proc.pid
-		self.code = None if not job.proc else job.proc.returncode
-		self.tstart = job.tstart
-		self.tstop = job.tstop if job.tstop is not None else tstop
-		self.memsize = job.mem
-		self.memkind = job.memkind
-		self.task = job.task
-		self.category = job.category
-
-
 class ExecPool(object):
 	"""Execution Pool of workers for jobs
 
@@ -1188,6 +1310,11 @@ class ExecPool(object):
 					print('WARNING, webuiapp can not be started. Disabled: {}. {}'.format(
 						err, traceback.format_exc(5)), file=sys.stderr)
 					_WEBUI = False
+
+
+	def __str__(self):
+		"""A string representation, which is the .name if defined"""
+		return self.name if self.name is not None else self.__repr__()
 
 
 	def __reviseUi(self):
@@ -1358,17 +1485,6 @@ class ExecPool(object):
 
 	def _traceFailures(self):
 		"""Trace failed tasks with their jobs and jobs not belonging to any tasks"""
-		def tblfmt(v):
-			"""Table-like formatting of the value"""
-			if v is None:
-				v = '-'
-			if isinstance(v, str):
-				return v.rjust(9)
-			elif not isinstance(v, float):
-				return '{:9}'.format(v)
-			else:
-				return '{:.3f}'.format(v)
-
 		# Header of the jobs
 		indent = '  '  # Indent for each level of the Task/Jobs tree
 		colsep = ' '  # Table column separator
@@ -1383,19 +1499,20 @@ class ExecPool(object):
 			assert isinstance(data, tuple), 'Unexpected data type: ' + type(data).__name__
 			if fji.task is None:
 				if header:
-					print('\nFAILED jobs not assigned to tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-					print(indent, colsep.join([tblfmt(v) for v in JobInfo.__slots__]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+					print('\nFAILED jobs not assigned to any tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+					print(indent, colsep.join([tblfmt(v) for v in JobInfo.iterprop()]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 					header = False
 				print(indent, colsep.join([tblfmt(v) for v in data]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 			else:
 				tie = tinfe0.get(fji.task)
 				if tie is None:
-					tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=[TaskInfo.__slots__
-						, infodata(TaskInfo(fji.task))], members=[JobInfo.__slots__]))
+					tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=[TaskInfo.iterprop()
+						, infodata(TaskInfo(fji.task))], members=[JobInfo.iterprop()]))
 				tie.members.append(data)
-
-		if tinfe0:
-			print('\nFAILED tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		if not tinfe0:
+			return
+		
+		print('\nFAILED tasks with their jobs:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		# Iteratively form the hierarchy of failed tasks from the bottom level
 		ties = dict()
 		for task, tie in viewitems(tinfe0):
@@ -1408,35 +1525,17 @@ class ExecPool(object):
 						# Note: data should not be None here 
 						data = infodata(TaskInfo(task))
 						assert isinstance(data, tuple), 'Unexpected data type: ' + type(data).__name__
-						tie = TaskInfoExt(props=[TaskInfo.__slots__, data], members=[tie])
+						tie = TaskInfoExt(props=[TaskInfo.iterprop(), data], members=[tie])
 						ties[task] = tie
 					else:
 						newtie = ties[task]
 						newtie.members.append(tie)
 						tie = newtie
-		del tinfe0
-
-		def printDepth(tinfext, cindent=indent):
-			"""Print TaskUnfoExt hierarchy in the depth first manner
-			
-			Args:
-				tinfext: TaskInfoExt  - extended task info to be unfolded and printed
-				cindent: str  - current indent for the output hierarchy formatting
-			"""
-			for props in tinfext.props:
-				print(cindent, colsep.join([tblfmt(v) for v in props]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-			# assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
-			nonlocal indent
-			cindent += indent
-			for tie in tinfext.members:
-				if isinstance(tie, TaskInfoExt):
-					printDepth(tie, cindent)
-				else:
-					print(cindent, colsep.join([tblfmt(v) for v in tie]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		tinfe0 = None  # Release the initial dictionary
 
 		# Print hierarchy of tasks from the root (top) level
 		for tie in viewvalues(ties):
-			printDepth(tie, cindent=indent)
+			printDepthFirst(tie, cindent=indent, indstep=indent, colsep=colsep)
 
 
 	def __postpone(self, job, priority=False):
@@ -2143,8 +2242,9 @@ class ExecPool(object):
 			if self._uicmd is not None:
 				self.__reviseUi()
 		self._traceFailures()
-		print('The execution pool "{}" is completed, duration: {} h {} m {:.4f} s'
-			, self.name, *secondsToHms(time.perf_counter() - self._tstart)
+		print('The execution pool{} is completed, duration: {} h {} m {:.4f} s'.format(
+			'' if self.name is None else ' ' + self.name
+			, *secondsToHms(time.perf_counter() - self._tstart))
 			, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		self._tstart = None  # Be ready for the following execution
 
