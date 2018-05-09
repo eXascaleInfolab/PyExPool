@@ -201,7 +201,7 @@ def applyCallback(callback, owner):
 		callback: function  - callback (self.onXXX)
 		owner: str  -owner name of the callback (self.name), required only for tracing
 	"""
-	assert callable(callback) and isinstance(owner, str), 'A valid callback and owner name are expected'
+	#assert callable(callback) and isinstance(owner, str), 'A valid callback and owner name are expected'
 	try:
 		callback()
 	except Exception as err:  #pylint: disable=W0703
@@ -209,7 +209,7 @@ def applyCallback(callback, owner):
 			.format(callback.__name__, owner, err, traceback.format_exc(5)), file=sys.stderr)
 
 
-"""Filter value of the Executing Item (Task/Job)
+"""Property value constraint of the item filter for the ObjInfo (Task/Job Info)
 
 beg  - begin of the range bound
 end  - end of the range bound
@@ -242,10 +242,10 @@ def infodata(obj, propflt=None, objflt=None):
 	#assert hasattr(obj, '__slots__'), 'The object should contain slots'
 	# Pass the objflt or return None
 	if objflt:
-		for prop, pflt in viewitems(objflt):
-			assert isinstance(prop, str) and isinstance(pflt, ExecItemFilterVal
-				), 'Invalid type of argumetns:  prop: {}, pflt: {}'.format(
-				type(prop).__name__, type(pflt).__name__)
+		for prop, pcon in viewitems(objflt):  # Property name and constraint
+			#assert isinstance(prop, str) and isinstance(pcon, ExecItemFilterVal
+			# 	), 'Invalid type of argumetns:  prop: {}, pflt: {}'.format(
+			# 	type(prop).__name__, type(pcon).__name__)
 			pval = None if prop not in obj else obj.__getattribute__(prop)
 			# Use task name for the task property
 			# Note: task resolution is required for the proper filtering
@@ -254,8 +254,8 @@ def infodata(obj, propflt=None, objflt=None):
 			if _DEBUG_TRACE and pval is None:
 				print('  WARNING, objflt item does not belong to the {}: {}'.format(
 					type(obj).__name__, prop), file=sys.stderr)
-			if (not pflt.opt and prop not in obj) or (
-			pflt.end is None and pval != pflt.beg) or pval < pflt.beg or pval >= pflt.end:
+			if (not pcon.opt and prop not in obj) or (
+			pcon.end is None and pval != pcon.beg) or pval < pcon.beg or pval >= pcon.end:
 				return None
 	return tuple([obj.__getattribute__(prop) for prop in (propflt if propflt else obj.iterprop())])
 
@@ -280,18 +280,19 @@ def propslist(cls):
 			ie = cls._props.find(' ', ib)
 		yield cls._props[ib:]
 
-	assert hasattr(cls, '__slots__'), 'The class should have slots: ' + cls.__name__
 	# List all public properties in the _props:str attribute retaining the order of __slots__
 	# and then defined computed properties.
 	# Note: double underscored attribute can't be defined externally
 	# since internally it is interpreted as _<ClsName>_<attribute>.
+	#assert hasattr(cls, '__slots__'), 'The class should have slots: ' + cls.__name__
 	cslots = set(cls.__slots__)
 	cls._props = ' '.join(itertools.chain(cls.__slots__,
 		[m for m in dir(cls) if not m.startswith('_') if m not in cslots]))  # Note: dir() list also slots
 	# Define requied methods
-	# ATTENTION: the methods are bound automatically since they are defined before the class is created
+	# ATTENTION: the methods are bound automatically to self (but not to the cls in Python2)
+	# since they are defined before the class is created.
 	cls.__contains__ = contains
-	cls.iterprop = types.MethodType(iterprop, cls)
+	cls.iterprop = types.MethodType(iterprop, cls)  # Note: required only in Python2 for the static methods
 	return cls
 
 
@@ -492,10 +493,10 @@ class Task(object):
 		"""Add one more subtask to the task
 		
 		Args:
-			subtask (Job, Task): subtask of the current task
+			subtask: Job|Task  - subtask of the current task
 		
 		Raises:
-			RuntimeError: lock acquasition failed
+			RuntimeError  - lock acquasition failed
 		"""
 		assert isinstance(subtask, Job) or isinstance(subtask, Task), 'Unexpected type of the subtask'
 		if self.tstart is None:
@@ -520,11 +521,11 @@ class Task(object):
 		"""Complete subtask
 		
 		Args:
-			subtask (Job, Task): finished subtask
-			succeed (bool): graceful successful completion or termination
+			subtask: Job | Task  - finished subtask
+			succeed: bool  - graceful successful completion or termination
 		
 		Raises:
-			RuntimeError: lock acquasition failed
+			RuntimeError  - lock acquasition failed
 		"""
 		if not self._lock.acquire(timeout=self.latency):
 			raise RuntimeError('Lock acqusition failed on finished() in "{}"'.format(self.name))
@@ -652,7 +653,7 @@ class Job(object):
 
 	# NOTE: keyword-only arguments are specified after the *, supported only since Python 3
 	def __init__(self, name, workdir=None, args=(), timeout=0, restartonto=False, task=None #,*
-	, startdelay=0, onstart=None, ondone=None, params=None, category=None, size=0, slowdown=1.
+	, startdelay=0., onstart=None, ondone=None, params=None, category=None, size=0, slowdown=1.
 	, omitafn=False, memkind=1, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize job to be executed
 
@@ -722,7 +723,7 @@ class Job(object):
 			requires _CHAINED_CONSTRAINTS
 		"""
 		assert isinstance(name, str) and timeout >= 0 and (task is None or isinstance(task, Task)
-			) and size >= 0 and slowdown > 0 and 0 <= memkind <= 2, 'Arguments are invalid'
+			) and size >= 0 and slowdown > 0 and memkind in (0, 1, 2), 'Arguments are invalid'
 		#if not args:
 		#	args = ("false")  # Create an empty process to schedule it's execution
 
@@ -1320,7 +1321,6 @@ class ExecPool(object):
 	def __reviseUi(self):
 		"""Check and handle UI commands"""
 		# Process on the next iteration if the client request is not ready
-		assert self._uicmd is not None, 'self._uicmd is expected to be defined'
 		if self._uicmd.id is None or not self._uicmd.cond.acquire(blocking=False):
 			return
 		if not (self._workers and self._jobs):
@@ -1496,7 +1496,6 @@ class ExecPool(object):
 			# Note: data should not be None here 
 			# if data is None:
 			# 	continue
-			assert isinstance(data, tuple), 'Unexpected data type: ' + type(data).__name__
 			if fji.task is None:
 				if header:
 					print('\nFAILED jobs not assigned to any tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
@@ -1524,7 +1523,6 @@ class ExecPool(object):
 					if ties.get(task) is None:
 						# Note: data should not be None here 
 						data = infodata(TaskInfo(task))
-						assert isinstance(data, tuple), 'Unexpected data type: ' + type(data).__name__
 						tie = TaskInfoExt(props=[TaskInfo.iterprop(), data], members=[tie])
 						ties[task] = tie
 					else:
@@ -1639,9 +1637,8 @@ class ExecPool(object):
 		concur  - concurrent execution or wait till the job execution completion
 		return  - 0 on successful execution, proc.returncode otherwise
 		"""
-		assert isinstance(job, Job), 'Job type is invalid: {}'.format(job)
-		assert job.tstop is None or job.terminates, ('The starting job "{}" is'
-			' expected to be non-completed'.format(job.name))
+		assert isinstance(job, Job) and (job.tstop is None or job.terminates), (
+			'The starting job "{}" is expected to be non-completed'.format(job.name))
 		wksnum = len(self._workers)  # The current number of worker processes
 		if (concur and wksnum >= self._wkslim) or not self._wkslim or not self.alive:
 			# Note: can be cause by the execution pool termination
@@ -1660,7 +1657,6 @@ class ExecPool(object):
 		# Update execution pool tasks, should be done before the job.onstart()
 		# Note: the lock is not required here because tasks are also created in the main thread
 		if job.task is not None:
-			assert isinstance(job.task, Task), 'Unexpected type of the job task: ' + type(job.task).__name__
 			self.tasks.add(job.task)
 			# Note: the task started when the first job has been added to it before its jobs started
 		job.tstart = time.perf_counter()
@@ -2076,7 +2072,6 @@ class ExecPool(object):
 				#	print('  "{}" is being rescheduled, workers: {} / {}, estimated mem: {:.4f} / {:.4f} Gb'
 				#		.format(job.name, len(self._workers), self._wkslim, memall + job.mem, self.memlimit)
 				#		, file=sys.stderr)
-				assert len(self._workers) < self._wkslim, 'Completed jobs formed from the reduced workers'
 				#assert not self.memlimit or memall + job.mem * self._JMEMTRR < self.memlimit, (
 				#	'Group exceeding of the memory limit should be already processed')
 				if not self.__start(job) and self.memlimit:
@@ -2118,7 +2113,8 @@ class ExecPool(object):
 					break
 				elif not self.__start(job) and self.memlimit:
 					memall += job.mem  # Reuse .mem from the previous run if exists
-		assert (self._workers or not self._jobs) and self._wkslim, (
+		assert (self._workers or not self._jobs) and self._wkslim and (
+			len(self._workers) <= self._wkslim), (
 			'Worker processes should always exist if nonstarted jobs are remained:'
 			'  workers: {}, wkslim: {}, jobs: {}'.format(len(self._workers)
 			, self._wkslim, len(self._jobs)))
@@ -2148,7 +2144,7 @@ class ExecPool(object):
 		"""Schecule the job for the execution
 
 		job  - the job to be executed, instance of Job
-		concur  - concur execution or wait until execution completed
+		concur  - concurrent execution or wait until execution completed
 			 NOTE: concurrent tasks are started at once
 		return  - 0 on successful execution, process return code otherwise
 		"""
@@ -2157,8 +2153,8 @@ class ExecPool(object):
 				' the execution pool is not alive'.format(job.name)
 				, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 			return errno.EINTR
-		assert isinstance(job, Job) and job.name, (
-			'Job type is invalid or the instance is not initialized: {}'.format(job))
+		#assert isinstance(job, Job) and job.name, ('The job "{}" has invalid type'
+		# ' or not initialized: '.format(job.name, type(job).__name__))
 		# Note: _wkslim an be 0 only on/after the termination
 		assert len(self._workers) <= self._wkslim and self._wkslim >= 1, (
 			'Number of workers exceeds the limit or the pool has been terminated:'
@@ -2224,7 +2220,7 @@ class ExecPool(object):
 		return  - True on graceful completion, Flase on termination by the specified
 			constrainets (timeout, memory limit, etc.)
 		"""
-		assert timeout >= 0., 'timeout valiadtion failed'
+		#assert timeout >= 0., 'timeout valiadtion failed'
 		if self._tstart is None:
 			assert not self._jobs and not self._workers, (
 				'Start time should be defined for non-empty execution pool')
@@ -2248,7 +2244,7 @@ class ExecPool(object):
 			, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		self._tstart = None  # Be ready for the following execution
 
-		assert not self._jobs and not self._workers, 'All jobs should be finalized'
+		assert not self._jobs and not self._workers, 'All jobs should be finished'
 		return True
 
 
