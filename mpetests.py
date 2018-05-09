@@ -658,7 +658,8 @@ class TestTasks(unittest.TestCase):
 
 	@unittest.skipUnless(mock is not None, 'Requires defined mock')
 	def test_subtasksTimeout(self):
-		with ExecPool(2, latency=_TEST_LATENCY) as xpool:
+		# Note: it's OK if this test fails in case the computer has less than 3 CPU cores
+		with ExecPool(3, latency=_TEST_LATENCY) as xpool:
 			# Prepare jobs task with the postprocessing
 			worktime = max(0.5, _TEST_LATENCY * 3)
 			t1 = Task('Task1', onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock())
@@ -671,7 +672,7 @@ class TestTasks(unittest.TestCase):
 			xpool.execute(j1)
 			xpool.execute(st1j1)
 			xpool.execute(st1j2)
-			xpool.join(worktime*2)
+			xpool.join(timelong * 1.1)
 
 			j1.onstart.assert_called_once_with(j1)
 			st1j1.onstart.assert_called_once_with(st1j1)
