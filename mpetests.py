@@ -5,18 +5,20 @@
 :Description:  Unit tests for the Multi-Process Execution Pool
 
 :Authors: (c) Artem Lutov <artem@exascale.info>
-:Organizations: eXascale Infolab <http://exascale.info/>, Lumais <http://www.lumais.com/>, ScienceWise <http://sciencewise.info/>
+:Organizations: eXascale Infolab <http://exascale.info/>, Lumais <http://www.lumais.com/>,
+	ScienceWise <http://sciencewise.info/>
 :Date: 2017-06 v2
 """
 
 from __future__ import print_function, division  # Required for stderr output, must be the first import
-import sys, time, subprocess, unittest
+import time, subprocess, unittest
+import sys
 from sys import executable as PYEXEC  # Full path to the current Python interpreter
 # import signal  # Intercept kill signals
 # import atexit  # At exit termination handling
 # from functools import partial  # Partially predefined functions (callbacks)
 try:
-	from unittest import mock
+	from unittest import mock  #pylint: disable=C0412
 except ImportError:
 	try:
 		# Note: mock is not available under default Python2 / pypy installation
@@ -68,11 +70,12 @@ _WPROCSMAX = max(AffinityMask.CPUS-1, 1)  # Maximal number of the worker process
 _TEST_LATENCY = 0.1  # Approximate minimal latency of ExecPool in seconds
 
 class TestExecPool(unittest.TestCase):
+	"""Basic tests for the ExecPool"""
 	#global _DEBUG_TRACE
 	#_DEBUG_TRACE = True
 
 	@classmethod
-	def terminationHandler(cls, signal=None, frame=None, terminate=True):
+	def terminationHandler(cls, signal=None, frame=None, terminate=True):  #pylint: disable=W0613
 		"""Signal termination handler
 
 		signal  - raised signal
@@ -176,8 +179,9 @@ class TestExecPool(unittest.TestCase):
 		tstart = time.perf_counter()
 		self._execpool.execute(Job('ep_timeout', args=('sleep', str(worktime)), timeout=timeout))
 
-		runsCount={'count': 0}
+		runsCount = {'count': 0}
 		def updateruns(job):
+			"""Onstart callback"""
 			job.params['count'] += 1
 
 		jrx = Job('ep_timeout_jrx', args=('sleep', str(worktime)), timeout=etimeout / 2, restartonto=True
@@ -258,10 +262,12 @@ class TestExecPool(unittest.TestCase):
 		3. Termination of the worker process that exceeds limit of the dedicated memory
 	 		or had bad_alloc and termination of all related non-smaller jobs
 		"""
-		worktime = _TEST_LATENCY * 5  # Note: should be larger than 3*latency; 400 ms can be insufficient for the Python 3
+		# Note: should be larger than 3*latency; 400 ms can be insufficient for the Python3
+		worktime = _TEST_LATENCY * 5
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
-		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3  # Execution pool timeout; Note: *3 because non-started jobs exist here
+		# Execution pool timeout; Note: *3 because non-started jobs exist here
+		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3
 		assert _TEST_LATENCY * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
 		# Note: we need another execution pool to set memlimit (10 MB) there
@@ -326,7 +332,8 @@ class TestExecPool(unittest.TestCase):
 				self.assertIsNone(jmsDvl2.tstart)
 			# Early termination by the chained relation to the mem violated origin
 			#self.assertLess(jmsDvl1.tstop - jmsDvl1.tstart, worktime)
-			self.assertGreaterEqual(jms2.tstop - jms2.tstart, worktime)  # Independent job should have graceful completion
+			# Independent job should have graceful completion
+			self.assertGreaterEqual(jms2.tstop - jms2.tstart, worktime)
 
 
 	@unittest.skipUnless(_LIMIT_WORKERS_RAM and mock is not None, 'Requires _LIMIT_WORKERS_RAM and defined mock')
@@ -341,12 +348,14 @@ class TestExecPool(unittest.TestCase):
 		worktime = _TEST_LATENCY * 10  # Note: should be larger than 3*latency
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
-		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3  # Execution pool timeout; Note: *3 because non-started jobs exist here and postponed twice
+		# Execution pool timeout; Note: *3 because non-started jobs exist here and postponed twice
+		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3
 		assert _TEST_LATENCY * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
 		# Note: we need another execution pool to set memlimit (10 MB) there
 		epoolMem = 0.15  # Execution pool mem limit, GB
-		msmall = inBytes(0.025)  # Small amount of memory for a job; Note: actual Python app consumes ~51 MB for the allocated ~25 MB
+		# Small amount of memory for a job; Note: actual Python app consumes ~51 MB for the allocated ~25 MB
+		msmall = inBytes(0.025)
 		# Start not more than 3 simultaneous workers
 		with ExecPool(max(_WPROCSMAX, 3), latency=_TEST_LATENCY, memlimit=epoolMem) as xpool:
 			tstart = time.perf_counter()
@@ -397,7 +406,8 @@ class TestExecPool(unittest.TestCase):
 			jgmsp2.ondone.assert_not_called()
 
 
-	@unittest.skipUnless(_LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS, 'Requires _LIMIT_WORKERS_RAM, _CHAINED_CONSTRAINTS')
+	@unittest.skipUnless(_LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS
+		, 'Requires _LIMIT_WORKERS_RAM, _CHAINED_CONSTRAINTS')
 	def test_jobMemlimGroupChained(self):
 		"""Verify memory violations caused by group of workers having chained jobs
 		Rescheduling of the worker processes when their total memory consumption
@@ -410,12 +420,15 @@ class TestExecPool(unittest.TestCase):
 		worktime = _TEST_LATENCY * 10  # Note: should be larger than 3*latency
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
-		etimeout = (max(1, _TEST_LATENCY) + timeout) * 4  # Execution pool timeout; Note: *3 because non-started jobs exist here and postponed twice
-		assert _TEST_LATENCY * 3 < worktime/2 and worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
+		# Execution pool timeout; Note: *3 because non-started jobs exist here and postponed twice
+		etimeout = (max(1, _TEST_LATENCY) + timeout) * 4
+		assert _TEST_LATENCY * 3 < worktime/2 and worktime < timeout and (
+			timeout < etimeout), 'Testcase parameters validation failed'
 
 		# Note: we need another execution pool to set memlimit (10 MB) there
 		epoolMem = 0.15  # Execution pool mem limit, GB
-		msmall = inBytes(0.025)  # Small amount of memory for a job; Note: actual Python app consumes ~51 MB for the allocated ~25 MB
+		# Small amount of memory for a job; Note: actual Python app consumes ~51 MB for the allocated ~25 MB
+		msmall = inBytes(0.025)
 		# Start not more than 3 simultaneous workers
 		with ExecPool(max(_WPROCSMAX, 4), latency=_TEST_LATENCY, memlimit=epoolMem) as xpool:
 			tstart = time.perf_counter()
@@ -455,15 +468,19 @@ class TestExecPool(unittest.TestCase):
 			self.assertGreaterEqual(jgms3.tstop - jgms3.tstart, worktime)
 			self.assertFalse(jgms3.proc.returncode)
 			if jgmsp1.tstop > jgmsp2.tstop + _TEST_LATENCY:
-				self.assertLessEqual(jgmsp1.tstop - jgmsp1.tstart, worktime*1.25 + _TEST_LATENCY * 3)  # Canceled by chained timeout
+				# Canceled by chained timeout
+				self.assertLessEqual(jgmsp1.tstop - jgmsp1.tstart, worktime*1.25 + _TEST_LATENCY * 3)
 				self.assertTrue(jgmsp1.proc.returncode)
 			self.assertLessEqual(jgmsp2.tstop - jgmsp2.tstart, worktime)
 			self.assertTrue(jgmsp2.proc.returncode)
-			self.assertGreaterEqual(jgmsp3.tstop - jgmsp3.tstart, worktime)  # Execution time a bit exceeds te timeout
-			# Note: jgmsp3 may complete gracefully or may be terminated by timeout depending on the workers revision time.
+			# Execution time a bit exceeds te timeout
+			self.assertGreaterEqual(jgmsp3.tstop - jgmsp3.tstart, worktime)
+			# Note: jgmsp3 may complete gracefully or may be terminated by timeout
+			# depending on the workers revision time.
 			# Most likely the completion is graceful
 			## Check the last completed job
-			#self.assertTrue(jgms3.tstop < jgmsp1.tstop < tstart + etime)  # Note: heavier job is rescheduled after the more lightweight one
+			# Note: heavier job is rescheduled after the more lightweight one
+			#self.assertTrue(jgms3.tstop < jgmsp1.tstop < tstart + etime)
 
 			# Verify handlers calls
 			jgms2.onstart.assert_called_with(jgms2)
@@ -573,7 +590,8 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 		worktime = _TEST_LATENCY * 6  # Note: should be larger than 3*latency
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
-		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3  # Execution pool timeout; Note: *3 because non-started jobs exist here and postponed twice
+		# Execution pool timeout; Note: *3 because non-started jobs exist here and postponed twice
+		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3
 		assert _TEST_LATENCY * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
 		# Start not more than 3 simultaneous workers
@@ -621,6 +639,7 @@ class TestTasks(unittest.TestCase):
 	"""Process tasks evaluation tests"""
 	@unittest.skipUnless(mock is not None, 'Requires defined mock')
 	def test_taskDone(self):
+		"""Test for the successful task execution"""
 		with ExecPool(2, latency=_TEST_LATENCY) as xpool:
 			# Prepare jobs task with the post-processing
 			worktime = max(0.5, _TEST_LATENCY * 3)
@@ -641,6 +660,7 @@ class TestTasks(unittest.TestCase):
 
 	@unittest.skipUnless(mock is not None, 'Requires defined mock')
 	def test_taskTimeout(self):
+		"""Test for the task of jobs termination by timeout"""
 		with ExecPool(2, latency=_TEST_LATENCY) as xpool:
 			# Prepare jobs task with the post-processing
 			worktime = max(0.5, _TEST_LATENCY * 3)
@@ -666,15 +686,19 @@ class TestTasks(unittest.TestCase):
 
 	@unittest.skipUnless(mock is not None, 'Requires defined mock')
 	def test_subtasksTimeout(self):
+		"""Test for the termination hierarchy of tasks of jobs by timeout"""
 		# Note: it's OK if this test fails in case the computer has less than 3 CPU cores
 		with ExecPool(3, latency=_TEST_LATENCY) as xpool:
 			# Prepare jobs task with the post-processing
 			worktime = max(0.5, _TEST_LATENCY * 3)
 			t1 = Task('Task1', onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock())
 			timelong = (worktime + _TEST_LATENCY) * 3  # Note: should be larger than 3*latency
-			j1 = Job('j1', args=('sleep', str(worktime)), task=t1, onstart=mock.MagicMock(), ondone=mock.MagicMock())
-			st1 = Task('Subtask1', onstart=mock.MagicMock(), task=t1, ondone=mock.MagicMock(), onfinish=mock.MagicMock())
-			st1j1 = Job('st1j1', args=('sleep', str(timelong)), task=st1, onstart=mock.MagicMock(), ondone=mock.MagicMock(), timeout=worktime)
+			j1 = Job('j1', args=('sleep', str(worktime)), task=t1
+				, onstart=mock.MagicMock(), ondone=mock.MagicMock())
+			st1 = Task('Subtask1', onstart=mock.MagicMock(), task=t1
+				, ondone=mock.MagicMock(), onfinish=mock.MagicMock())
+			st1j1 = Job('st1j1', args=('sleep', str(timelong)), task=st1
+				, onstart=mock.MagicMock(), ondone=mock.MagicMock(), timeout=worktime)
 			st1j2 = Job('st1j2', args=('sleep', str(worktime)), task=st1, ondone=mock.MagicMock())
 
 			xpool.execute(j1)
@@ -701,8 +725,10 @@ class TestTasks(unittest.TestCase):
 			self.assertEqual(t1.numterm, 1)
 
 
+################################################################################
+# WebUI related tests
 # import threading  # To request URL in parallel with execpool joining
-from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt, UiResFltStatus  # UiResCol
+from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt, UiResFltStatus  #pylint: disable=C0413;  UiResCol
 try:
 	# from urllib.parse import urlparse, urlencode
 	from urllib.request import urlopen #, Request
@@ -722,7 +748,7 @@ class TestWebUI(unittest.TestCase):
 	def setUpClass(cls):
 		cls.host = 'localhost'
 		cls.port = 8080
-		global _webuiapp
+		global _webuiapp  #pylint: disable=W0603
 		if _webuiapp is None:
 			_webuiapp = WebUiApp(host=cls.host, port=cls.port, name='MpeWebUI', daemon=True)
 		cls._execpool = ExecPool(2, latency=_TEST_LATENCY, name='MpePoolWUI', webuiapp=_webuiapp)
@@ -750,7 +776,8 @@ class TestWebUI(unittest.TestCase):
 
 
 	# @unittest.skipUnless(mock is not None, 'Requires defined mock')
-	def test_listJobs(self):
+	def test_summary(self):
+		"""Test WebUI summary listing"""
 		timeout = 10  # Note: should be larger than 3*latency
 		# worktime = max(1, _TEST_LATENCY) + (timeout * 2) // 1  # Job work time
 		worktime = 0.75 * timeout  # Job work time

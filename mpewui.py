@@ -14,12 +14,18 @@ from __future__ import print_function, division  # Required for stderr output, m
 # External API (exporting functions)
 __all__ = ['WebUiApp', 'UiCmdId', 'UiResOpt', 'UiResCol', 'UiResFltStatus']
 
-
-import bottle
-# from bottle import run as websrvrun
 # import signal  # Required for the correct handling of KeyboardInterrupt: https://docs.python.org/2/library/thread.html
 import threading  # Run bottle in the dedicated thread
 from functools import partial  # Custom parameterized routes
+# Internal format serialization to JSON/HTM/TXT
+import json
+try:
+	from html import escape
+except ImportError:
+	from cgi import escape  # Consider both both Python2/3
+import bottle  # Web service
+# from bottle import run as websrvrun
+
 # Constants Definitions
 try:
 	from enum import IntEnum
@@ -72,32 +78,26 @@ except ImportError:
 		cls.__members__ = dnames
 		return cls
 
-# Internal format serialization to JSON/HTM/TXT
-import json
-try:
-	from html import escape
-except ImportError:
-	from cgi import escape  # Consider both both Python2/3
 
-"""UI Command Identifier associated with the REST URL"""
 UiCmdId = IntEnum('UiCmdId', 'SUMMARY LIST_JOBS')  # 'JOB_INFO', 'LIST_TASKS', 'TASK_INFO'
+"""UI Command Identifier associated with the REST URL"""
 
-"""UI Command parameters"""
 UiResOpt = IntEnum('UiResOpt', 'fmt cols fltStatus')
+"""UI Command parameters"""
 
-"""UI Command: Result format parameter values"""
 UiResFmt = IntEnum('UiResFmt', 'json htm txt')
+"""UI Command: Result format parameter values"""
 
-"""UI Command: Result columns parameter values for the Jobs listing"""
 UiResCol = IntEnum('UiResCol', 'pid state tstart tstop duration memory task category')
+"""UI Command: Result columns parameter values for the Jobs listing"""
 
-"""UI Command: Result filtration by the job status: executing (worker job), deferred (scheduled obj)"""
 # Note: 'exec' is a keyword in Python 2 and can't be used as an object attribute
 UiResFltStatus = IntEnum('UiResFltStatus', 'work defer')
+"""UI Command: Result filtration by the job status: executing (worker job), deferred (scheduled obj)"""
 
 class UiCmd(object):
 	"""UI Command (for the MVC controller)"""
-	def __init__(self, cid, data=dict()):
+	def __init__(self, cid, data={}):
 		"""UI command
 
 		Args:
@@ -108,7 +108,7 @@ class UiCmd(object):
 		Internal attributes:
 			cond (Condition)  - synchronizing condition
 		"""
-		# params (dict)  - Command parameters, params=dict();   and isinstance(params, dict)
+		# params (dict)  - Command parameters, params={};   and isinstance(params, dict)
 		#dshape (set(str), optional): Defaults to None. Expected data shape (columns of the returning table)
 		# self.lock = threading.Lock()
 		self.cond = threading.Condition()  # (self.lock)
@@ -161,12 +161,14 @@ class WebUiApp(threading.Thread):
 	@bottle.get('/favicon.ico')
 	@staticmethod
 	def favicon():
-		return bottle.server_static('/images/favicon.ico')
+		"""Favicon for browsers"""
+		return bottle.static_file('favicon.ico', root='/images')
 
 
 	@bottle.error(404)
 	@staticmethod
 	def error404(error, msg=''):
+		"""Custom page not found"""
 		if msg:
 			return 'The URL is invalid: ' + msg
 		else:
@@ -227,25 +229,26 @@ class WebUiApp(threading.Thread):
 			qdict = bottle.request.query
 			fmtKey = UiResOpt.fmt.name
 			# return "query dict: {}, dict.keys: {}, dict[fmt]: {}".format(qdict.items(), qdict.keys(), qdict[fmtKey])
-			if fmtKey in qdict:
+			if fmtKey in qdict:  #pylint: disable=E1135
 				try:
-					fmt = UiResFmt[qdict[fmtKey]]
-					del qdict[fmtKey]
+					fmt = UiResFmt[qdict[fmtKey]]  #pylint: disable=E1136
+					del qdict[fmtKey]  #pylint: disable=E1138
 				except KeyError:
 					bottle.response.status = 400
-					return 'Invalid URL parameter value of "{}": {}'.format(fmtKey, qdict[fmtKey])
+					return 'Invalid URL parameter value of "{}": {}'.format(fmtKey, qdict[fmtKey])  #pylint: disable=E1136
 					# raise HTTPResponse(body='Invalid URL parameter value of "fmt": ' + qdict['fmt'], status=400)
 			# Prepare .data for the request parameters storage
 			if cmd.data:
 				cmd.data.clear()
-			cols = qdict.get(UiResOpt.cols.name)
+			cols = qdict.get(UiResOpt.cols.name)  #pylint: disable=E1101
 			if cols:
 				cmd.data[UiResOpt.cols] = cols.split(',')
-			fltStatus = qdict.get(UiResOpt.fltStatus.name)
+			fltStatus = qdict.get(UiResOpt.fltStatus.name)  #pylint: disable=E1101
 			if fltStatus:
 				cmd.data[UiResOpt.fltStatus] = fltStatus.split(',')
 			# Wait for the command execution and notification
-			# return "cmd.id: {}, cmd.data: {}, keys: {}, vals: {}".format(cmd.id, cmd.data.items(), cmd.data.keys(), cmd.data.values())
+			# return "cmd.id: {}, cmd.data: {}, keys: {}, vals: {}".format(
+			# 	cmd.id, cmd.data.items(), cmd.data.keys(), cmd.data.values())
 			cmd.cond.wait()
 			# Now .data contains the response results
 			return "cmd.data: {}".format(cmd.data)
@@ -259,15 +262,16 @@ class WebUiApp(threading.Thread):
 				return '\n'.join(['\t'.join([str(v) for v in cols]) for cols in cmd.data])
 			#elif fmt == UiResFmt.htm:
 			else:
-				return ''.join('<table>',
-					'\n'.join([''.join('<tr>', ''.join(
+				return ''.join(('<table>',
+					'\n'.join([''.join(('<tr>', ''.join(
 						[''.join(('<td>', escape(str(v), True), '</td>')) for v in cols]
-						), '</tr>') for cols in cmd.data])
-					, '</table>')
+						), '</tr>')) for cols in cmd.data])
+					, '</table>'))
 
 
 	@staticmethod
 	def jobs(cmd):
+		"""Jobs listing including workers (UiCmdId.LIST_JOBS)"""
 		with cmd.cond:
 			cmd.id = UiCmdId.LIST_JOBS
 
