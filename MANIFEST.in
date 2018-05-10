@@ -4,5 +4,6 @@ include *.md
 # Include the license file
 include LICENSE.txt
 
+# Note: images are relatively heavy
 # Include the data files (dir wildcard)
-recursive-include images *
+#recursive-include images *

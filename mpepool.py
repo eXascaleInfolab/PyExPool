@@ -43,31 +43,31 @@ considering NUMA architecture:
 	ScienceWise <http://sciencewise.info/>
 :Date: 2015-07 v1, 2017-06 v2
 """
-# Possible naming: pyexpool / mpepool / xplobal / muexpolb
+# Possible naming: pyexpool / mpepool
 
 from __future__ import print_function, division  # Required for stderr output, must be the first import
 import sys
-import time
-# Consider compatibility with Python before v3.3
-if not hasattr(time, 'perf_counter'):
-	time.perf_counter = time.time
-import collections
 import os
+import time
 # import ctypes  # Required for the multiprocessing Value definition
 import types  # Required for instance methods definition
-import traceback  # Stacktrace
+import traceback  # stacktrace
 # To print a stacktrace fragment:
 # traceback.print_stack(limit=5, file=sys.stderr) or
 # print(traceback.format_exc(5), file=sys.stderr)
 import subprocess
 import errno
-# # Anync Tasks management
+# # Async Tasks management
 # import threading  # Used only for the concurrent Tasks termination by timeout
 # import signal  # Required for the correct handling of KeyboardInterrupt: https://docs.python.org/2/library/thread.html
 import itertools  # chain
 
-from multiprocessing import cpu_count, Lock, Queue  #, active_children, Value, Process
-from collections import namedtuple  # ExecItemFilterVal, TaskInfoExt
+from multiprocessing import cpu_count, Lock  #, Queue  #, active_children, Value, Process
+from collections import deque, namedtuple  # ExecItemFilterVal, TaskInfoExt
+
+# Consider time interface compatibility with Python before v3.3
+if not hasattr(time, 'perf_counter'):
+	time.perf_counter = time.time
 
 # Required to efficiently traverse items of dictionaries in both Python 2 and 3
 try:
@@ -126,7 +126,7 @@ def timeheader(timestamp=time.gmtime()):
 
 	timestamp  - timestamp
 
-	return  - timetamp string for the file header
+	return  - timestamp string for the file header
 	"""
 	assert isinstance(timestamp, time.struct_time), 'Unexpected type of timestamp'
 	# ATTENTION: MPE pool timestamp [prefix] intentionally differs a bit from the
@@ -135,7 +135,7 @@ def timeheader(timestamp=time.gmtime()):
 
 
 # Note: import occurs before the execution of the main application, so show
-# the timestamp to outline when the error occurred and separate reexecutions
+# the timestamp to outline when the error occurred and separate re-executions
 if not (_WEBUI and _LIMIT_WORKERS_RAM):
 	print(timeheader(), file=sys.stderr)
 	if not _WEBUI:
@@ -150,10 +150,12 @@ if not (_WEBUI and _LIMIT_WORKERS_RAM):
 # category and heavier than the origin violating the constraints
 _CHAINED_CONSTRAINTS = True
 
-_RAM_SIZE = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / 1024.**3  # RAM (physical memory) size in Gb
-# Dedicate at least 256 Mb for the OS consuming not more than 98% of RAM
-_RAM_LIMIT = _RAM_SIZE * 0.98 - 0.25  # Maximal consumption of RAM in Gb (< _RAM_SIZE to avoid/reduce swapping)
-_AFFINITYBIN = 'taskset'  # System app to set CPU affinity if required, should be preliminarry installed (taskset is present by default on NIX systems)
+_RAM_SIZE = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / 1024.**3  # RAM (physical memory) size in GB
+# Dedicate at least 256 MB for the OS consuming not more than 98% of RAM
+_RAM_LIMIT = _RAM_SIZE * 0.98 - 0.25  # Maximal consumption of RAM in GB (< _RAM_SIZE to avoid/reduce swapping)
+# System app to set CPU affinity if required, should be preliminary installed
+# (taskset is present by default on NIX systems)
+_AFFINITYBIN = 'taskset'
 _DEBUG_TRACE = False  # Trace start / stop and other events to stderr;  1 - brief, 2 - detailed, 3 - in-cycles
 
 
@@ -196,7 +198,7 @@ def tblfmt(v):
 
 def applyCallback(callback, owner):
 	"""Process the callback call
-	
+
 	Args:
 		callback: function  - callback (self.onXXX)
 		owner: str  -owner name of the callback (self.name), required only for tracing
@@ -213,15 +215,15 @@ def applyCallback(callback, owner):
 
 beg  - begin of the range bound
 end  - end of the range bound
-opt: bool  - target property of the filter is optional, i.e. omit the fileter if the property is absent or None
+opt: bool  - target property of the filter is optional, i.e. omit the filter if the property is absent or None
 """
 ExecItemFilterVal = namedtuple('ExecItemFilterVal', 'beg end opt')
 
 
-# NOTE: additional paramter(s) can be added to output additional virtual properties like duration,
+# NOTE: additional parameter(s) can be added to output additional virtual properties like duration,
 # which can be implemented as bool parameter to emulate properties specified by propflt
 def infodata(obj, propflt=None, objflt=None):
-	"""Convert the object to the tuple filtering specified properties and itselt
+	"""Convert the object to the tuple filtering specified properties and itself
 
 	Args:
 		obj: XobjInfo  - the object to be filtered and converted to the tuple, supposed
@@ -231,8 +233,8 @@ def infodata(obj, propflt=None, objflt=None):
 			only if the specified properties belong to the specified range,
 			member items are processed irrespectively of the item inclusion
 
-		NOTE: property names should exactly match the obj propeties (including __slots__)
-	
+		NOTE: property names should exactly match the obj properties (including __slots__)
+
 	Returns:
 		tuple  - filtered properties of the task or None
 
@@ -244,7 +246,7 @@ def infodata(obj, propflt=None, objflt=None):
 	if objflt:
 		for prop, pcon in viewitems(objflt):  # Property name and constraint
 			#assert isinstance(prop, str) and isinstance(pcon, ExecItemFilterVal
-			# 	), 'Invalid type of argumetns:  prop: {}, pflt: {}'.format(
+			# 	), 'Invalid type of arguments:  prop: {}, pflt: {}'.format(
 			# 	type(prop).__name__, type(pcon).__name__)
 			pval = None if prop not in obj else obj.__getattribute__(prop)
 			# Use task name for the task property
@@ -257,7 +259,7 @@ def infodata(obj, propflt=None, objflt=None):
 			if (not pcon.opt and prop not in obj) or (
 			pcon.end is None and pval != pcon.beg) or pval < pcon.beg or pval >= pcon.end:
 				return None
-	return tuple([obj.__getattribute__(prop) for prop in (propflt if propflt else obj.iterprop())])
+	return tuple([obj.__getattribute__(prop) for prop in (propflt if propflt else obj.iterprop())])  #pylint: disable=C0325
 
 
 def propslist(cls):
@@ -267,7 +269,7 @@ def propslist(cls):
 	- iterprop() method to iterate over all properties (including the dynamically computed)
 	"""
 	def contains(self, prop):
-		"""Whether the specified property is persent"""
+		"""Whether the specified property is present"""
 		return self._props.endswith(prop) or self._props.find(prop + ' ') != -1
 
 	def iterprop(cls):
@@ -288,7 +290,7 @@ def propslist(cls):
 	cslots = set(cls.__slots__)
 	cls._props = ' '.join(itertools.chain(cls.__slots__,
 		[m for m in dir(cls) if not m.startswith('_') if m not in cslots]))  # Note: dir() list also slots
-	# Define requied methods
+	# Define required methods
 	# ATTENTION: the methods are bound automatically to self (but not to the cls in Python2)
 	# since they are defined before the class is created.
 	cls.__contains__ = contains
@@ -325,7 +327,7 @@ class JobInfo(object):
 
 	def __init__(self, job, tstop=None):
 		"""JobInfo initialization
-		
+
 		Args:
 			job: Job  - a job from which the info is fetched
 			tstop: float  - job finishing time, actual for the terminating deferred jobs
@@ -359,7 +361,7 @@ class TaskInfo(object):
 
 	def __init__(self, task):
 		"""TaskInfo initialization
-		
+
 		Args:
 			task: Task  - a task from which the info is fetched
 		"""
@@ -389,7 +391,7 @@ TaskInfoExt = namedtuple('TaskInfoExt', 'props members')
 
 def printDepthFirst(tinfext, cindent='  ', indstep='  ', colsep=' '):
 	"""Print TaskUnfoExt hierarchy using the depth first traversing
-	
+
 	Args:
 		tinfext: TaskInfoExt  - extended task info to be unfolded and printed
 		cindent: str  - current indent for the output hierarchy formatting
@@ -441,29 +443,30 @@ class Task(object):
 			CONTEXT OF THE CALLER (main process) with the single argument, the task. Default: None
 			ATTENTION: must be lightweight
 		params  - additional parameters to be used in callbacks
-		task: Task  - optional supertask
+		task: Task  - optional owner supertask
 		latency: float  - lock timeout in seconds: None means infinite, <= 0 means non-bocking, > 0 is the actual timeout
 		stdout  - None or file name or PIPE for the buffered output to be APPENDED
 		stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited
-		
+
 		Automatically initialized and updated properties:
 		tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 		tstop  - termination / completion time after ondone.
 		numadded: uint  - the number of direct added subtasks
-		numdone: uint  - the number of completed DIRECT subtasks (each subtask may conatin multiple jobs or subsubtasks)
+		numdone: uint  - the number of completed DIRECT subtasks (each subtask may contain multiple jobs or subsubtasks)
 		numterm: uint  - the number of terminated direct subtask
 		"""
 		assert isinstance(name, str) and (latency is None or latency >= 0) and (
 			task is None or (isinstance(task, Task) and task != self)), 'Arguments are invalid'
-		self._lock = Lock()  # Lock for the embrasing jobs
+		self._lock = Lock()  # Lock for the included jobs
 		# dict(subtask: Task | Job, accterms: uint)
 		self._items = dict()  # Dictionary of non-finished subtasks with the direct termination counter
 		self.name = name
 		# Add member handlers if required
-		self.onstart = None if not callable(onstart) else types.MethodType(onstart, self)  # Bind the callback to the object
-		self.ondone = None if not callable(ondone) else types.MethodType(ondone, self)  # Bind the callback to the object
-		self.onfinish = None if not callable(onfinish) else types.MethodType(onfinish, self)  # Bind the callback to the object
+		# types.MethodType binds the callback to the object
+		self.onstart = None if not callable(onstart) else types.MethodType(onstart, self)
+		self.ondone = None if not callable(ondone) else types.MethodType(ondone, self)
+		self.onfinish = None if not callable(onfinish) else types.MethodType(onfinish, self)
 		# self.timeout = timeout
 		self.params = params
 		self.latency = latency
@@ -473,7 +476,7 @@ class Task(object):
 
 		self.tstart = None
 		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
-		self.numadded = 0  # The number of added direct subtasks, the same subtask/job can be readded several times
+		self.numadded = 0  # The number of added direct subtasks, the same subtask/job can be re-added several times
 		self.numdone = 0  # The number of completed direct subtasks
 		self.numterm = 0  # Total number of terminated direct subtasks
 		# Consider subtasks termination by timeout
@@ -491,12 +494,12 @@ class Task(object):
 
 	def add(self, subtask):
 		"""Add one more subtask to the task
-		
+
 		Args:
 			subtask: Job|Task  - subtask of the current task
-		
+
 		Raises:
-			RuntimeError  - lock acquasition failed
+			RuntimeError  - lock acquisition failed
 		"""
 		assert isinstance(subtask, Job) or isinstance(subtask, Task), 'Unexpected type of the subtask'
 		if self.tstart is None:
@@ -514,21 +517,21 @@ class Task(object):
 			self._lock.release()
 			self.numadded += 1
 		else:
-			raise RuntimeError('Lock acqusition failed on add() in "{}"'.format(self.name))
+			raise RuntimeError('Lock acquisition failed on add() in "{}"'.format(self.name))
 
 
 	def finished(self, subtask, succeed):
 		"""Complete subtask
-		
+
 		Args:
 			subtask: Job | Task  - finished subtask
 			succeed: bool  - graceful successful completion or termination
-		
+
 		Raises:
-			RuntimeError  - lock acquasition failed
+			RuntimeError  - lock acquisition failed
 		"""
 		if not self._lock.acquire(timeout=self.latency):
-			raise RuntimeError('Lock acqusition failed on finished() in "{}"'.format(self.name))
+			raise RuntimeError('Lock acquisition failed on finished() in "{}"'.format(self.name))
 		try:
 			if succeed:
 				del self._items[subtask]
@@ -555,41 +558,13 @@ class Task(object):
 				self.task.finished(self, not self._items)
 		else:
 			assert self.numterm + self.numdone < self.numadded and self._items, (
-				'Uncomplete subtasks should be remained; numterm: {}, numdone: {}, numadded: {}'
+				'Uncompleted subtasks should be remained; numterm: {}, numdone: {}, numadded: {}'
 				.format(self.numterm, self.numdone, self.numadded))
-
-
-	@staticmethod
-	def subtaskInfo(subtask):
-		"""Subtask tracing
-		
-		Args:
-			subtask (Task | Job): subtask to be traced
-		
-		Returns:
-			str | list: subtask information
-		"""
-		isjob = isinstance(subtask, Job)
-		assert isjob or isinstance(subtask, Task), 'Unexpected type of the subtask: ' + type(subtask).__name__
-		if extinfo:
-			res = [subtask.name]
-			if pid:
-				res.append(None if not isjob or subtask.proc is None else subtask.proc.pid)
-			if tstart:
-				res.append(subtask.tstart)
-			if tstop:
-				res.append(subtask.tstop)
-			if duration:
-				res.append(None if subtask.tstart is None else ctime - subtask.tstart)
-			if memory:
-				res.append(None if not isjob else subtask.mem)
-			return res
-		return subtask.name
 
 
 	def uncompleted(self, recursive=False, header=False, pid=False, tstart=False, tstop=False, duration=False, memory=False):
 		"""Fetch names of the uncompleted tasks
-		
+
 		Args:
 			recursive (bool, optional): Defaults to False. Fetch uncompleted subtasks recursively.
 			header (bool, optional): Defaults to False. Include header for the displaying attributes.
@@ -599,12 +574,12 @@ class Task(object):
 			duration (bool, optional): Defaults to False. Show duration of the execution.
 			memory (bool, optional): Defaults to False. Show memory consumption the job, None for the task.
 				Note: the value as specified by the Job.mem, which is not the peak RSS.
-		
+
 		Returns:
 			hierarchical dictionary of the uncompleted task names and other attributes, each items is tuple or str
 
 		Raises:
-			RuntimeError: lock acquasition failed
+			RuntimeError: lock acquisition failed
 		"""
 		extinfo = pid or duration or memory
 		if duration:
@@ -628,8 +603,35 @@ class Task(object):
 				res.append(hdritems)
 			else:
 				res.append('Name')
+
+		def subtaskInfo(subtask):
+			"""Subtask tracing
+
+			Args:
+				subtask (Task | Job): subtask to be traced
+
+			Returns:
+				str | list: subtask information
+			"""
+			isjob = isinstance(subtask, Job)
+			assert isjob or isinstance(subtask, Task), 'Unexpected type of the subtask: ' + type(subtask).__name__
+			if extinfo:
+				res = [subtask.name]
+				if pid:
+					res.append(None if not isjob or subtask.proc is None else subtask.proc.pid)
+				if tstart:
+					res.append(subtask.tstart)
+				if tstop:
+					res.append(subtask.tstop)
+				if duration:
+					res.append(None if subtask.tstart is None else ctime - subtask.tstart)
+				if memory:
+					res.append(None if not isjob else subtask.mem)
+				return res
+			return subtask.name
+
 		if not self._lock.acquire(timeout=self.latency):
-			raise RuntimeError('Lock acquasition failed on uncompleted() in "{}"'.format(self.name))
+			raise RuntimeError('Lock acquisition failed on uncompleted() in "{}"'.format(self.name))
 		try:
 			# List should be generated on place while all the tasks are present
 			# Note: list extension should prevent lazy evaluation of the list generator
@@ -665,7 +667,7 @@ class Job(object):
 		timeout  - execution timeout in seconds. Default: 0, means infinity
 		restartonto  - restart the job on timeout, Default: False. Can be used for
 			non-deterministic Jobs like generation of the synthetic networks to regenerate
-			the network on border cases overcoming gettig stuck on specific values of the rand variables.
+			the network on border cases overcoming getting stuck on specific values of the rand variables.
 		task: Task  - origin task if this job is a part of the task
 		startdelay  - delay after the job process starting to execute it for some time,
 			executed in the CONTEXT OF THE CALLER (main process).
@@ -710,7 +712,7 @@ class Job(object):
 		tstop  - termination / completion time after ondone
 			NOTE: onstart() and ondone() callbacks execution is included in the job execution time
 		proc  - process of the job, can be used in the ondone() to read it's PIPE
-		mem  - consuming memory (smooth max of average of vms and rss, not just the current value)
+		mem  - consuming memory (smooth max of average of VMS and RSS, not just the current value)
 			or the least expected value inherited from the jobs of the same category having non-smaller size;
 			requires _LIMIT_WORKERS_RAM
 		terminates  - accumulated number of the received termination requests caused by the constraints violation
@@ -756,7 +758,7 @@ class Job(object):
 		self._omitafn = omitafn
 		self.memkind = memkind
 		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
-			self.size = size  # Expected memory complexity of the job, typcally it's size of the processing data
+			self.size = size  # Expected memory complexity of the job, typically it's size of the processing data
 			# Consumed implementation-defined type of memory on execution in gigabytes or the least expected
 			# (inherited from the related jobs having the same category and non-smaller size)
 			self.mem = 0.
@@ -809,7 +811,7 @@ class Job(object):
 				xmem = curmem  # Memory consumption of the heaviest process in the tree
 				for ucp in up.children(recursive=True):  # Note: fetches only children procs
 					pmem = ucp.memory_info()
-					mem = (pmem.vms + pmem.rss) / 2  # Mb
+					mem = (pmem.vms + pmem.rss) / 2  # MB
 					amem += mem
 					if xmem < mem:
 						xmem = mem
@@ -818,7 +820,7 @@ class Job(object):
 			# The process is finished and such pid does not exist
 			print('WARNING, _updateMem() failed, current proc mem set to 0: {}. {}'.format(
 				err, traceback.format_exc(5)), file=sys.stderr)
-		# Note: even if curmem = 0 updte mem smoothly to avoid issues on internal
+		# Note: even if curmem = 0 update mem smoothly to avoid issues on internal
 		# fails of psutil even thought they should not happen
 		curmem = inGigabytes(curmem)
 		self.mem = max(curmem, self.mem * Job._RTM + curmem * (1-Job._RTM))
@@ -859,7 +861,7 @@ class Job(object):
 		#if self.proc is not None:
 		#	if self.proc.poll() is None:  # poll() None means the process has not been terminated / completed
 		#		self.proc.kill()
-		#		self.proc.wait()  # Join the completed orocess to remove the entry from the children table and avoid zombie
+		#		self.proc.wait()  # Join the completed process to remove the entry from the children table and avoid zombie
 		#		print('WARNING, completion of the non-finished process is called for "{}", killed'
 		#			.format(self.name), file=sys.stderr)
 
@@ -877,7 +879,7 @@ class Job(object):
 				except Exception as err:  #pylint: disable=W0703
 					print('ERROR in ondone callback of "{}": {}. {}'.format(
 						self.name, err, traceback.format_exc(5)), file=sys.stderr)
-			# Clean up empty logs (can be left for the terminatig process to avoid delays)
+			# Clean up empty logs (can be left for the terminating process to avoid delays)
 			# Remove empty logs skipping the system devnull
 			tpaths = []  # Base dir of the output
 			if (self.stdout and isinstance(self.stdout, str) and self.stdout != os.devnull
@@ -915,13 +917,13 @@ class Job(object):
 
 
 def ramfracs(fracsize):
-	"""Evaluate the minimal number of RAM fractions of the specified size in Gb
+	"""Evaluate the minimal number of RAM fractions of the specified size in GB
 
 	Used to estimate the reasonable number of processes with the specified minimal
 	dedicated RAM.
 
-	fracsize  - minimal size of each fraction in Gb, can be a fractional number
-	return the minimal number of RAM fractions having the specified size in Gb
+	fracsize  - minimal size of each fraction in GB, can be a fractional number
+	return the minimal number of RAM fractions having the specified size in GB
 	"""
 	return int(_RAM_SIZE / fracsize)
 
@@ -929,9 +931,9 @@ def ramfracs(fracsize):
 def cpucorethreads():
 	"""The number of hardware treads per a CPU core
 
-	Used to specify CPU afinity dedicating the maximal amount of CPU cache L1/2.
+	Used to specify CPU affinity dedicating the maximal amount of CPU cache L1/2.
 	"""
-	# -r or -E  - extended regex syntax, -n  - quet output, /p  - print the match
+	# -r or -E  - extended regex syntax, -n  - quiet output, /p  - print the match
 	return int(subprocess.check_output(
 		[r"lscpu | sed -rn 's/^Thread\(s\).*(\w+)$/\1/p'"], shell=True))
 
@@ -953,7 +955,7 @@ def cpusequential(ncpunodes=cpunodes()):
 	The enumeration can be crossnodes starting with one hardware thread per each
 	NUMA node, or sequential by enumerating all cores and hardware threads in each
 	NUMA node first.
-	For two hardware threads per a physical CPU core, where secondary hw threads
+	For two hardware threads per a physical CPU core, where secondary HW threads
 	are taken in brackets:
 		Crossnodes enumeration, often used for the server CPUs
 		NUMA node0 CPU(s):     0,2(,4,6)		=> PU L#1 (P#4)
@@ -991,9 +993,9 @@ class AffinityMask(object):
 	Typically, CPUs are enumerated across the nodes:
 	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30
 	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31
-	In case the number of hw threads per core is 2 then the physical CPU cores are 1 .. 15:
-	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14	(16,18,20,22,24,26,28,30  - 2nd hw treads)
-	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15	(17,19,21,23,25,27,29,31  - 2nd hw treads)
+	In case the number of HW threads per core is 2 then the physical CPU cores are 1 .. 15:
+	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14	(16,18,20,22,24,26,28,30  - 2nd HW treads)
+	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15	(17,19,21,23,25,27,29,31  - 2nd HW treads)
 	But the enumeration can be also sequential:
 	NUMA node0 CPU(s):     0,(1),2,(3),...
 	...
@@ -1097,7 +1099,7 @@ class AffinityMask(object):
 			False  - crossnodes
 			True  - sequential
 
-			For two hardware threads per a physical CPU core, where secondary hw threads
+			For two hardware threads per a physical CPU core, where secondary HW threads
 			are taken in brackets:
 			Crossnodes enumeration, often used for the server CPUs
 			NUMA node0 CPU(s):     0,2(,4,6)
@@ -1131,7 +1133,7 @@ class AffinityMask(object):
 		if self.afnstep == 1:
 			if self.sequential:
 				# 1. Identify shift inside the NUMA node traversing over the same number of
-				# the hardware threads in all physical cores starting from the first hw thread
+				# the hardware threads in all physical cores starting from the first HW thread
 				indcpu = i//self.NODES * self.CORE_THREADS  # Traverse with step = CORE_THREADS
 				indcpu = indcpu%self.NODE_CPUS + indcpu//self.NODE_CPUS  # Normalize to fit the actual indices
 				# 2. Identify index of the NUMA node and conver it to the number of logical CPUs
@@ -1148,7 +1150,7 @@ class AffinityMask(object):
 				#indcpus = inode * self.NODE_CPUS
 				i = (inode*self.NODE_CPUS
 					# 2. Identify shift inside the NUMA node traversing over the same number of
-					# the hardware threads in all physical cores starting from the first hw thread
+					# the hardware threads in all physical cores starting from the first HW thread
 					+ i//self.NODES * self.afnstep)
 				assert i + self.afnstep <= self.CPUS, ('Mask out of range: {} > {}'
 					.format(i + self.afnstep, self.CPUS))
@@ -1157,14 +1159,14 @@ class AffinityMask(object):
 				else:
 					cpumask = '{}-{}'.format(i, i + self.afnstep - 1)
 			else:
-				# NUMA node0 CPU(s):     0,2,4,6,8,10,12,14	(16,18,20,22,24,26,28,30  - 2nd hw treads)
-				# NUMA node1 CPU(s):     1,3,5,7,9,11,13,15	(17,19,21,23,25,27,29,31  - 2nd hw treads)
+				# NUMA node0 CPU(s):     0,2,4,6,8,10,12,14	(16,18,20,22,24,26,28,30  - 2nd HW treads)
+				# NUMA node1 CPU(s):     1,3,5,7,9,11,13,15	(17,19,21,23,25,27,29,31  - 2nd HW treads)
 				# afnstep <= 1 or hwthreads = 1  -> direct mapping
 				# afnstep = 2 [th=2]  -> 0,16; 1,17; 2,18; ...
 				#
-				# NUMA node0 CPU(s):     0,3,6,9	(12,15,18,21  - 2nd hw treads)
-				# NUMA node1 CPU(s):     1,4,7,10	(13,16,19,22  - 2nd hw treads)
-				# NUMA node2 CPU(s):     2,5,8,11	(14,17,20,23  - 2nd hw treads)
+				# NUMA node0 CPU(s):     0,3,6,9	(12,15,18,21  - 2nd HW treads)
+				# NUMA node1 CPU(s):     1,4,7,10	(13,16,19,22  - 2nd HW treads)
+				# NUMA node2 CPU(s):     2,5,8,11	(14,17,20,23  - 2nd HW treads)
 				# afnstep = 3 [th=2]  -> 0,12,3; 1,13,4; ... 15,6,18;
 				#
 				# NUMA node0 CPU(s):     0,3,6,9	(12,15,18,21  24... ...45)
@@ -1172,7 +1174,7 @@ class AffinityMask(object):
 				# NUMA node2 CPU(s):     2,5,8,11	(14,17,20,23  26... ...47)
 				# afnstep = 3 [th=4]  -> 0,12,24,36; ... 4,16,28,40; ...
 				ncores = self.afnstep//self.CORE_THREADS  # The number of physical cores to dedicate
-				# Index of the logical CPU (1st hw thread of the physical core) with shift of the NUMA node
+				# Index of the logical CPU (1st HW thread of the physical core) with shift of the NUMA node
 				indcpu = i//self.NODES * self.NODES * ncores + inode
 				cpus = []
 				for hwt in range(self.CORE_THREADS):
@@ -1215,7 +1217,7 @@ class ExecPool(object):
 			The recomended value is max(cpu_count() - 1, 1) to leave one logical
 			CPU for the benchmarking framework and OS applications.
 
-			To guarantee minimal average RAM per a process, for example 2.5 Gb
+			To guarantee minimal average RAM per a process, for example 2.5 GB
 			without _LIMIT_WORKERS_RAM flag (not using psutil for the dynamic
 			control of memory consumption):
 				wksnum = min(cpu_count(), max(ramfracs(2.5), 1))
@@ -1264,7 +1266,7 @@ class ExecPool(object):
 					print('WARNING{}, the number of worker processes is reduced'
 						' ({wlim0} -> {wlim} to satisfy the affinity step'
 						.format('' if not self.name else ' ' + self.name
-						,wlim0=wksnum, wlim=afnmask.CPUS//afnmask.afnstep), file=sys.stderr)
+						, wlim0=wksnum, wlim=afnmask.CPUS//afnmask.afnstep), file=sys.stderr)
 					wksnum = afnmask.CPUS // afnmask.afnstep
 			except OSError as err:
 				afnmask = None
@@ -1273,7 +1275,7 @@ class ExecPool(object):
 					, afnbin=_AFFINITYBIN, err=err), file=sys.stderr)
 		self._wkslim = wksnum  # Max number of resident workers
 		self._workers = set()  # Scheduled and started jobs, i.e. worker processes:  {executing_job, }
-		self._jobs = collections.deque()  # Scheduled jobs that have not been started yet:  deque(job)
+		self._jobs = deque()  # Scheduled jobs that have not been started yet:  deque(job)
 		self._tstart = None  # Start time of the execution of the first task
 		# Affinity scheduling attributes
 		self._afnmask = afnmask  # Affinity mask functor
@@ -1283,7 +1285,7 @@ class ExecPool(object):
 			'  _wkslim: {}, afnstep: {}, CPUs: {}'.format(self._wkslim
 			, 1 if not self._afnmask else self._afnmask.afnstep, self._CPUS))
 		# Execution rescheduling attributes
-		self.memlimit = 0. if not _LIMIT_WORKERS_RAM else max(0, min(memlimit, _RAM_LIMIT))  # in Gb
+		self.memlimit = 0. if not _LIMIT_WORKERS_RAM else max(0, min(memlimit, _RAM_LIMIT))  # in GB
 		self.latency = latency if latency else 1 + (self.memlimit != 0.)  # Seconds of sleep on pooling
 		# Predefined private attributes
 		self._termlatency = min(0.2, self.latency)  # 200 ms, job process (worker) termination latency
@@ -1294,7 +1296,7 @@ class ExecPool(object):
 
 		if self.memlimit and self.memlimit != memlimit:
 			print('WARNING{}, total memory limit is reduced to guarantee the in-RAM'
-				' computations: {:.6f} -> {:.6f} Gb'.format('' if not self.name else ' ' + self.name
+				' computations: {:.6f} -> {:.6f} GB'.format('' if not self.name else ' ' + self.name
 				, memlimit, self.memlimit), file=sys.stderr)
 
 		# Initialize WebUI if it has been supplied
@@ -1362,7 +1364,7 @@ class ExecPool(object):
 			# 		''
 			# 	}
 			# }
-			data.append(['#','name'])  # Number and Name
+			data.append(['#', 'name'])  # Number and Name
 			data[0].extend(cols)
 			for job in jobs:
 				i += 1
@@ -1401,12 +1403,12 @@ class ExecPool(object):
 		return self
 
 
-	def __exit__(self, etype, evalue, traceback):
+	def __exit__(self, etype, evalue, trcbck):
 		"""Contex exit
 
 		etype  - exception type
 		evalue  - exception value
-		traceback  - exception traceback
+		trcbck  - exception trcbck
 		"""
 		self.__terminate()
 		# Note: the exception (if any) is propagated if True is not returned here
@@ -1493,24 +1495,24 @@ class ExecPool(object):
 		header = True  # Show header for the initial output
 		for fji in self.failures:
 			data = infodata(fji)
-			# Note: data should not be None here 
+			# Note: data should not be None here
 			# if data is None:
 			# 	continue
 			if fji.task is None:
 				if header:
 					print('\nFAILED jobs not assigned to any tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-					print(indent, colsep.join([tblfmt(v) for v in JobInfo.iterprop()]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+					print(indent, colsep.join([tblfmt(v) for v in JobInfo.iterprop()]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)  #pylint: disable=E1101
 					header = False
 				print(indent, colsep.join([tblfmt(v) for v in data]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 			else:
 				tie = tinfe0.get(fji.task)
 				if tie is None:
-					tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=[TaskInfo.iterprop()
-						, infodata(TaskInfo(fji.task))], members=[JobInfo.iterprop()]))
+					tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=[TaskInfo.iterprop()  #pylint: disable=E1101
+						, infodata(TaskInfo(fji.task))], members=[JobInfo.iterprop()]))  #pylint: disable=E1101
 				tie.members.append(data)
 		if not tinfe0:
 			return
-		
+
 		print('\nFAILED tasks with their jobs:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		# Iteratively form the hierarchy of failed tasks from the bottom level
 		ties = dict()
@@ -1518,12 +1520,12 @@ class ExecPool(object):
 			if task.task is None:
 				ties[task] = tie
 			else:
-				while(task.task is not None):
+				while task.task is not None:
 					task = task.task
 					if ties.get(task) is None:
-						# Note: data should not be None here 
+						# Note: data should not be None here
 						data = infodata(TaskInfo(task))
-						tie = TaskInfoExt(props=[TaskInfo.iterprop(), data], members=[tie])
+						tie = TaskInfoExt(props=[TaskInfo.iterprop(), data], members=[tie])  #pylint: disable=E1101
 						ties[task] = tie
 					else:
 						newtie = ties[task]
@@ -1564,7 +1566,7 @@ class ExecPool(object):
 			) and (not self._jobs or self._jobs[0].wkslim >= self._jobs[-1].wkslim)), (
 			'A terminated non-rescheduled job is expected that doest not violate constraints.'
 			' "{}" terminates: {}, started: {} jwkslim: {} vs {} pwkslim, pripority: {}, {} workers, {} jobs: {};'
-			'\nmem: {:.4f} / {:.4f} Gb, exectime: {:.4f} ({} .. {}) / {:.4f} sec'.format(
+			'\nmem: {:.4f} / {:.4f} GB, exectime: {:.4f} ({} .. {}) / {:.4f} sec'.format(
 			job.name, job.terminates, job.tstart is not None, job.wkslim, self._wkslim
 			, priority, wksnum, len(self._jobs)
 			, ', '.join(['#{} {}: {}'.format(ij, j.name, j.wkslim) for ij, j in enumerate(self._jobs)])
@@ -1715,7 +1717,7 @@ class ExecPool(object):
 			if _DEBUG_TRACE >= 2 and (fstdout or fstderr):
 				print('"{}" output channels:\n\tstdout: {}\n\tstderr: {}'.format(job.name
 					, job.stdout, job.stderr))  # Note: write to log, not to the stderr
-			if(job.args):
+			if job.args:
 				# Consider CPU affinity
 				# Note: the exception is raised by .index() if the _affinity table is corrupted (doesn't have the free entry)
 				iafn = -1 if not self._affinity or job._omitafn else self._affinity.index(None)  # Index in the affinity table to bind process to the CPU/core
@@ -1813,7 +1815,7 @@ class ExecPool(object):
 			except ValueError:
 				print('WARNING, affinity cleanup is requested to the job "{}" without the activated affinity'
 					.format(job.name), file=sys.stderr)
-				pass  # Do nothing if the affinity was not set for this process
+				# Do nothing if the affinity is not set for this process
 		if graceful is None:
 			graceful = not job.terminates and job.proc is not None and not job.proc.returncode
 		job.complete(graceful)
@@ -1826,7 +1828,7 @@ class ExecPool(object):
 	def __reviseWorkers(self):
 		"""Rewise the workers
 
-		Check for the comleted jobs and their timeouts, update corresponding
+		Check for the completed jobs and their timeouts, update corresponding
 		workers and start the nonstarted jobs if possible.
 		Apply chained termination and rescheduling on tiomeout and memory
 		constraints violation if _CHAINED_CONSTRAINTS.
@@ -1856,7 +1858,7 @@ class ExecPool(object):
 					if job.mem < self.memlimit:
 						memall += job.mem  # Consider mem consumption of past runs if any
 						#if _DEBUG_TRACE >= 3:
-						#	print('  "{}" consumes {:.4f} Gb, memall: {:.4f} Gb'.format(job.name, job.mem, memall), file=sys.stderr)
+						#	print('  "{}" consumes {:.4f} GB, memall: {:.4f} GB'.format(job.name, job.mem, memall), file=sys.stderr)
 						continue
 					# The memory limits violating worker will be terminated
 				else:
@@ -1889,7 +1891,7 @@ class ExecPool(object):
 				completed.add(job)
 				if _DEBUG_TRACE:  # Note: anyway completing terminated jobs are traced
 					print('WARNING, "{}" #{} is killed because of the {} violation'
-						' consuming {:.4f} Gb with timeout of {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
+						' consuming {:.4f} GB with timeout of {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 						.format(job.name, job.proc.pid
 						, 'timeout' if job.timeout and exectime >= job.timeout else (
 							('' if job.mem >= self.memlimit else 'group ') + 'memory limit')
@@ -1986,7 +1988,7 @@ class ExecPool(object):
 
 		# Check memory limitation fulfilling for all remained processes
 		if self.memlimit:
-			memfree = inGigabytes(psutil.virtual_memory().available)  # Amount of free RAM (RSS) in Gb; skip it if memlimit is not requested
+			memfree = inGigabytes(psutil.virtual_memory().available)  # Amount of free RAM (RSS) in GB; skip it if memlimit is not requested
 		if self.memlimit and (memall >= self.memlimit or memfree <= self._MEMLOW):  # Jobs should use less memory than the limit
 			# Terminate the largest workers and reschedule jobs or reduce the workers number
 			wksnum = len(self._workers)
@@ -1997,7 +1999,9 @@ class ExecPool(object):
 			hws = []  # Heavy workers
 			# ATTENTION: at least one worker should be remained after the reduction
 			# Note: at least one worker shold be remained
-			while memov >= 0 and len(self._workers) - len(pjobs) > 1:  # Overuse should negative, i.e. underuse to starr any another job, 0 in practice is insufficient of the subsequent execution
+			# Note: memory overuse should be negative, i.e. underuse to start any another job,
+			# 0 in practice is insufficient of the subsequent execution
+			while memov >= 0 and len(self._workers) - len(pjobs) > 1:  
 				# Reinitialize the heaviest remained jobs and continue
 				for job in self._workers:
 					if not job.terminates and job not in pjobs:
@@ -2046,7 +2050,7 @@ class ExecPool(object):
 				#cterminated = True
 				continue
 			print('WARNING, "{}" #{} is terminated because of the {} violation'
-				', chtermtime: {}, consumes {:.4f} / {:.4f} Gb, timeout {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
+				', chtermtime: {}, consumes {:.4f} / {:.4f} GB, timeout {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 				.format(job.name, job.proc.pid
 				, 'timeout' if job.timeout and exectime >= job.timeout else (
 					('' if job.mem >= self.memlimit else 'group ') + 'memory limit')
@@ -2069,7 +2073,7 @@ class ExecPool(object):
 				# Note: if the job was terminated by timeout then memory limit was not met
 				# Note: earlier executed job might not fit into the RAM now because of the inreasing mem consumption by the workers
 				#if _DEBUG_TRACE >= 3:
-				#	print('  "{}" is being rescheduled, workers: {} / {}, estimated mem: {:.4f} / {:.4f} Gb'
+				#	print('  "{}" is being rescheduled, workers: {} / {}, estimated mem: {:.4f} / {:.4f} GB'
 				#		.format(job.name, len(self._workers), self._wkslim, memall + job.mem, self.memlimit)
 				#		, file=sys.stderr)
 				#assert not self.memlimit or memall + job.mem * self._JMEMTRR < self.memlimit, (
@@ -2095,7 +2099,7 @@ class ExecPool(object):
 		if not terminating:  # Start only after the terminated jobs terminated and released the memory
 			while self._jobs and len(self._workers) < self._wkslim:
 				#if _DEBUG_TRACE >= 3:
-				#	print('  "{}" (expected totmem: {:.4f} / {:.4f} Gb) is being resheduled, {} nonstarted jobs: {}'
+				#	print('  "{}" (expected totmem: {:.4f} / {:.4f} GB) is being resheduled, {} nonstarted jobs: {}'
 				#		.format(self._jobs[0].name, 0 if not self.memlimit else memall + job.mem, self.memlimit
 				#		, len(self._jobs), ', '.join([j.name for j in self._jobs])), file=sys.stderr)
 				job = self._jobs.popleft()
@@ -2122,7 +2126,7 @@ class ExecPool(object):
 
 	def clear(self):
 		"""Clear execution pool to reuse it
-		
+
 		Raises:
 			ValueError: attempt to clear a terminating execution pool
 		"""
@@ -2138,7 +2142,7 @@ class ExecPool(object):
 			raise ValueError('Terminating dirty execution pool can not be resetted:'
 				'  alive: {}, {} workers, {} jobs'.format(self.alive
 				, len(self._workers), len(self._jobs)))
-		
+
 
 	def execute(self, job, concur=True):
 		"""Schecule the job for the execution
@@ -2176,7 +2180,7 @@ class ExecPool(object):
 				memall = 0.
 				for wj in self._workers:
 					memall += wj.mem
-				memfree = inGigabytes(psutil.virtual_memory().available)  # Amount of free RAM (RSS) in Gb; skip it if memlimit is not requested
+				memfree = inGigabytes(psutil.virtual_memory().available)  # Amount of free RAM (RSS) in GB; skip it if memlimit is not requested
 				jmemx = (job.mem if job.mem else memall / (1 + len(self._workers))) * self._JMEMTRR  # Extended estimated job mem
 			# Schedule the job, postpone it if already nonstarted jobs exist or there are no any free workers
 			if self._jobs or len(self._workers) >= self._wkslim or (
@@ -2249,7 +2253,7 @@ class ExecPool(object):
 
 
 if __name__ == '__main__':
-	"""Doc tests execution"""
+	# Doc tests execution
 	import doctest
 	#doctest.testmod()  # Detailed tests output
 	flags = doctest.REPORT_NDIFF | doctest.REPORT_ONLY_FIRST_FAILURE | doctest.IGNORE_EXCEPTION_DETAIL

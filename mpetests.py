@@ -10,9 +10,10 @@
 """
 
 from __future__ import print_function, division  # Required for stderr output, must be the first import
+import sys, time, subprocess, unittest
 from sys import executable as PYEXEC  # Full path to the current Python interpreter
 # import signal  # Intercept kill signals
-# import atexit  # At exit termination handleing
+# import atexit  # At exit termination handling
 # from functools import partial  # Partially predefined functions (callbacks)
 try:
 	from unittest import mock
@@ -21,9 +22,9 @@ except ImportError:
 		# Note: mock is not available under default Python2 / pypy installation
 		import mock
 	except ImportError:
-		mock = None  # Skip unittests operating with the mock if it is not installed
-from mpepool import AffinityMask, ExecPool, Job, Task, _CHAINED_CONSTRAINTS, _LIMIT_WORKERS_RAM, _RAM_SIZE, inBytes, inGigabytes
-import sys, time, subprocess, unittest
+		mock = None  # Skip unit tests operating with the mock if it is not installed
+from mpepool import (AffinityMask, ExecPool, Job, Task, _CHAINED_CONSTRAINTS
+	, _LIMIT_WORKERS_RAM, _RAM_SIZE, inBytes, inGigabytes)
 # Consider compatibility with Python before v3.3
 if not hasattr(time, 'perf_counter'):
 	time.perf_counter = time.time
@@ -33,7 +34,7 @@ except ImportError as err:
 	print('ERROR, psutil import failed: ', err, file=sys.stderr)
 
 
-# Accessory Funcitons
+# Accessory Functions
 def allocDelayProg(size, duration):
 	"""Python program as str that allocates object of the specified size
 	in Gigabytes and then waits for the specified time
@@ -86,8 +87,8 @@ class TestExecPool(unittest.TestCase):
 			# print('WARNING{}, execpool is terminating by the signal {} ({})'
 			# 	.format('' if not cls._execpool.name else ' ' + cls._execpool.name, signal
 			# 	, cls._signals.get(signal, '-')))  # Note: this is a trace log record
-			del cls._execpool  # Destructors are caled later
-			# Define _execpool to avoid unnessary trash in the error log, which might
+			del cls._execpool  # Destructors are called later
+			# Define _execpool to avoid unnecessary trash in the error log, which might
 			# be caused by the attempt of subsequent deletion on destruction
 			cls._execpool = None  # Note: otherwise _execpool becomes undefined
 		if terminate:
@@ -103,7 +104,7 @@ class TestExecPool(unittest.TestCase):
 		# cls._signals = {sv: sn for sn, sv in signal.__dict__.items()
 		# 	if sn.startswith('SIG') and not sn.startswith('SIG_')}
 
-		# # Substitute class parameter to terminationHandler 
+		# # Substitute class parameter to terminationHandler
 		# termHandler = partial(cls.terminationHandler, cls)
 		# # Set handlers of external signals
 		# signal.signal(signal.SIGTERM, termHandler)
@@ -119,8 +120,8 @@ class TestExecPool(unittest.TestCase):
 	@classmethod
 	def tearDownClass(cls):
 		if cls._execpool:
-			del cls._execpool  # Destructors are caled later
-			# Define _execpool to avoid unnessary trash in the error log, which might
+			del cls._execpool  # Destructors are called later
+			# Define _execpool to avoid unnecessary trash in the error log, which might
 			# be caused by the attempt of subsequent deletion on destruction
 			cls._execpool = None  # Note: otherwise _execpool becomes undefined
 
@@ -151,7 +152,7 @@ class TestExecPool(unittest.TestCase):
 		# Verify successful completion of the execution pool
 		self.assertTrue(self._execpool.join())
 		etime = time.perf_counter() - tstart  # Execution time
-		self.assertFalse(self._execpool._workers)  # Workers shuold be empty
+		self.assertFalse(self._execpool._workers)  # Workers should be empty
 		# Verify termination time
 		self.assertLess(etime, worktime)
 		self.assertGreaterEqual(etime, timeout)
@@ -180,7 +181,7 @@ class TestExecPool(unittest.TestCase):
 			job.params['count'] += 1
 
 		jrx = Job('ep_timeout_jrx', args=('sleep', str(worktime)), timeout=etimeout / 2, restartonto=True
-			, params=runsCount, onstart=updateruns)  # Reexecuting job
+			, params=runsCount, onstart=updateruns)  # Re-executing job
 		self._execpool.execute(jrx)
 		# Verify termination of the execution pool
 		self.assertFalse(self._execpool.join(etimeout))
@@ -260,11 +261,11 @@ class TestExecPool(unittest.TestCase):
 		worktime = _TEST_LATENCY * 5  # Note: should be larger than 3*latency; 400 ms can be insufficient for the Python 3
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
-		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3  # Execution pool timeout; Note: *3 because nonstarted jobs exist here
+		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3  # Execution pool timeout; Note: *3 because non-started jobs exist here
 		assert _TEST_LATENCY * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
-		# Note: we need another execution pool to set memlimit (10 Mb) there
-		epoolMem = 0.2  # Execution pool mem limit, Gb
+		# Note: we need another execution pool to set memlimit (10 MB) there
+		epoolMem = 0.2  # Execution pool mem limit, GB
 		msmall = 256  # Small amount of memory for a job, bytes
 		# Start not more than 3 simultaneous workers
 		with ExecPool(max(_WPROCSMAX, 3), latency=_TEST_LATENCY, memlimit=epoolMem) as xpool:
@@ -275,7 +276,7 @@ class TestExecPool(unittest.TestCase):
 			jmb = Job('jmem_badalloc', args=(PYEXEC, '-c', allocDelayProg(inBytes(_RAM_SIZE * 2), worktime))
 				, category='cat1', size=9, timeout=timeout)
 
-			jmvsize = 5  # Size of the task violating memory contraints
+			jmvsize = 5  # Size of the task violating memory constraints
 			jmv = Job('jmem_violate', args=(PYEXEC, '-c', allocDelayProg(inBytes(epoolMem * 2), worktime))
 				, category='cat2', size=jmvsize, timeout=timeout)
 			jmsDvs = Job('jmem_small_v1', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
@@ -306,18 +307,25 @@ class TestExecPool(unittest.TestCase):
 
 			# Verify timings
 			self.assertLess(etime, etimeout)
-			self.assertGreaterEqual(jmsDb.tstop - jmsDb.tstart, worktime)  # Note: internal errors in the external processes should not effect related jobs
-			self.assertTrue(jmb.proc.returncode)  # bad_alloc causes non zero termintion code
-			self.assertLess(jmb.tstop - jmb.tstart, worktime)  # Early termination cased by the bad_alloc (internal error in the external process)
+			# Note: internal errors in the external processes should not effect related jobs
+			self.assertGreaterEqual(jmsDb.tstop - jmsDb.tstart, worktime)
+			self.assertTrue(jmb.proc.returncode)  # bad_alloc causes non zero termination code
+			# Early termination cased by the bad_alloc (internal error in the external process)
+			self.assertLess(jmb.tstop - jmb.tstart, worktime)
 
 			self.assertLess(jmv.tstop - jmv.tstart, worktime)  # Early termination by the memory constraints violation
-			self.assertGreaterEqual(jmsDvs.tstop - jmsDvs.tstart, worktime)  # Smaller size of the ralted chained job to the vioated origin should not cause termination
-			self.assertGreaterEqual(jms1.tstop - jms1.tstart, worktime)  # Independent job should have graceful completion
-			self.assertFalse(jms1.proc.returncode)  # Errcode code is 0 on the gracefull completion
+			# Smaller size of the related chained job to the violated origin should not cause termination
+			self.assertGreaterEqual(jmsDvs.tstop - jmsDvs.tstart, worktime)
+			# Independent job should have graceful completion
+			self.assertGreaterEqual(jms1.tstop - jms1.tstart, worktime)
+			self.assertFalse(jms1.proc.returncode)  # Errcode code is 0 on the graceful completion
 			if _CHAINED_CONSTRAINTS:
-				self.assertIsNone(jmsDvl1.tstart)  # Postponed job should be terminated before being started by the chained relation on the memory-violating origin
-				self.assertIsNone(jmsDvl2.tstart)  # Postponed job should be terminated before being started by the chained relation on the memory-violating origin
-			#self.assertLess(jmsDvl1.tstop - jmsDvl1.tstart, worktime)  # Early termination by the chained retalion to the mem violated origin
+				# Postponed job should be terminated before being started by the chained
+				# relation on the memory-violating origin
+				self.assertIsNone(jmsDvl1.tstart)
+				self.assertIsNone(jmsDvl2.tstart)
+			# Early termination by the chained relation to the mem violated origin
+			#self.assertLess(jmsDvl1.tstop - jmsDvl1.tstart, worktime)
 			self.assertGreaterEqual(jms2.tstop - jms2.tstart, worktime)  # Independent job should have graceful completion
 
 
@@ -327,18 +335,18 @@ class TestExecPool(unittest.TestCase):
 
 		Reduction of the number of worker processes when their total memory consumption
 		exceeds the dedicated limit and there are
-			1) either no any nonstarted jobs
-			2) or the nonstarted jobs were already rescheduled by the related worker (absence of chained constraints)
+			1) either no any non-started jobs
+			2) or the non-started jobs were already rescheduled by the related worker (absence of chained constraints)
 		"""
 		worktime = _TEST_LATENCY * 10  # Note: should be larger than 3*latency
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
-		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3  # Execution pool timeout; Note: *3 because nonstarted jobs exist here nad postponed twice
+		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3  # Execution pool timeout; Note: *3 because non-started jobs exist here and postponed twice
 		assert _TEST_LATENCY * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
-		# Note: we need another execution pool to set memlimit (10 Mb) there
-		epoolMem = 0.15  # Execution pool mem limit, Gb
-		msmall = inBytes(0.025)  # Small amount of memory for a job; Note: actual Python app consumes ~51 Mb for the allocated ~25 Mb
+		# Note: we need another execution pool to set memlimit (10 MB) there
+		epoolMem = 0.15  # Execution pool mem limit, GB
+		msmall = inBytes(0.025)  # Small amount of memory for a job; Note: actual Python app consumes ~51 MB for the allocated ~25 MB
 		# Start not more than 3 simultaneous workers
 		with ExecPool(max(_WPROCSMAX, 3), latency=_TEST_LATENCY, memlimit=epoolMem) as xpool:
 			tstart = time.perf_counter()
@@ -365,7 +373,7 @@ class TestExecPool(unittest.TestCase):
 			# All jobs should be completed
 			etime = time.perf_counter() - tstart  # Execution time
 
-			# Verify timings, gracefull copletion of all jobs except the last one
+			# Verify timings, graceful completion of all jobs except the last one
 			self.assertLess(etime, etimeout)
 			self.assertGreaterEqual(jgms1.tstop - jgms1.tstart, worktime)
 			self.assertFalse(jgms1.proc.returncode)
@@ -377,7 +385,7 @@ class TestExecPool(unittest.TestCase):
 			self.assertFalse(jgmsp1.proc.returncode)
 			self.assertLess(jgmsp2.tstop - jgmsp2.tstart, worktime)
 			self.assertTrue(jgmsp2.proc.returncode)
-			# Check the last comleted job
+			# Check the last completed job
 			self.assertTrue(jgms3.tstop <= tstart + etime)
 
 			# Verify handlers calls
@@ -393,7 +401,7 @@ class TestExecPool(unittest.TestCase):
 	def test_jobMemlimGroupChained(self):
 		"""Verify memory violations caused by group of workers having chained jobs
 		Rescheduling of the worker processes when their total memory consumption
-		exceeds the dedicated limit and there are some nonstarted jobs of smaller
+		exceeds the dedicated limit and there are some non-started jobs of smaller
 		size and the same category that
 			1) were not rescheduled by the non-heavier worker.
 			2) were rescheduled by the non-heavier worker.
@@ -402,12 +410,12 @@ class TestExecPool(unittest.TestCase):
 		worktime = _TEST_LATENCY * 10  # Note: should be larger than 3*latency
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
-		etimeout = (max(1, _TEST_LATENCY) + timeout) * 4  # Execution pool timeout; Note: *3 because nonstarted jobs exist here nad postponed twice
+		etimeout = (max(1, _TEST_LATENCY) + timeout) * 4  # Execution pool timeout; Note: *3 because non-started jobs exist here and postponed twice
 		assert _TEST_LATENCY * 3 < worktime/2 and worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
-		# Note: we need another execution pool to set memlimit (10 Mb) there
-		epoolMem = 0.15  # Execution pool mem limit, Gb
-		msmall = inBytes(0.025)  # Small amount of memory for a job; Note: actual Python app consumes ~51 Mb for the allocated ~25 Mb
+		# Note: we need another execution pool to set memlimit (10 MB) there
+		epoolMem = 0.15  # Execution pool mem limit, GB
+		msmall = inBytes(0.025)  # Small amount of memory for a job; Note: actual Python app consumes ~51 MB for the allocated ~25 MB
 		# Start not more than 3 simultaneous workers
 		with ExecPool(max(_WPROCSMAX, 4), latency=_TEST_LATENCY, memlimit=epoolMem) as xpool:
 			tstart = time.perf_counter()
@@ -438,7 +446,7 @@ class TestExecPool(unittest.TestCase):
 			self.assertTrue(xpool.join(etimeout))
 			etime = time.perf_counter() - tstart  # Execution time
 
-			# Verify timings, gracefull copletion of all jobs except the last one
+			# Verify timings, graceful completion of all jobs except the last one
 			self.assertLess(etime, etimeout)
 			self.assertGreaterEqual(jgms1.tstop - jgms1.tstart, worktime)
 			self.assertFalse(jgms1.proc.returncode)
@@ -452,9 +460,9 @@ class TestExecPool(unittest.TestCase):
 			self.assertLessEqual(jgmsp2.tstop - jgmsp2.tstart, worktime)
 			self.assertTrue(jgmsp2.proc.returncode)
 			self.assertGreaterEqual(jgmsp3.tstop - jgmsp3.tstart, worktime)  # Execution time a bit exceeds te timeout
-			# Note: jgmsp3 may complete gracefully or may be terminated by timeout depending on the wrkers revision time.
+			# Note: jgmsp3 may complete gracefully or may be terminated by timeout depending on the workers revision time.
 			# Most likely the completion is graceful
-			## Check the last comleted job
+			## Check the last completed job
 			#self.assertTrue(jgms3.tstop < jgmsp1.tstop < tstart + etime)  # Note: heavier job is rescheduled after the more lightweight one
 
 			# Verify handlers calls
@@ -495,9 +503,9 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 
 	@unittest.skip('Used to understand what is included into the reported process memory by "psutil"')
 	def test_psutilPTMem(self):
-		"""Test psutil process tree memory consumpotion"""
+		"""Test psutil process tree memory consumption"""
 		amem = 0.02  # Direct allocating memory in the process
-		camem = 0.07  # Allocatinf memory in the child process
+		camem = 0.07  # Allocating memory in the child process
 		duration = 0.2  # Duration in sec
 		proc = subprocess.Popen(args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
 			allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration))))
@@ -508,10 +516,10 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 		except psutil.Error as err:
 			print('WARNING, psutil.Process() failed: ', err, file=sys.stderr)
 			return
-		mem = inGigabytes(up.memory_info().vms) * 1000  # Mb; Virtual Memory Size
-		rmem = inGigabytes(up.memory_info().rss) * 1000  # Mb; Resident Set Size
-		umem = inGigabytes(up.memory_full_info().vms) * 1000  # Mb; Unique Set Size
-		urmem = inGigabytes(up.memory_full_info().rss) * 1000  # Mb; Unique Set Size
+		mem = inGigabytes(up.memory_info().vms) * 1000  # MB; Virtual Memory Size
+		rmem = inGigabytes(up.memory_info().rss) * 1000  # MB; Resident Set Size
+		umem = inGigabytes(up.memory_full_info().vms) * 1000  # MB; Unique Set Size
+		urmem = inGigabytes(up.memory_full_info().rss) * 1000  # MB; Unique Set Size
 
 		acmem = mem
 		armem = rmem
@@ -525,11 +533,11 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 		cnum = 0  # The number of child processes
 		for ucp in up.children(recursive=True):
 			cnum += 1
-			cmem = inGigabytes(ucp.memory_info().vms) * 1000  # Mb; Virtual Memory Size
-			crmem = inGigabytes(ucp.memory_info().rss) * 1000  # Mb; Resident Set Size
-			cumem = inGigabytes(ucp.memory_full_info().vms) * 1000  # Mb; Unique Set Size
-			curmem = inGigabytes(ucp.memory_full_info().rss) * 1000  # Mb; Unique Set Size
-			print('Memory in Mb of "{pname}" #{pid}: (mem: {mem:.2f}, rmem: {rmem:.2f}, umem: {umem:.2f}, urmem: {urmem:.2f})'
+			cmem = inGigabytes(ucp.memory_info().vms) * 1000  # MB; Virtual Memory Size
+			crmem = inGigabytes(ucp.memory_info().rss) * 1000  # MB; Resident Set Size
+			cumem = inGigabytes(ucp.memory_full_info().vms) * 1000  # MB; Unique Set Size
+			curmem = inGigabytes(ucp.memory_full_info().rss) * 1000  # MB; Unique Set Size
+			print('Memory in MB of "{pname}" #{pid}: (mem: {mem:.2f}, rmem: {rmem:.2f}, umem: {umem:.2f}, urmem: {urmem:.2f})'
 				.format(pname=ucp.name(), pid=ucp.pid, mem=cmem, rmem=crmem, umem=cumem, urmem=curmem))
 			# Identify consumption by the heaviest child (by absolute mem)
 			if cxmem < cmem:
@@ -543,11 +551,11 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 			aumem += cumem
 			aurmem += curmem
 
-		amem *= 1000  # Mb
-		camem *= 1000  # Mb
+		amem *= 1000  # MB
+		camem *= 1000  # MB
 		proc.wait()  # Wait for the process termination
 
-		print('Memory in Mb:\n  allocated for the proc #{pid}: {amem}, child: {camem}, total: {tamem}'
+		print('Memory in MB:\n  allocated for the proc #{pid}: {amem}, child: {camem}, total: {tamem}'
 			'\n  psutil proc #{pid} (mem: {mem:.2f}, rmem: {rmem:.2f}, umem: {umem:.2f}, urmem: {urmem:.2f})'
 			'\n  psutil proc #{pid} tree ({cnum} subprocs) heaviest child #{cxpid}'
 			' (mem: {cxmem:.2f}, rmem: {cxrmem:.2f}, umem: {cxumem:.2f}, urmem: {cxurmem:.2f})'
@@ -565,13 +573,13 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 		worktime = _TEST_LATENCY * 6  # Note: should be larger than 3*latency
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
-		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3  # Execution pool timeout; Note: *3 because nonstarted jobs exist here nad postponed twice
+		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3  # Execution pool timeout; Note: *3 because non-started jobs exist here and postponed twice
 		assert _TEST_LATENCY * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
 		# Start not more than 3 simultaneous workers
 		with ExecPool(max(_WPROCSMAX, 3), latency=_TEST_LATENCY) as xpool:
 			amem = 0.02  # Direct allocating memory in the process
-			camem = 0.07  # Allocatinf memory in the child process
+			camem = 0.07  # Allocating memory in the child process
 			duration = worktime / 3  # Duration in sec
 			job = Job('jmem_proc', args=(PYEXEC, '-c', TestProcMemTree.allocAndSpawnProg(
 				allocDelayProg(inBytes(amem), duration), allocDelayProg(inBytes(camem), duration)))
@@ -598,7 +606,7 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 			xmem = jobx._updateMem()
 			tmem = jobtr._updateMem()
 			# Verify memory consumption
-			print('Memory consumption in Mb,  proc_mem: {pmem:.3g}, max_procInTree_mem: {xmem:.3g}, procTree_mem: {tmem:.3g}'
+			print('Memory consumption in MB,  proc_mem: {pmem:.3g}, max_procInTree_mem: {xmem:.3g}, procTree_mem: {tmem:.3g}'
 				.format(pmem=pmem*1000, xmem=xmem*1000, tmem=tmem*1000))
 			self.assertTrue(pmem < xmem < tmem)
 			# Verify exec pool completion before the timeout
@@ -614,7 +622,7 @@ class TestTasks(unittest.TestCase):
 	@unittest.skipUnless(mock is not None, 'Requires defined mock')
 	def test_taskDone(self):
 		with ExecPool(2, latency=_TEST_LATENCY) as xpool:
-			# Prepare jobs task with the postprocessing
+			# Prepare jobs task with the post-processing
 			worktime = max(0.5, _TEST_LATENCY * 3)
 			task = Task('TimeoutTask', onstart=mock.MagicMock(), ondone=mock.MagicMock(), params=0)
 			job1 = Job('j1', args=('sleep', str(worktime)), task=task, onstart=mock.MagicMock(), ondone=mock.MagicMock())
@@ -634,7 +642,7 @@ class TestTasks(unittest.TestCase):
 	@unittest.skipUnless(mock is not None, 'Requires defined mock')
 	def test_taskTimeout(self):
 		with ExecPool(2, latency=_TEST_LATENCY) as xpool:
-			# Prepare jobs task with the postprocessing
+			# Prepare jobs task with the post-processing
 			worktime = max(0.5, _TEST_LATENCY * 3)
 			task = Task('TimeoutTask', onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock())
 			timelong = (worktime + _TEST_LATENCY) * 3  # Note: should be larger than 3*latency
@@ -660,7 +668,7 @@ class TestTasks(unittest.TestCase):
 	def test_subtasksTimeout(self):
 		# Note: it's OK if this test fails in case the computer has less than 3 CPU cores
 		with ExecPool(3, latency=_TEST_LATENCY) as xpool:
-			# Prepare jobs task with the postprocessing
+			# Prepare jobs task with the post-processing
 			worktime = max(0.5, _TEST_LATENCY * 3)
 			t1 = Task('Task1', onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock())
 			timelong = (worktime + _TEST_LATENCY) * 3  # Note: should be larger than 3*latency
@@ -723,8 +731,8 @@ class TestWebUI(unittest.TestCase):
 	@classmethod
 	def tearDownClass(cls):
 		if cls._execpool:
-			del cls._execpool  # Destructors are caled later
-			# Define _execpool to avoid unnessary trash in the error log, which might
+			del cls._execpool  # Destructors are called later
+			# Define _execpool to avoid unnecessary trash in the error log, which might
 			# be caused by the attempt of subsequent deletion on destruction
 			cls._execpool = None  # Note: otherwise _execpool becomes undefined
 

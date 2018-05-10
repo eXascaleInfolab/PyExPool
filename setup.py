@@ -24,12 +24,12 @@ setup(
 	' separate library. Additionally, an optional minimalistic Web interface is'
 	' provided in the separate file to inspect the load balancer and execution pool.'
 	' Typically, PyExPool is used as an application framework for benchmarking or'
-	' heavy-loaded multi-process execution activities on consrained computational'
+	' heavy-loaded multi-process execution activities on constrained computational'
 	' resources.'
 	'\n\n'
 	'See details on the [PyExPool page](https://github.com/eXascaleInfolab/PyExPool)'
-	' and star the project if you like it! For any futher assistance you can drop me'
-	' a email or write [me on Linkein](https://linkedin.com/in/artemvl).'
+	' and star the project if you like it! For any further assistance you can drop me'
+	' a email or write [me on Linkedin](https://linkedin.com/in/artemvl).'
 	),
 	long_description_content_type='text/markdown',
 	url='https://github.com/eXascaleInfolab/PyExPool',
@@ -78,7 +78,7 @@ setup(
 		'Programming Language :: Python :: 3.5',
 		'Programming Language :: Python :: 3.6',
 		'Programming Language :: Python :: 3.7',
-		
+
 		'Programming Language :: Python :: Implementation :: CPython',
 		'Programming Language :: Python :: Implementation :: PyPy',
 

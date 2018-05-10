@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 :Description:  Minimalistic Web User Interface for the Multiprocess Execution Pool.
-    The functionality includes only fetching of the specified atrifutes of the
+    The functionality includes only fetching of the specified attributes of the
     scheduled and executing Jobs in the specified format (HTML table / JSON / TXT)
     for the profiling and debugging.
 
@@ -11,7 +11,7 @@
 :Date: 2018-04
 """
 from __future__ import print_function, division  # Required for stderr output, must be the first import
-# Extrenal API (exporting functions)
+# External API (exporting functions)
 __all__ = ['WebUiApp', 'UiCmdId', 'UiResOpt', 'UiResCol', 'UiResFltStatus']
 
 
@@ -19,21 +19,21 @@ import bottle
 # from bottle import run as websrvrun
 # import signal  # Required for the correct handling of KeyboardInterrupt: https://docs.python.org/2/library/thread.html
 import threading  # Run bottle in the dedicated thread
-from functools import partial  # Customly parameterized routes
+from functools import partial  # Custom parameterized routes
 # Constants Definitions
 try:
-    from enum import IntEnum
+	from enum import IntEnum
 except ImportError:
 	# As a falback make a manual wrapper with the essential functionality
-	def IntEnum(clsname, names, module=__name__, start=1):
+	def IntEnum(clsname, names, module=__name__, start=1):  #pylint: disable=W0613
 		"""IntEnum-like class builder
-		
+
 		Args:
 			clsname (str): class name
 			names (str|list|dict): enum members, optionally enumerated
 			module (str): class module
 			start (int, optional): stating value for the default enumeration
-		
+
 		Returns:
 			Clsname: IntEnum-like class Clsname
 
@@ -45,13 +45,13 @@ except ImportError:
 		"""
 
 		def valobj(clsname, name, val):
-			"""Build object with the specivied class name, name and value attributes
-			
+			"""Build object with the specified class name, name and value attributes
+
 			Args:
 				clsname (str): name of the embracing class
 				name (str): object name
 				val: the value to be assigned
-			
+
 			Returns:
 				required object of the type '<clsname>.<name>'
 			"""
@@ -59,7 +59,7 @@ except ImportError:
 			return type('.'.join((clsname, name)), (object,), {'name': name, 'value': val})()
 
 		dnames = {}  # Constructing members of the enum-like object
-		if names: 
+		if names:
 			if isinstance(names, str):
 				names = [name.rstrip(',') for name in names.split()]
 			if not isinstance(names, dict) and (not isinstance(names, list) or isinstance(names[0], str)):
@@ -91,15 +91,15 @@ UiResFmt = IntEnum('UiResFmt', 'json htm txt')
 """UI Command: Result columns parameter values for the Jobs listing"""
 UiResCol = IntEnum('UiResCol', 'pid state tstart tstop duration memory task category')
 
-"""UI Command: Result filteration by the job status: executing (worker job), deferred (scheduled ojb)"""
-# Note: 'exec' is a keyword in Python 2 and can't be used as an obect attribute
+"""UI Command: Result filtration by the job status: executing (worker job), deferred (scheduled obj)"""
+# Note: 'exec' is a keyword in Python 2 and can't be used as an object attribute
 UiResFltStatus = IntEnum('UiResFltStatus', 'work defer')
 
 class UiCmd(object):
 	"""UI Command (for the MVC controller)"""
 	def __init__(self, cid, data=dict()):
 		"""UI command
-		
+
 		Args:
 			cid (UiCmdId)  - Command identifier
 			data (dict)  - request (parameters) to the ExecPool on it's call and
@@ -121,19 +121,19 @@ class UiCmd(object):
 
 
 class WebUiApp(threading.Thread):
-	"""WebUI App sarting in the dedicated thread and providing remote interface to inspect ExecPool"""
+	"""WebUI App starting in the dedicated thread and providing remote interface to inspect ExecPool"""
 	def __init__(self, host='localhost', port=8080, name=None, daemon=None, group=None, args=(), kwargs={}):
 		"""WebUI App constructor
 
 		ATTENTION: Once constructed, the WebUI App lives in the dedicated thread until the main program exit.
-		
+
 		Args:
 			uihost (str)  - Web UI host
 			uiport (uint16)  - Web UI port
 			name  - The thread name. By default, a unique name
 				is constructed of the form “Thread-N” where N is a small decimal number.
 			daemon (bool)  - Start the thread in the daemon mode to
-				be automatcally terminated on the main app exit.
+				be automatically terminated on the main app exit.
 			group  - Reserved for future extension
 				when a ThreadGroup class is implemented.
 			args (tuple)  - The argument tuple for the target invocation.
@@ -147,7 +147,7 @@ class WebUiApp(threading.Thread):
         # Initialize web app before starting the thread
 		webuiapp = bottle.default_app()  # The same as bottle.Bottle()
 		mroot = partial(WebUiApp.root, self.cmd)  # Define partial function with the substituted first parameter
-		webuiapp.route('/', callback=mroot, name=UiCmdId.SUMMARY.name)  
+		webuiapp.route('/', callback=mroot, name=UiCmdId.SUMMARY.name)
 		webuiapp.route('/jobs', callback=mroot, name=UiCmdId.LIST_JOBS.name)
 		# TODO, add interfaces to inspect tasks and selected jobs/tasks:
 		# webuiapp.route('/job/<name>', callback=mroot, name=UiCmdId.JOB_INFO.name)
@@ -161,7 +161,7 @@ class WebUiApp(threading.Thread):
 	@bottle.get('/favicon.ico')
 	@staticmethod
 	def favicon():
-		return server_static('/images/favicon.ico')
+		return bottle.server_static('/images/favicon.ico')
 
 
 	@bottle.error(404)
@@ -179,7 +179,7 @@ class WebUiApp(threading.Thread):
 
 		Shows:
 		- execpool name if any
-		- the curent number of workers and the total number of them
+		- the current number of workers and the total number of them
 		- the amount of consuming memory by the workers and the specified memory constraint
 		- duration of the execution
 		- failed jobs, ordered in the historical order by the termination time (tstop):
@@ -187,29 +187,29 @@ class WebUiApp(threading.Thread):
 				pid  - process id
 				tstart  - start time of the job
 				//tstop  - termination time of the job
-				duration  - cuttent execution time
+				duration  - current execution time
 				memory  - consuming memory as specified by Job
 				//memkind  - kind of the reporting memory
 				task  - task name if assigned
 				category  - job category if specified
-			
+
 
 		URL parameters:
 			fmt (UiResFmt values) = {json, htm, txt}  - format of the result
 			cols (UiResCol values):
 				[name  - job name, always present]
 				pid  - process id
-				# state = {'w', 's'}  - execution state (working, shceduled)
-				duration  - cuttent execution time
+				# state = {'w', 's'}  - execution state (working, scheduled)
+				duration  - current execution time
 				memory  - consuming memory as specified by Job
 				task  - task name if assigned
 				category  - job category if specified
-		
+
 		Args:
 			cmd (UiCmd): UI command to be executed
-		
+
 		Returns:
-			Jobs listing for the specified detalizaion in the specified format
+			Jobs listing for the specified detalization in the specified format
 		"""
 		# return 'Root works'
 		with cmd.cond:
@@ -222,7 +222,7 @@ class WebUiApp(threading.Thread):
 			# 3. URL params as MultiDict:
 			# bottle.request.query
 
-			# Parse URL parametrs and form the UI command parameters
+			# Parse URL parameters and form the UI command parameters
 			fmt = UiResFmt.htm
 			qdict = bottle.request.query
 			fmtKey = UiResOpt.fmt.name
