@@ -148,7 +148,7 @@ setup(
 		# 'pyexpool': ['README.md', 'images/*'],
 		# '': ['README.md', 'images/*'],  # ! Include specified files from the current directory
 		# Note: images are relatively heavy
-		'': ['README.md']  # ! Include specified files from the current directory
+		'': ['*.md']  # ! Include specified files from the current directory
 	},
 	# include_package_data=True,  # Deprecated
 

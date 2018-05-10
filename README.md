@@ -102,33 +102,33 @@ _LIMIT_WORKERS_RAM = True
  CHAINED_CONSTRAINTS = True
 
 
-Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
-	, startdelay=0, onstart=None, ondone=None, params=None, category=None, size=0
-	, slowdown=1., omitafn=False, memkind=1, stdout=sys.stdout, stderr=sys.stderr):
+Job(name, workdir=None, args=(), timeout=0, restartonto=False, task=None
+	, startdelay=0., onstart=None, ondone=None, params=None, category=None
+	, size=0, slowdown=1., omitafn=False, memkind=1, stdout=sys.stdout, stderr=sys.stderr):
 	"""Initialize job to be executed
 
 	Job is executed in a separate process via Popen or Process object and is
 	managed by the Process Pool Executor
 
 	Main parameters:
-	name  - job name
+	name: str  - job name
 	workdir  - working directory for the corresponding process, None means the dir of the benchmarking
 	args  - execution arguments including the executable itself for the process
 		NOTE: can be None to make make a stub process and execute the callbacks
 	timeout  - execution timeout in seconds. Default: 0, means infinity
-	ontimeout  - action on timeout:
-		False  - terminate the job. Default
-		True  - restart the job
-	task  - origin task if this job is a part of the task
+	restartonto  - restart the job on timeout, Default: False. Can be used for
+		non-deterministic Jobs like generation of the synthetic networks to regenerate
+		the network on border cases overcoming getting stuck on specific values of the rand variables.
+	task: Task  - origin task if this job is a part of the task
 	startdelay  - delay after the job process starting to execute it for some time,
 		executed in the CONTEXT OF THE CALLER (main process).
 		ATTENTION: should be small (0.1 .. 1 sec)
-	onstart  - callback which is executed on the job starting (before the execution
+	onstart  - a callback, which is executed on the job starting (before the execution
 		started) in the CONTEXT OF THE CALLER (main process) with the single argument,
 		the job. Default: None
 		ATTENTION: must be lightweight
 		NOTE: can be executed a few times if the job is restarted on timeout
-	ondone  - callback which is executed on successful completion of the job in the
+	ondone  - a callback, which is executed on successful completion of the job in the
 		CONTEXT OF THE CALLER (main process) with the single argument, the job. Default: None
 		ATTENTION: must be lightweight
 	params  - additional parameters to be used in callbacks
@@ -141,14 +141,16 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 	Scheduling parameters:
 	omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled
 		and the process has multiple treads
-	category  - classification category, typically semantic context or part of the name;
-		used for _CHAINED_CONSTRAINTS to identify related jobs
+	category  - classification category, typically semantic context or part of the name,
+		used to identify related jobs;
+		requires _CHAINED_CONSTRAINTS
 	size  - expected relative memory complexity of the jobs of the same category,
 		typically it is size of the processing data, >= 0, 0 means undefined size
 		and prevents jobs chaining on constraints violation;
 		used on _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS
 	slowdown  - execution slowdown ratio, >= 0, where (0, 1) - speedup, > 1 - slowdown; 1 by default;
 		used for the accurate timeout estimation of the jobs having the same .category and .size.
+		requires _CHAINED_CONSTRAINTS
 	memkind  - kind of memory to be evaluated (average of virtual and resident memory
 		to not overestimate the instant potential consumption of RAM):
 		0  - mem for the process itself omitting the spawned sub-processes (if any)
@@ -156,26 +158,36 @@ Job(name, workdir=None, args=(), timeout=0, ontimeout=False, task=None
 			(including the origin itself)
 		2  - mem for the whole spawned process tree including the origin process
 
-	Internal attributes, initialized automatically on execution:
-	tstart  - start time is filled automatically on the execution start (before onstart). Default: None
+	Execution parameters, initialized automatically on execution:
+	tstart  - start time, filled automatically on the execution start (before onstart). Default: None
 	tstop  - termination / completion time after ondone
 		NOTE: onstart() and ondone() callbacks execution is included in the job execution time
 	proc  - process of the job, can be used in the ondone() to read it's PIPE
-	mem  - consuming memory (smooth max of average of vms and rss, not just the current value)
+	mem  - consuming memory (smooth max of average of VMS and RSS, not just the current value)
 		or the least expected value inherited from the jobs of the same category having non-smaller size;
 		requires _LIMIT_WORKERS_RAM
+	terminates  - accumulated number of the received termination requests caused by the constraints violation
+		NOTE: > 0 (1 .. ExecPool._KILLDELAY) for the apps terminated by the execution pool
+			(resource constrains violation or ExecPool exception),
+			== 0 for the crashed apps
+	wkslim  - worker processes limit (max number) on the job postponing if any;
+		requires _LIMIT_WORKERS_RAM
+	chtermtime  - chained termination: None - disabled, False - by memory, True - by time;
+		requires _CHAINED_CONSTRAINTS
 	"""
 ```
 
 ### Task
 ```python
-Task(name, onstart=None, ondone=None, onfinish=None, params=None, task=None, latency=2, stdout=sys.stdout, stderr=sys.stderr):
-	"""Initialize task, which is a group of jobs to be executed
+Task(name, timeout=0, onstart=None, ondone=None, onfinish=None, params=None
+	, task=None, latency=1.5, stdout=sys.stdout, stderr=sys.stderr):
+	"""Initialize task, which is a group of subtasks including jobs to be executed
 
-	Task is a managing container for Jobs
+	Task is a managing container for subtasks and Jobs
 
-	name  - task name
-	onstart  - a callback, which is executed on the task start (before the execution
+	name: str  - task name
+	timeout  - execution timeout in seconds. Default: 0, means infinity. ATTENTION: not implemented
+	onstart  - a callback, which is executed on the task start (before the subtasks/jobs execution
 		started) in the CONTEXT OF THE CALLER (main process) with the single argument,
 		the task. Default: None
 		ATTENTION: must be lightweight
@@ -186,17 +198,17 @@ Task(name, onstart=None, ondone=None, onfinish=None, params=None, task=None, lat
 		CONTEXT OF THE CALLER (main process) with the single argument, the task. Default: None
 		ATTENTION: must be lightweight
 	params  - additional parameters to be used in callbacks
-	task: Task  - optional supertask
+	task: Task  - optional owner supertask
 	latency: float  - lock timeout in seconds: None means infinite, <= 0 means non-bocking, > 0 is the actual timeout
 	stdout  - None or file name or PIPE for the buffered output to be APPENDED
 	stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 		ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited
 
-	Internal attributes, initialized automatically on execution:
+	Automatically initialized and updated properties:
 	tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 	tstop  - termination / completion time after ondone.
 	numadded: uint  - the number of direct added subtasks
-	numdone: uint  - the number of completed DIRECT subtasks (each subtask may conatin multiple jobs or subsubtasks)
+	numdone: uint  - the number of completed DIRECT subtasks (each subtask may contain multiple jobs or subsubtasks)
 	numterm: uint  - the number of terminated direct subtask
 	"""
 ```
@@ -210,9 +222,9 @@ AffinityMask(afnstep, first=True, sequential=cpusequential())
 	Typically, CPUs are enumerated across the nodes:
 	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30
 	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31
-	In case the number of hw threads per core is 2 then the physical CPU cores are 1 .. 15:
-	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14	(16,18,20,22,24,26,28,30  - 2nd hw treads)
-	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15	(17,19,21,23,25,27,29,31  - 2nd hw treads)
+	In case the number of HW threads per core is 2 then the physical CPU cores are 1 .. 15:
+	NUMA node0 CPU(s):     0,2,4,6,8,10,12,14	(16,18,20,22,24,26,28,30  - 2nd HW treads)
+	NUMA node1 CPU(s):     1,3,5,7,9,11,13,15	(17,19,21,23,25,27,29,31  - 2nd HW treads)
 	But the enumeration can be also sequential:
 	NUMA node0 CPU(s):     0,(1),2,(3),...
 	...
@@ -227,7 +239,7 @@ AffinityMask(afnstep, first=True, sequential=cpusequential())
 	`$ sudo apt-get install hwloc`
 	See details: http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service
 
-	afnstep  - affinity step, integer if applied, allowed values:
+	afnstep: int  - affinity step, integer if applied, allowed values:
 		1, CORE_THREADS * n,  n E {1, 2, ... CPUS / (NODES * CORE_THREADS)}
 
 		Used to bind worker processes to the logical CPUs to have warm cache and,
@@ -252,7 +264,7 @@ AffinityMask(afnstep, first=True, sequential=cpusequential())
 		False  - crossnodes
 		True  - sequential
 
-		For two hardware threads per a physical CPU core, where secondary hw threads
+		For two hardware threads per a physical CPU core, where secondary HW threads
 		are taken in brackets:
 		Crossnodes enumeration, often used for the server CPUs
 		NUMA node0 CPU(s):     0,2(,4,6)
@@ -268,13 +280,16 @@ AffinityMask(afnstep, first=True, sequential=cpusequential())
 ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., name=None, webuiapp=None)
 	"""Multi-process execution pool of jobs
 
-	wksnum  - number of resident worker processes, >=1. The reasonable value is
-		<= logical CPUs (returned by cpu_count()) = NUMA nodes * node CPUs,
+	A worker in the pool executes only a single job, a new worker is created for
+	each subsequent job.
+
+	wksnum: int  - number of resident worker processes, >=1. The reasonable
+		value <= logical CPUs (returned by cpu_count()) = NUMA nodes * node CPUs,
 		where node CPUs = CPU cores * HW treads per core.
 		The recomended value is max(cpu_count() - 1, 1) to leave one logical
 		CPU for the benchmarking framework and OS applications.
 
-		To guarantee minimal average RAM per a process, for example 2.5 Gb
+		To guarantee minimal average RAM per a process, for example 2.5 GB
 		without _LIMIT_WORKERS_RAM flag (not using psutil for the dynamic
 		control of memory consumption):
 			wksnum = min(cpu_count(), max(ramfracs(2.5), 1))
@@ -302,24 +317,36 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 		Should be reseted to True on resuse after the termination.
 		NOTE: should be reseted to True if the execution pool is reused
 		after the joining or termination.
+	failures: [JobInfo]  - failed (terminated or crashed) jobs with timestamps.
+		NOTE: failures contain both terminated, crashed jobs that jobs completed with non-zero return code
+		excluding the jobs terminated by timeout that have set .restartonto (will be restarted)
+	tasks: set(Task)  - tasks associated with the sheduled jobs
 	"""
 
 	execute(job, concur=True):
 		"""Schedule the job for the execution
 
-		job  - the job to be executed, instance of Job
-		concur  - concurrent execution or wait till the job execution completion
-		  NOTE: concurrent tasks are started at once
-		return  - 0 on successful execution, process return code otherwise
+		job: Job  - the job to be executed, instance of Job
+		concur: bool  - concurrent execution or wait until execution completed
+			 NOTE: concurrent tasks are started at once
+		return int  - 0 on successful execution, process return code otherwise
 		"""
 
 	join(timeout=0):
 		"""Execution cycle
 
-		timeout  - execution timeout in seconds before the workers termination, >= 0.
-			0 means absence of the timeout. The time is measured SINCE the first job
+		timeout: int  - execution timeout in seconds before the workers termination, >= 0.
+			0 means unlimited time. The time is measured SINCE the first job
 			was scheduled UNTIL the completion of all scheduled jobs.
-		return  - True on graceful completion, False on termination by the specified timeout
+		return bool  - True on graceful completion, Flase on termination by the specified
+			constrainets (timeout, memory limit, etc.)
+		"""
+
+	clear():
+		"""Clear execution pool to reuse it
+
+		Raises:
+			ValueError: attempt to clear a terminating execution pool
 		"""
 
 	__del__():
@@ -333,41 +360,43 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 #### WebUiApp
 ```python
 WebUiApp(host='localhost', port=8080, name=None, daemon=None, group=None, args=(), kwargs={})
-	"""WebUI App sarting in the dedicated thread and providing remote interface to inspect ExecPool
+	"""WebUI App starting in the dedicated thread and providing remote interface to inspect ExecPool
 
 	ATTENTION: Once constructed, the WebUI App lives in the dedicated thread until the main program exit.
 
 	Args:
-		uihost (str)  - Web UI host
-		uiport (uint16)  - Web UI port
-		name  - The thread name. By default, a unique name
+		uihost: str  - Web UI host
+		uiport: uint16  - Web UI port
+		name: str  - The thread name. By default, a unique name
 			is constructed of the form “Thread-N” where N is a small decimal number.
-		daemon (bool)  - Start the thread in the daemon mode to
-			be automatcally terminated on the main app exit.
+		daemon: bool  - Start the thread in the daemon mode to
+			be automatically terminated on the main app exit.
 		group  - Reserved for future extension
 			when a ThreadGroup class is implemented.
-		args (tuple)  - The argument tuple for the target invocation.
-		kwargs (dict)  - A dictionary of keyword arguments for the target invocation.
+		args: tuple  - The argument tuple for the target invocation.
+		kwargs: dict  - A dictionary of keyword arguments for the target invocation.
 
 	Internal attributes:
-		cmd (UiCmd)  - UI command to be executed, which includes (reserved) attribute(s) for the invocation result.
+		cmd: UiCmd  - UI command to be executed, which includes (reserved) attribute(s) for the invocation result.
 	"""
 ```
 
 #### UiCmd
 ```python
-UiCmd(cid, params=set(), data=[])
-	"""UI command
+UiCmd(cid, data={})
+	"""UI Command (for the MVC controller)
 
 	Args:
-		cid (UiCmdId)  - Command identifier
-		params (set)  - Command parameters
-		data (list)  - Resulting data
+		cid: UiCmdId  - Command identifier
+		data: dict  - request (parameters) to the ExecPool on it's call and
+			resulting (response) data (or empty dict) afterwards
 
 	Internal attributes:
-		cond (Condition)  - synchronizing condition
+		cond: Condition  - synchronizing condition
 	"""
 ```
+
+See [WebUI queries tutorial](webui.md#webui-queries) for details.
 
 ### Accessory Routines
 ```python

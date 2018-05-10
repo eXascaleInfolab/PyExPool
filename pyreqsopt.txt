@@ -1,7 +1,7 @@
-# Optional Python Modules for PyExPool (pyexpool / mpepool / xplobal / muexpolb)
-# Jobs autobalancing on execution
+# Optional Python Modules for PyExPool (pyexpool / mpepool)
+# Jobs auto-balancing on execution
 psutil>=5.2
-# Future utils for Python2/3 compatibility
+# Future utilities for Python2/3 compatibility
 future>=0.16
 # Enum class for Python2 to be compatible with Python3
 enum34>=1.1

@@ -101,12 +101,12 @@ class UiCmd(object):
 		"""UI command
 
 		Args:
-			cid (UiCmdId)  - Command identifier
-			data (dict)  - request (parameters) to the ExecPool on it's call and
+			cid: UiCmdId  - Command identifier
+			data: dict  - request (parameters) to the ExecPool on it's call and
 				resulting (response) data (or empty dict) afterwards
 
 		Internal attributes:
-			cond (Condition)  - synchronizing condition
+			cond: Condition  - synchronizing condition
 		"""
 		# params (dict)  - Command parameters, params={};   and isinstance(params, dict)
 		#dshape (set(str), optional): Defaults to None. Expected data shape (columns of the returning table)
@@ -128,19 +128,19 @@ class WebUiApp(threading.Thread):
 		ATTENTION: Once constructed, the WebUI App lives in the dedicated thread until the main program exit.
 
 		Args:
-			uihost (str)  - Web UI host
-			uiport (uint16)  - Web UI port
-			name  - The thread name. By default, a unique name
+			uihost: str  - Web UI host
+			uiport: uint16  - Web UI port
+			name: str  - The thread name. By default, a unique name
 				is constructed of the form “Thread-N” where N is a small decimal number.
-			daemon (bool)  - Start the thread in the daemon mode to
+			daemon: bool  - Start the thread in the daemon mode to
 				be automatically terminated on the main app exit.
 			group  - Reserved for future extension
 				when a ThreadGroup class is implemented.
-			args (tuple)  - The argument tuple for the target invocation.
-			kwargs (dict)  - A dictionary of keyword arguments for the target invocation.
+			args: tuple  - The argument tuple for the target invocation.
+			kwargs: dict  - A dictionary of keyword arguments for the target invocation.
 
 		Internal attributes:
-			cmd (UiCmd)  - UI command to be executed, which includes (reserved) attribute(s) for the invocation result.
+			cmd: UiCmd  - UI command to be executed, which includes (reserved) attribute(s) for the invocation result.
 		"""
 		# target (callable, optional): Defaults to None. The callable object to be invoked by the run() method.
 		self.cmd = UiCmd(None)  # Shared data between the UI WebApp and MpePool backend

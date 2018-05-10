@@ -410,6 +410,8 @@ def printDepthFirst(tinfext, cindent='  ', indstep='  ', colsep=' '):
 
 
 class Task(object):
+	"""Task is a managing container for subtasks and Jobs"""
+
 	# _tasks = []
 	# _taskManager = None
 	# _taskManagerLock = threading.Lock()
@@ -425,12 +427,11 @@ class Task(object):
 	# 			if task.timeout and ctime - task.tstart >= task.timeout:
 	# 				task.terminate()
 
-	"""Task is a managing container for Jobs"""
 	def __init__(self, name, timeout=0, onstart=None, ondone=None, onfinish=None, params=None
 		, task=None, latency=1.5, stdout=sys.stdout, stderr=sys.stderr):
-		"""Initialize task, which is a group of jobs to be executed
+		"""Initialize task, which is a group of subtasks including jobs to be executed
 
-		name  - task name
+		name: str  - task name
 		timeout  - execution timeout in seconds. Default: 0, means infinity. ATTENTION: not implemented
 		onstart  - a callback, which is executed on the task start (before the subtasks/jobs execution
 			started) in the CONTEXT OF THE CALLER (main process) with the single argument,
@@ -661,7 +662,7 @@ class Job(object):
 		"""Initialize job to be executed
 
 		Main parameters:
-		name  - job name
+		name: str  - job name
 		workdir  - working directory for the corresponding process, None means the dir of the benchmarking
 		args  - execution arguments including the executable itself for the process
 			NOTE: can be None to make make a stub process and execute the callbacks
@@ -1076,7 +1077,7 @@ class AffinityMask(object):
 	def __init__(self, afnstep, first=True, sequential=SEQUENTIAL):
 		"""Affinity mask initialization
 
-		afnstep  - affinity step, integer if applied, allowed values:
+		afnstep: int  - affinity step, integer if applied, allowed values:
 			1, CORE_THREADS * n,  n E {1, 2, ... CPUS / (NODES * CORE_THREADS)}
 
 			Used to bind worker processes to the logical CPUs to have warm cache and,
@@ -1195,9 +1196,9 @@ class AffinityMask(object):
 
 
 class ExecPool(object):
-	"""Execution Pool of workers for jobs
+	"""Multi-process execution pool of jobs
 
-	A worker in the pool executes only the one job, a new worker is created for
+	A worker in the pool executes only a single job, a new worker is created for
 	each subsequent job.
 	"""
 	_CPUS = cpu_count()  # The number of logical CPUs in the system
@@ -1213,8 +1214,8 @@ class ExecPool(object):
 		# afnstep=None, uidir=None
 		"""Execution Pool constructor
 
-		wksnum  - number of resident worker processes, >=1. The reasonable value is
-			<= logical CPUs (returned by cpu_count()) = NUMA nodes * node CPUs,
+		wksnum: int  - number of resident worker processes, >=1. The reasonable
+			value <= logical CPUs (returned by cpu_count()) = NUMA nodes * node CPUs,
 			where node CPUs = CPU cores * HW treads per core.
 			The recomended value is max(cpu_count() - 1, 1) to leave one logical
 			CPU for the benchmarking framework and OS applications.
@@ -2169,10 +2170,10 @@ class ExecPool(object):
 	def execute(self, job, concur=True):
 		"""Schecule the job for the execution
 
-		job  - the job to be executed, instance of Job
-		concur  - concurrent execution or wait until execution completed
+		job: Job  - the job to be executed, instance of Job
+		concur: bool  - concurrent execution or wait until execution completed
 			 NOTE: concurrent tasks are started at once
-		return  - 0 on successful execution, process return code otherwise
+		return int  - 0 on successful execution, process return code otherwise
 		"""
 		if not self.alive:
 			print('WARNING, scheduling of the job "{}" is cancelled because'
@@ -2242,10 +2243,10 @@ class ExecPool(object):
 	def join(self, timeout=0.):
 		"""Execution cycle
 
-		timeout  - execution timeout in seconds before the workers termination, >= 0.
+		timeout: int  - execution timeout in seconds before the workers termination, >= 0.
 			0 means unlimited time. The time is measured SINCE the first job
 			was scheduled UNTIL the completion of all scheduled jobs.
-		return  - True on graceful completion, Flase on termination by the specified
+		return bool  - True on graceful completion, Flase on termination by the specified
 			constrainets (timeout, memory limit, etc.)
 		"""
 		#assert timeout >= 0., 'timeout valiadtion failed'
