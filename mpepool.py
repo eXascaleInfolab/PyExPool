@@ -63,7 +63,7 @@ import errno
 import itertools  # chain
 
 from multiprocessing import cpu_count, Lock  #, Queue  #, active_children, Value, Process
-from collections import deque, namedtuple  # ExecItemFilterVal, TaskInfoExt
+from collections import deque, namedtuple  # TaskInfoExt
 
 # Consider time interface compatibility with Python before v3.3
 if not hasattr(time, 'perf_counter'):
@@ -104,7 +104,7 @@ except ImportError:
 _WEBUI = True
 if _WEBUI:
 	try:
-		from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResCol, UiResFltStatus  # UiCmd, websrvrun
+		from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt, UiResCol, UiResFilterVal   #, UiResFltStatus  # UiCmd, websrvrun
 	except ImportError as wuerr:
 		_WEBUI = False
 
@@ -211,15 +211,6 @@ def applyCallback(callback, owner):
 			.format(callback.__name__, owner, err, traceback.format_exc(5)), file=sys.stderr)
 
 
-"""Property value constraint of the item filter for the ObjInfo (Task/Job Info)
-
-beg  - begin of the range bound
-end  - end of the range bound
-opt: bool  - target property of the filter is optional, i.e. omit the filter if the property is absent or None
-"""
-ExecItemFilterVal = namedtuple('ExecItemFilterVal', 'beg end opt')
-
-
 # NOTE: additional parameter(s) can be added to output additional virtual properties like duration,
 # which can be implemented as bool parameter to emulate properties specified by propflt
 def infodata(obj, propflt=None, objflt=None):
@@ -229,7 +220,7 @@ def infodata(obj, propflt=None, objflt=None):
 		obj: XobjInfo  - the object to be filtered and converted to the tuple, supposed
 			to be decorated with `propslist`
 		propflt: tuple(prop: str)  - property filter to include only the specified properties
-		objflt: dict(prop: str, val: ExecItemFilterVal)  - include the item
+		objflt: dict(prop: str, val: UiResFilterVal)  - include the item
 			only if the specified properties belong to the specified range,
 			member items are processed irrespectively of the item inclusion
 
@@ -245,7 +236,7 @@ def infodata(obj, propflt=None, objflt=None):
 	# Pass the objflt or return None
 	if objflt:
 		for prop, pcon in viewitems(objflt):  # Property name and constraint
-			#assert isinstance(prop, str) and isinstance(pcon, ExecItemFilterVal
+			#assert isinstance(prop, str) and isinstance(pcon, UiResFilterVal
 			# 	), 'Invalid type of arguments:  prop: {}, pflt: {}'.format(
 			# 	type(prop).__name__, type(pcon).__name__)
 			pval = None if prop not in obj else obj.__getattribute__(prop)
@@ -263,10 +254,17 @@ def infodata(obj, propflt=None, objflt=None):
 
 
 def propslist(cls):
-	"""Extends the class with properties listing capabilities:
-	- _props class attribute is added, which contains all public attributes of the class and all __slots__ members
+	"""Extends the class with properties listing capabilities
+	ATTENTION: slots are listed in the order of declaration (to contol the output order),
+	computed properties are listed afterwards in the alphabetical order.
+
+	Extensions:
+	- _props: set  - all public attributes of the class
+		and all __slots__ members even if the latter are underscored
 	- `in` operator support added to test membership in the _props
-	- iterprop() method to iterate over all properties (including the dynamically computed)
+	- iterprop() method to iterate over the properties present in _props starting
+		from __slots__ in the order of declaration and then over the computed properties
+		in the alphabetical order
 	"""
 	def contains(self, prop):
 		"""Whether the specified property is present"""
@@ -338,10 +336,20 @@ class JobInfo(object):
 		self.code = None if not job.proc else job.proc.returncode
 		self.tstart = job.tstart
 		self.tstop = job.tstop if job.tstop is not None else tstop
-		self.memsize = job.mem
-		self.memkind = job.memkind
+		# ATTENTION; JobInfo definitions should be synchronized with Job
+		# Note: non-initialized slots are still listed among the attributes but yield `AttributeError` on access,
+		# so they always should be initialized to sync headers with the content
+		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
+			self.memsize = job.mem
+			self.memkind = job.memkind
+		else:
+			self.memsize = None
+			self.memkind = None
 		self.task = job.task
-		self.category = job.category
+		self.category = None if not _CHAINED_CONSTRAINTS else job.category
+		# rsrtonto  # Restart on timeout
+		# if _LIMIT_WORKERS_RAM:
+		# 	wkslim  #wksmax
 
 
 	@property
@@ -372,7 +380,7 @@ class TaskInfo(object):
 		self.numadded = task.numadded
 		self.numdone = task.numdone
 		self.numterm = task.numterm
-		self.task = task.task
+		self.task = task.task  # Owner (super) task
 
 
 	@property
@@ -470,7 +478,7 @@ class Task(object):
 		self.onfinish = None if not callable(onfinish) else types.MethodType(onfinish, self)
 		# self.timeout = timeout
 		self.params = params
-		self.latency = latency
+		self._latency = latency
 		self.task = task
 		self.stdout = stdout
 		self.stderr = stderr
@@ -513,7 +521,7 @@ class Task(object):
 				self.task.add(self)
 		elif subtask in self._items:
 			return
-		if self._lock.acquire(timeout=self.latency):
+		if self._lock.acquire(timeout=self._latency):
 			self._items.setdefault(subtask, 0)
 			self._lock.release()
 			self.numadded += 1
@@ -531,7 +539,7 @@ class Task(object):
 		Raises:
 			RuntimeError  - lock acquisition failed
 		"""
-		if not self._lock.acquire(timeout=self.latency):
+		if not self._lock.acquire(timeout=self._latency):
 			raise RuntimeError('Lock acquisition failed on finished() in "{}"'.format(self.name))
 		try:
 			if succeed:
@@ -632,7 +640,7 @@ class Task(object):
 				return res
 			return subtask.name
 
-		if not self._lock.acquire(timeout=self.latency):
+		if not self._lock.acquire(timeout=self._latency):
 			raise RuntimeError('Lock acquisition failed on uncompleted() in "{}"'.format(self.name))
 		try:
 			# List should be generated on place while all the tasks are present
@@ -656,7 +664,7 @@ class Job(object):
 	assert 0 <= _RTM < 1, 'Memory retention ratio should E [0, 1)'
 
 	# NOTE: keyword-only arguments are specified after the *, supported only since Python 3
-	def __init__(self, name, workdir=None, args=(), timeout=0, restartonto=False, task=None #,*
+	def __init__(self, name, workdir=None, args=(), timeout=0, rsrtonto=False, task=None #,*
 	, startdelay=0., onstart=None, ondone=None, params=None, category=None, size=0, slowdown=1.
 	, omitafn=False, memkind=1, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize job to be executed
@@ -667,7 +675,7 @@ class Job(object):
 		args  - execution arguments including the executable itself for the process
 			NOTE: can be None to make make a stub process and execute the callbacks
 		timeout  - execution timeout in seconds. Default: 0, means infinity
-		restartonto  - restart the job on timeout, Default: False. Can be used for
+		rsrtonto  - restart the job on timeout, Default: False. Can be used for
 			non-deterministic Jobs like generation of the synthetic networks to regenerate
 			the network on border cases overcoming getting stuck on specific values of the rand variables.
 		task: Task  - origin task if this job is a part of the task
@@ -721,7 +729,8 @@ class Job(object):
 			NOTE: > 0 (1 .. ExecPool._KILLDELAY) for the apps terminated by the execution pool
 				(resource constrains violation or ExecPool exception),
 				== 0 for the crashed apps
-		wkslim  - worker processes limit (max number) on the job postponing if any;
+		wkslim  - worker processes limit (max number) on the job postponing if any,
+			the job is postponed until at most this number of worker procs operate;
 			requires _LIMIT_WORKERS_RAM
 		chtermtime  - chained termination: None - disabled, False - by memory, True - by time;
 			requires _CHAINED_CONSTRAINTS
@@ -737,7 +746,7 @@ class Job(object):
 		self.args = args
 		self.params = params
 		self.timeout = timeout
-		self.restartonto = restartonto
+		self.rsrtonto = rsrtonto
 		self.task = task
 		# Delay in the callers context after starting the job process. Should be small.
 		self.startdelay = startdelay  # 0.2  # Required to sync sequence of started processes
@@ -758,8 +767,8 @@ class Job(object):
 		self._fstderr = None
 		# Omit scheduler affinity policy (actual when some process is computed on all treads, etc.)
 		self._omitafn = omitafn
-		self.memkind = memkind
 		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
+			self.memkind = memkind
 			self.size = size  # Expected memory complexity of the job, typically it's size of the processing data
 			# Consumed implementation-defined type of memory on execution in gigabytes or the least expected
 			# (inherited from the related jobs having the same category and non-smaller size)
@@ -1250,7 +1259,7 @@ class ExecPool(object):
 			after the joining or termination.
 		failures: [JobInfo]  - failed (terminated or crashed) jobs with timestamps.
 			NOTE: failures contain both terminated, crashed jobs that jobs completed with non-zero return code
-			excluding the jobs terminated by timeout that have set .restartonto (will be restarted)
+			excluding the jobs terminated by timeout that have set .rsrtonto (will be restarted)
 		tasks: set(Task)  - tasks associated with the sheduled jobs
 		"""
 		assert (wksnum >= 1 and (afnmask is None or isinstance(afnmask, AffinityMask))
@@ -1332,6 +1341,7 @@ class ExecPool(object):
 		if not (self._workers and self._jobs):
 			return
 		if self._uicmd.id == UiCmdId.SUMMARY:
+			# self.summary()  # TODO: imlement each command in the dedicated function
 			# Read command parameters from the .data
 			data = self._uicmd.data
 			# Fill headers
@@ -1344,15 +1354,18 @@ class ExecPool(object):
 			if UiResCol.duration.name in cols:
 				ctime = time.perf_counter()
 			i = 0  # enumeration of workes and jobs
-			fltStatus = data.get(UiResOpt.fltStatus, [])
-			# Display only executing jobs (workers) by default
-			jobs = [] if fltStatus else self._workers
-			if fltStatus:
-				if UiResFltStatus.work.name in fltStatus:
-					jobs.extend(self._workers)
-				if UiResFltStatus.defer.name in fltStatus:
-					jobs.extend(self._jobs)
-			print("> uicmd.id: {}, type of jobs: {}, jobs: {}".format(self._uicmd.id, type(jobs), jobs), file=sys.stderr)
+			# Note: filter keys ending with '*' are optional (such columns allowed
+			# to be absent in the target item)
+			flt = data.get(UiResOpt.flt, {})
+			# # Display only executing jobs (workers) by default
+			# jobs = [] if fltStatus else self._workers
+			# if fltStatus:
+			# 	if UiResFltStatus.work.name in fltStatus:
+			# 		jobs.extend(self._workers)
+			# 	if UiResFltStatus.defer.name in fltStatus:
+			# 		jobs.extend(self._jobs)
+			print("> uicmd.id: {}, type of jobs: {}, jobs: {}".format(
+				self._uicmd.id, type(jobs), jobs), file=sys.stderr)
 			# Prepare .data for the response results
 			if data:
 				data.clear()
@@ -1580,7 +1593,7 @@ class ExecPool(object):
 			, 0 if job.tstop is None else job.tstop - job.tstart, job.tstart, job.tstop, job.timeout))
 		# Postpone only the goup-terminated jobs by memory limit, not a single worker
 		# that exceeds the (time/memory) constraints (except the explicitly requirested
-		# restart via restartonto, which results the priority rescheduling)
+		# restart via rsrtonto, which results the priority rescheduling)
 		# Note: job wkslim should be updated before adding to the _jobs to handle
 		# correctly the case when _jobs were empty
 		if _DEBUG_TRACE >= 2:
@@ -1835,7 +1848,7 @@ class ExecPool(object):
 			graceful = not job.terminates and job.proc is not None and not job.proc.returncode
 		job.complete(graceful)
 		# Update failures list skipping the tasks restarting on timeout
-		if not graceful and (not job.restartonto or job.tstart is None or job.tstop is None
+		if not graceful and (not job.rsrtonto or job.tstart is None or job.tstop is None
 		or job.tstop - job.tstart < job.timeout):
 			self.failures.append(JobInfo(job))  # Note: job.tstop should be defined here
 
@@ -1887,7 +1900,7 @@ class ExecPool(object):
 				# ATTENTION: do not terminate related jobs of the process that should be restarted by timeout,
 				# because such processes often have non-deterministic behavior and specially scheduled to be
 				# rexecuted until success
-				if job.timeout and exectime >= job.timeout and not job.restartonto:
+				if job.timeout and exectime >= job.timeout and not job.rsrtonto:
 					# Timeout constraints
 					jorg = jtorigs.get(job.category, None)
 					if jorg is None or job.size * job.slowdown < jorg.size * jorg.slowdown:
@@ -2077,7 +2090,7 @@ class ExecPool(object):
 				, 0 if not self.memlimit else job.mem, self.memlimit
 				, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			# Skip memory limit and timeout violating jobs that do not require autorestart (applicable only for the timeout)
-			if (exectime >= job.timeout and not job.restartonto) or (_CHAINED_CONSTRAINTS
+			if (exectime >= job.timeout and not job.rsrtonto) or (_CHAINED_CONSTRAINTS
 			and job.chtermtime is not None) or (self.memlimit and job.mem >= self.memlimit):
 				continue
 			# Reschedule job having the group violation of the memory limit
@@ -2085,10 +2098,10 @@ class ExecPool(object):
 			# Note: memall to not postpone the single existing job
 			if self.memlimit and ((memall and memall + job.mem * self._JMEMTRR >= self.memlimit)
 			or memfree - job.mem * self._JMEMTRR <= self._MEMLOW) and (
-			not job.timeout or exectime < job.timeout or job.restartonto):
+			not job.timeout or exectime < job.timeout or job.rsrtonto):
 				self.__postpone(job)
 			# Restart the job on timeout if requested
-			elif exectime >= job.timeout and job.restartonto:  # ATTENTION: restart on timeout only and if required
+			elif exectime >= job.timeout and job.rsrtonto:  # ATTENTION: restart on timeout only and if required
 				# Note: if the job was terminated by timeout then memory limit was not met
 				# Note: earlier executed job might not fit into the RAM now because of
 				# the inreasing mem consumption by the workers

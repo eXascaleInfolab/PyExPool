@@ -102,7 +102,7 @@ _LIMIT_WORKERS_RAM = True
  CHAINED_CONSTRAINTS = True
 
 
-Job(name, workdir=None, args=(), timeout=0, restartonto=False, task=None
+Job(name, workdir=None, args=(), timeout=0, rsrtonto=False, task=None
 	, startdelay=0., onstart=None, ondone=None, params=None, category=None
 	, size=0, slowdown=1., omitafn=False, memkind=1, stdout=sys.stdout, stderr=sys.stderr):
 	"""Initialize job to be executed
@@ -116,7 +116,7 @@ Job(name, workdir=None, args=(), timeout=0, restartonto=False, task=None
 	args  - execution arguments including the executable itself for the process
 		NOTE: can be None to make make a stub process and execute the callbacks
 	timeout  - execution timeout in seconds. Default: 0, means infinity
-	restartonto  - restart the job on timeout, Default: False. Can be used for
+	rsrtonto  - restart the job on timeout, Default: False. Can be used for
 		non-deterministic Jobs like generation of the synthetic networks to regenerate
 		the network on border cases overcoming getting stuck on specific values of the rand variables.
 	task: Task  - origin task if this job is a part of the task
@@ -170,7 +170,8 @@ Job(name, workdir=None, args=(), timeout=0, restartonto=False, task=None
 		NOTE: > 0 (1 .. ExecPool._KILLDELAY) for the apps terminated by the execution pool
 			(resource constrains violation or ExecPool exception),
 			== 0 for the crashed apps
-	wkslim  - worker processes limit (max number) on the job postponing if any;
+	wkslim  - worker processes limit (max number) on the job postponing if any,
+		the job is postponed until at most this number of worker procs operate;
 		requires _LIMIT_WORKERS_RAM
 	chtermtime  - chained termination: None - disabled, False - by memory, True - by time;
 		requires _CHAINED_CONSTRAINTS
@@ -319,7 +320,7 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 		after the joining or termination.
 	failures: [JobInfo]  - failed (terminated or crashed) jobs with timestamps.
 		NOTE: failures contain both terminated, crashed jobs that jobs completed with non-zero return code
-		excluding the jobs terminated by timeout that have set .restartonto (will be restarted)
+		excluding the jobs terminated by timeout that have set .rsrtonto (will be restarted)
 	tasks: set(Task)  - tasks associated with the sheduled jobs
 	"""
 

@@ -184,7 +184,7 @@ class TestExecPool(unittest.TestCase):
 			"""Onstart callback"""
 			job.params['count'] += 1
 
-		jrx = Job('ep_timeout_jrx', args=('sleep', str(worktime)), timeout=etimeout / 2, restartonto=True
+		jrx = Job('ep_timeout_jrx', args=('sleep', str(worktime)), timeout=etimeout / 2, rsrtonto=True
 			, params=runsCount, onstart=updateruns)  # Re-executing job
 		self._execpool.execute(jrx)
 		# Verify termination of the execution pool

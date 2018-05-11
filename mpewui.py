@@ -12,12 +12,14 @@
 """
 from __future__ import print_function, division  # Required for stderr output, must be the first import
 # External API (exporting functions)
-__all__ = ['WebUiApp', 'UiCmdId', 'UiResOpt', 'UiResCol', 'UiResFltStatus']
+__all__ = ['WebUiApp', 'UiCmdId', 'UiResOpt', 'UiResFmt', 'UiResCol']
 
 # import signal  # Required for the correct handling of KeyboardInterrupt: https://docs.python.org/2/library/thread.html
 import threading  # Run bottle in the dedicated thread
 from functools import partial  # Custom parameterized routes
+from collections import namedtuple  # UiResFilterVal
 # Internal format serialization to JSON/HTM/TXT
+import re
 import json
 try:
 	from html import escape
@@ -79,21 +81,64 @@ except ImportError:
 		return cls
 
 
+RE_INT = re.compile(r'[-+]?\d+$')  # Match int
+RE_FLOAT = re.compile(r'[-+]?\d+(\.\d*)?([eE][-+]\d+)?$')  # Match float
+
+
+def inferNumType(val):
+	"""Infer a numeric type if possible or retain the variable as it is
+
+	Args:
+		val: str  - the value to be converted  to the numeric type
+
+	Returns:
+		int|float|<type=str>  - origin value with possible converted type
+	"""
+	if RE_FLOAT.match(val):
+		if RE_INT.match(val):
+			return int(val)
+		else:
+			return float(val)
+	return val
+
+
 UiCmdId = IntEnum('UiCmdId', 'SUMMARY LIST_JOBS')  # 'JOB_INFO', 'LIST_TASKS', 'TASK_INFO'
 """UI Command Identifier associated with the REST URL"""
 
-UiResOpt = IntEnum('UiResOpt', 'fmt cols fltStatus')
-"""UI Command parameters"""
+UiResOpt = IntEnum('UiResOpt', 'fmt cols flt')  # fltStatus
+# Note: filter keys ending with '*' are optional (such columns allowed
+# to be absent in the target item)
+"""UI Command parameters
+
+fmt  - required format of the result
+cols  - required columns in the result, all by default
+flt  - filter target items per each column:
+	flt=rcode*:-15|duration:5m1.15..2d3h|...
+"""
+# flt=rcode*:-15&flt=duration:5m1.15..2d3h&...
+
 
 UiResFmt = IntEnum('UiResFmt', 'json htm txt')
-"""UI Command: Result format parameter values"""
+"""UI Command: `fmt` parameter values"""
 
-UiResCol = IntEnum('UiResCol', 'pid state tstart tstop duration memory task category')
-"""UI Command: Result columns parameter values for the Jobs listing"""
+# UiResCol = IntEnum('UiResCol', 'pid state tstart tstop duration memory task category')
+UiResCol = IntEnum('UiResCol',
+	'category rcode duration memkind memsize name numadded numdone numterm pid task tstart tstop')
+"""UI Command: `cols` parameter values for Jobs and Tasks listing"""
 
-# Note: 'exec' is a keyword in Python 2 and can't be used as an object attribute
-UiResFltStatus = IntEnum('UiResFltStatus', 'work defer')
-"""UI Command: Result filtration by the job status: executing (worker job), deferred (scheduled obj)"""
+
+UiResFilterVal = namedtuple('UiResFilterVal', 'beg end opt')
+"""Property value constraint of the item filter for the ObjInfo (Task/Job Info)
+
+beg  - begin of the range bound
+end  - end of the range bound
+opt: bool  - target property of the filter is optional, i.e. omit the filter if the property is absent or None
+"""
+
+# # Note: 'exec' is a keyword in Python 2 and can't be used as an object attribute
+# work - working (executing) jobs (workers), defer - deferred (regular, postponed) jobs
+# UiResFltStatus = IntEnum('UiResFltStatus', 'work defer task')
+# """UI Command: Result filtration by the job status: executing (worker job), deferred (scheduled obj)"""
 
 class UiCmd(object):
 	"""UI Command (for the MVC controller)"""
@@ -232,7 +277,7 @@ class WebUiApp(threading.Thread):
 			if fmtKey in qdict:  #pylint: disable=E1135
 				try:
 					fmt = UiResFmt[qdict[fmtKey]]  #pylint: disable=E1136
-					del qdict[fmtKey]  #pylint: disable=E1138
+					# del qdict[fmtKey]  #pylint: disable=E1138
 				except KeyError:
 					bottle.response.status = 400
 					return 'Invalid URL parameter value of "{}": {}'.format(fmtKey, qdict[fmtKey])  #pylint: disable=E1136
@@ -243,25 +288,47 @@ class WebUiApp(threading.Thread):
 			cols = qdict.get(UiResOpt.cols.name)  #pylint: disable=E1101
 			if cols:
 				cmd.data[UiResOpt.cols] = cols.split(',')
-			fltStatus = qdict.get(UiResOpt.fltStatus.name)  #pylint: disable=E1101
-			if fltStatus:
-				cmd.data[UiResOpt.fltStatus] = fltStatus.split(',')
+			# fltKey = UiResOpt.flt.name
+			flt = qdict.get(UiResOpt.flt.name)  #pylint: disable=E1101
+			if flt:
+				# Parse Filter parameters to UiResFilterVal
+				fltopts = {}
+				for prm in flt.split('|'):
+					for k, v in prm.split(':'):
+						# Consider range values and infer the numeric type if possible
+						if v.find('..') != -1:
+							v, ve = v.split('..', 1)
+							ve = inferNumType(ve)
+						else:
+							ve = None
+						v = inferNumType(v)
+						# Consider optional filtering fields
+						val = UiResFilterVal(beg=v, end=ve, opt=k[-1]=='*')  #pylint: disable=C0326
+						if val.opt:
+							k = k[:-1]
+						fltopts[k] = val
+				cmd.data[UiResOpt.flt] = fltopts
+			# fltStatus = qdict.get(UiResOpt.fltStatus.name)  #pylint: disable=E1101
+			# if fltStatus:
+			# 	cmd.data[UiResOpt.fltStatus] = fltStatus.split(',')
 			# Wait for the command execution and notification
 			# return "cmd.id: {}, cmd.data: {}, keys: {}, vals: {}".format(
 			# 	cmd.id, cmd.data.items(), cmd.data.keys(), cmd.data.values())
 			cmd.cond.wait()
 			# Now .data contains the response results
-			return "cmd.data: {}".format(cmd.data)
 			# Read the result and transfer to the client
 			if not cmd.data:
 				return ''
 			# Expected format of data is a table: header, rows
+			return json.dumps(cmd.data)
 			if fmt == UiResFmt.json:
 				return json.dumps(cmd.data)
 			elif fmt == UiResFmt.txt:
+				# TOFIX
 				return '\n'.join(['\t'.join([str(v) for v in cols]) for cols in cmd.data])
 			#elif fmt == UiResFmt.htm:
 			else:
+				# TOFIX
 				return ''.join(('<table>',
 					'\n'.join([''.join(('<tr>', ''.join(
 						[''.join(('<td>', escape(str(v), True), '</td>')) for v in cols]
