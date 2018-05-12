@@ -407,7 +407,7 @@ class TaskInfoExt(object):
 		self.subtasks = subtasks
 
 
-def printDepthFirst(tinfext, cindent='  ', indstep='  ', colsep=' '):
+def printDepthFirst(tinfext, cindent='', indstep='  ', colsep=' '):
 	"""Print TaskUnfoExt hierarchy using the depth first traversing
 
 	Args:
@@ -416,13 +416,15 @@ def printDepthFirst(tinfext, cindent='  ', indstep='  ', colsep=' '):
 		indstep: str  - indent step for each subsequent level of the hierarchy
 		colsep: str  - column separator for the printing variables (columns)
 	"""
+	# Print task properties (properties header and values)
 	for props in tinfext.props:
-		print(cindent, colsep.join([tblfmt(v) for v in props]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		print(cindent, colsep.join([tblfmt(v) for v in props]), sep='', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 	# assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
+	# Print task jobs and subtasks
 	cindent += indstep
 	if tinfext.jobs:  # Consider None
 		for tie in tinfext.jobs:
-			print(cindent, colsep.join([tblfmt(v) for v in tie]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+			print(cindent, colsep.join([tblfmt(v) for v in tie]), sep='', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 	# print('>> Outputing task {} with {} subtasks'.format(tinfext.props[1][0]
 	# 	, 0 if not tinfext.subtasks else len(tinfext.subtasks)), file=sys.stderr)
 	if tinfext.subtasks:  # Consider None
@@ -1570,7 +1572,6 @@ class ExecPool(object):
 		if not tinfe0:
 			return
 
-		print('\nFAILED tasks with their jobs:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		# Iteratively form the hierarchy of failed tasks from the bottom level
 		ties = dict()
 		for task, tie in viewitems(tinfe0):
@@ -1612,9 +1613,15 @@ class ExecPool(object):
 						# print('>> Subtask {} added to {}: {}'.format(tie.props[1][0], task.name, tie.subtasks)
 						# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 					tie = newtie
-		tinfe0 = None  # Release the initial dictionary
 
-		# Print hierarchy of tasks from the root (top) level
+		# Print failed tasks statistics
+		print('\nFAILED root tasks ({} failed root / {} failed total / {} total):'.format(
+			len(viewvalues(ties)), len(tinfe0), len(self.tasks)), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		tinfe0 = None  # Release the initial dictionary
+		# List names of the root failed tasks
+		print(' '.join([tk.name for tk in ties]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		# Print hierarchy of the failed tasks from the root (top) level
+		print('\nFAILED tasks with their jobs:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		for tie in viewvalues(ties):
 			printDepthFirst(tie, cindent=indent, indstep=indent, colsep=colsep)
 
