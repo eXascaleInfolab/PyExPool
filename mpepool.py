@@ -63,7 +63,7 @@ import errno
 import itertools  # chain
 
 from multiprocessing import cpu_count, Lock  #, Queue  #, active_children, Value, Process
-from collections import deque, namedtuple  # TaskInfoExt
+from collections import deque
 
 # Consider time interface compatibility with Python before v3.3
 if not hasattr(time, 'perf_counter'):
@@ -104,7 +104,8 @@ except ImportError:
 _WEBUI = True
 if _WEBUI:
 	try:
-		from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt, UiResCol, UiResFilterVal   #, UiResFltStatus  # UiCmd, websrvrun
+		#, UiResFltStatus  # UiCmd, websrvrun
+		from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt, UiResCol, UiResFilterVal, SummaryBrief
 	except ImportError as wuerr:
 		_WEBUI = False
 
@@ -389,12 +390,21 @@ class TaskInfo(object):
 		return None if self.tstop is None or self.tstart is None else self.tstop - self.tstart
 
 
-"""Task information extended with member items (subtasks/jobs)
+class TaskInfoExt(object):
+	"""Task information extended with member items (subtasks/jobs)"""
+	__slots__ = ('props', 'jobs', 'subtasks')
 
-prop: list(tuple)  - task info properties
-members: list(tuple)  - task info members
-"""
-TaskInfoExt = namedtuple('TaskInfoExt', 'props members')
+	def __init__(self, props, jobs=None, subtasks=None):
+		"""Initialization of the extended task information
+
+		Args:
+			props: tuple(header: iterable, values: iterable)  - task properties
+			jobs: list(header: iterable, values1: iterable, values: iterable...)  - member jobs properties
+			subtasks: list(TaskInfoExt)  - member tasks (subtasks) info
+		"""
+		self.props = props
+		self.jobs = jobs
+		self.subtasks = subtasks
 
 
 def printDepthFirst(tinfext, cindent='  ', indstep='  ', colsep=' '):
@@ -410,11 +420,14 @@ def printDepthFirst(tinfext, cindent='  ', indstep='  ', colsep=' '):
 		print(cindent, colsep.join([tblfmt(v) for v in props]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 	# assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
 	cindent += indstep
-	for tie in tinfext.members:
-		if isinstance(tie, TaskInfoExt):
-			printDepthFirst(tie, cindent=cindent, indstep=indstep, colsep=colsep)
-		else:
+	if tinfext.jobs:  # Consider None
+		for tie in tinfext.jobs:
 			print(cindent, colsep.join([tblfmt(v) for v in tie]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+	# print('>> Outputing task {} with {} subtasks'.format(tinfext.props[1][0]
+	# 	, 0 if not tinfext.subtasks else len(tinfext.subtasks)), file=sys.stderr)
+	if tinfext.subtasks:  # Consider None
+		for tie in tinfext.subtasks:
+			printDepthFirst(tie, cindent=cindent, indstep=indstep, colsep=colsep)
 
 
 class Task(object):
@@ -1338,38 +1351,56 @@ class ExecPool(object):
 		# Process on the next iteration if the client request is not ready
 		if self._uicmd.id is None or not self._uicmd.cond.acquire(blocking=False):
 			return
-		if not (self._workers and self._jobs):
-			return
 		if self._uicmd.id == UiCmdId.SUMMARY:
 			# self.summary()  # TODO: imlement each command in the dedicated function
 			# Read command parameters from the .data
 			data = self._uicmd.data
-			# Fill headers
-			cols = data.get(UiResOpt.cols, [])
-			if not cols:
-				cols.extend(UiResCol.__members__)
-			# Reverse the list for the efficient filling retaining the columns order
-			cols.reverse()
-			# Fill data falues
-			if UiResCol.duration.name in cols:
-				ctime = time.perf_counter()
-			i = 0  # enumeration of workes and jobs
-			# Note: filter keys ending with '*' are optional (such columns allowed
-			# to be absent in the target item)
-			flt = data.get(UiResOpt.flt, {})
-			# # Display only executing jobs (workers) by default
-			# jobs = [] if fltStatus else self._workers
-			# if fltStatus:
-			# 	if UiResFltStatus.work.name in fltStatus:
-			# 		jobs.extend(self._workers)
-			# 	if UiResFltStatus.defer.name in fltStatus:
-			# 		jobs.extend(self._jobs)
-			print("> uicmd.id: {}, type of jobs: {}, jobs: {}".format(
-				self._uicmd.id, type(jobs), jobs), file=sys.stderr)
-			# Prepare .data for the response results
 			if data:
-				data.clear()
+				propflt = data.get(UiResOpt.cols)  # Properties (colons header)
+				objflt = data.get(UiResOpt.flt)
+			else:
+				propflt = None
+				objflt = None
+			print("> uicmd.id: {}, propflt: {}, objflt: {}".format(
+				self._uicmd.id, propflt, objflt), file=sys.stderr)
+			# Prepare .data for the response results
+			data.clear()
 			# Summary of the execution pool:
+			# Note: executed in the main thread, so the lock check is required only
+			# to check for the termination
+			# acqlock = self.__termlock.acquire(True, 0.05)  # 50 ms
+			with self.__termlock:
+				smr = SummaryBrief(workers=len(self._workers), jobs=len(self._workers)
+					, jobsFailed=len(self.failures), tasks=len(self.tasks))
+				# Evaluate remained vats
+				# Evaluate tasksFailed and tasksRootFailed from failures
+				tasksRootFailed = 0
+				tasksFailed = set()
+				for fji in self.failures:
+					task = fji.task
+					while task:
+						if task not in tasksFailed:
+							if task.task is None:
+								tasksRootFailed += 1
+							tasksFailed.add(task)
+						task = task.task
+				smr.tasksRootFailed = tasksRootFailed
+				smr.tasksFailed = len(tasksFailed)
+				# Evaluate tasksRoot from tasks
+				tasksRoot = 0
+				for task in self.tasks:
+					if task.task is None:
+						tasksRoot += 1
+				smr.tasksRoot = tasksRoot
+				data['summary'] = smr
+				# data['jobsFailed'] = [data in ]
+				# data['tasksJobsFailed'] =
+
+				# Preprare failures considering format, filtering and membership in tasks
+				# Body of the jobs data as a table
+
+
+
 			# - the number of workers and deffered/postponed jobs;
 			# - the number and statistics (timestamps of the start and end, exit code)
 			# of the terminated or crashed jobs that are not [going to be] restarted.
@@ -1381,32 +1412,36 @@ class ExecPool(object):
 			# 		''
 			# 	}
 			# }
-			data.append(['#', 'name'])  # Number and Name
-			data[0].extend(cols)
-			for job in jobs:
-				i += 1
-				data.append[[i, job.name]]
-				drow = data[-1]
-				while cols:
-					cl = cols.pop()
-					if cl == UiResCol.pid.name:
-						drow.append('' if not job.proc else str(job.proc.pid))
-					elif cl == UiResCol.state.name:
-						drow.append('w' if jobs is self._workers else 'd')
-					elif cl == UiResCol.duration.name:
-						drow.append('' if not job.tstart else str(ctime - job.tstart))
-					elif cl == UiResCol.memory.name:
-						if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
-							drow.append('' if not job.mem else str(job.mem))
-					elif cl == UiResCol.task.name:
-						drow.append(job.task)
-					elif cl == UiResCol.category.name:
-						if _CHAINED_CONSTRAINTS:
-							drow.append(job.category)
-					else:
-						print('WARNING, Unknown column requested: {}. {}'.format(cl, traceback.format_exc(5)), file=sys.stderr)
+			# data.append(['#', 'name'])  # Number and Name
+			# data[0].extend(cols)
+			# for job in jobs:
+			# 	i += 1
+			# 	data.append[[i, job.name]]
+			# 	drow = data[-1]
+			# 	while cols:
+			# 		cl = cols.pop()
+			# 		if cl == UiResCol.pid.name:
+			# 			drow.append('' if not job.proc else str(job.proc.pid))
+			# 		elif cl == UiResCol.state.name:
+			# 			drow.append('w' if jobs is self._workers else 'd')
+			# 		elif cl == UiResCol.duration.name:
+			# 			drow.append('' if not job.tstart else str(ctime - job.tstart))
+			# 		elif cl == UiResCol.memory.name:
+			# 			if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
+			# 				drow.append('' if not job.mem else str(job.mem))
+			# 		elif cl == UiResCol.task.name:
+			# 			drow.append(job.task)
+			# 		elif cl == UiResCol.category.name:
+			# 			if _CHAINED_CONSTRAINTS:
+			# 				drow.append(job.category)
+			# 		else:
+			# 			print('WARNING, Unknown column requested: {}. {}'.format(cl, traceback.format_exc(5)), file=sys.stderr)
 			self._uicmd.id = None  # Reset command id for the completed command
 			self._uicmd.cond.notify()
+		elif self._uicmd.id == UiCmdId.LIST_JOBS:
+			# TODO: should the self._uicmd.data be resetted for the completed exec pool?
+			if not (self._workers and self._jobs):
+				return
 		else:
 			print('WARNING, Unknown command requested: {}. {}'.format(self._uicmd.id, traceback.format_exc(5)), file=sys.stderr)
 		self._uicmd.cond.release()
@@ -1445,7 +1480,7 @@ class ExecPool(object):
 		"""Force termination of the pool"""
 		# Wait for the new worker registration on the job starting if required,
 		# which shold be done << 10 ms
-		acqlock = self.__termlock.acquire(True, 0.01)  # 10 ms
+		acqlock = self.__termlock.acquire(True)  # , 0.05 50 ms
 		self.alive = False  # The execution pool is terminating, should be always set on termination
 		# The lock can't be acquired (takes more than 10 ms) only if the termination was already called
 		if not acqlock or not (self._workers or self._jobs):
@@ -1504,6 +1539,10 @@ class ExecPool(object):
 
 	def _traceFailures(self):
 		"""Trace failed tasks with their jobs and jobs not belonging to any tasks"""
+		if self.failures:
+			print('WARNING, {} jobs are failed in the ExecPool {}'.format(
+				len(self.failures), '' if not self.name else self.name)
+				, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		# Header of the jobs
 		indent = '  '  # Indent for each level of the Task/Jobs tree
 		colsep = ' '  # Table column separator
@@ -1525,9 +1564,9 @@ class ExecPool(object):
 			else:
 				tie = tinfe0.get(fji.task)
 				if tie is None:
-					tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=[TaskInfo.iterprop()  #pylint: disable=E1101
-						, infodata(TaskInfo(fji.task))], members=[JobInfo.iterprop()]))  #pylint: disable=E1101
-				tie.members.append(data)
+					tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=(TaskInfo.iterprop()  #pylint: disable=E1101
+						, infodata(TaskInfo(fji.task))), jobs=[JobInfo.iterprop()]))  #pylint: disable=E1101
+				tie.jobs.append(data)
 		if not tinfe0:
 			return
 
@@ -1535,20 +1574,44 @@ class ExecPool(object):
 		# Iteratively form the hierarchy of failed tasks from the bottom level
 		ties = dict()
 		for task, tie in viewitems(tinfe0):
+			# print('> Preparing for the output task {} (supertask: {}), tie {} jobs and {} subtasks'.format(
+			# 	task.name, '-' if not task.task else task.task.name,  0 if not tie.jobs else len(tie.jobs)
+			# 	, 0 if not tie.subtasks else len(tie.subtasks))
+			# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 			if task.task is None:
-				ties[task] = tie
+				# Add or extend with jobs a root task
+				tinfe = ties.get(task)
+				if tinfe is None:
+					ties[task] = tie
+				else:
+					tinfe.jobs = tie.jobs
+					assert tinfe.props[1] == tie.props[1], '{} task properties are not synchronized'
 			else:
+				# print('>> task {} (supertask: {})'.format(task.name, task.task.name), file=sys.stderr)
 				while task.task is not None:
 					task = task.task
 					if ties.get(task) is None:
-						# Note: data should not be None here
-						data = infodata(TaskInfo(task))
-						tie = TaskInfoExt(props=[TaskInfo.iterprop(), data], members=[tie])  #pylint: disable=E1101
-						ties[task] = tie
+						# Add new super task to the hierarchy
+						# Note: infodata() should not yield None here
+						newtie = tinfe0.get(task)
+						# It is possible that the supertask has no any [failed] jobs
+						# and, hence, is not present in tinfe0
+						if newtie:
+							assert newtie.subtasks is None, (
+								'New supertask {} should not have any subtasks yet'.format(task.name))
+							newtie.subtasks = [tie]
+						else:
+							newtie = TaskInfoExt(props=(TaskInfo.iterprop()  #pylint: disable=E1101
+								, infodata(TaskInfo(task))), subtasks=[tie])
+						ties[task] = newtie
+						# print('>> New subtask {} added to {}'.format(tie.props[1][0], task.name)
+						# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 					else:
 						newtie = ties[task]
-						newtie.members.append(tie)
-						tie = newtie
+						newtie.subtasks.append(tie)  # Omit the header
+						# print('>> Subtask {} added to {}: {}'.format(tie.props[1][0], task.name, tie.subtasks)
+						# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+					tie = newtie
 		tinfe0 = None  # Release the initial dictionary
 
 		# Print hierarchy of tasks from the root (top) level
@@ -1749,7 +1812,7 @@ class ExecPool(object):
 				if _DEBUG_TRACE >= 2:
 					print('  Opening proc for "{}" with:\n\tjob.args: {},\n\tcwd: {}'.format(job.name
 						, ' '.join(job.args), job.workdir), file=sys.stderr)
-				acqlock = self.__termlock.acquire(False)
+				acqlock = self.__termlock.acquire(False, 0.01)  # 10 ms
 				if not acqlock or not self.alive:
 					# Note: it just interrupts job start, but does not cause termination
 					# of the whole (already terminated) execution pool

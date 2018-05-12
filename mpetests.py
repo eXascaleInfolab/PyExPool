@@ -145,7 +145,7 @@ class TestExecPool(unittest.TestCase):
 		"""Verify termination of a single job by timeout and completion of independent another job"""
 		timeout = _TEST_LATENCY * 4  # Note: should be larger than 3*latency
 		worktime = max(1, _TEST_LATENCY) + (timeout * 2) // 1  # Job work time
-		assert _TEST_LATENCY * 3 < timeout < worktime, 'Testcase parameters validation failed'
+		assert _TEST_LATENCY * ExecPool._KILLDELAY < timeout < worktime, 'Testcase parameters validation failed'
 
 		tstart = time.perf_counter()
 		jterm = Job('j_timeout', args=('sleep', str(worktime)), timeout=timeout)
@@ -174,7 +174,7 @@ class TestExecPool(unittest.TestCase):
 		etimeout = _TEST_LATENCY * 4  # Note: should be larger than 3*latency
 		timeout = etimeout * 2  # Job timeout
 		worktime = max(1, _TEST_LATENCY) + (timeout * 2) // 1  # Job work time
-		assert _TEST_LATENCY * 3 < timeout < worktime, 'Testcase parameters validation failed'
+		assert _TEST_LATENCY * ExecPool._KILLDELAY < timeout < worktime, 'Testcase parameters validation failed'
 
 		tstart = time.perf_counter()
 		self._execpool.execute(Job('ep_timeout', args=('sleep', str(worktime)), timeout=timeout))
@@ -209,7 +209,7 @@ class TestExecPool(unittest.TestCase):
 		"""
 		timeout = _TEST_LATENCY * 5  # Note: should be larger than 3*latency
 		worktime = max(1, _TEST_LATENCY) + (timeout * 2) // 1  # Job work time
-		assert _TEST_LATENCY * 3 < timeout < worktime, 'Testcase parameters validation failed'
+		assert _TEST_LATENCY * ExecPool._KILLDELAY < timeout < worktime, 'Testcase parameters validation failed'
 
 		tstart = time.perf_counter()
 		jm = Job('jmaster_timeout', args=('sleep', str(worktime))
@@ -229,7 +229,7 @@ class TestExecPool(unittest.TestCase):
 		self._execpool.execute(jsf)
 
 		# Execution pool timeout
-		etimeout = max(1, _TEST_LATENCY) + worktime * 3 * (1 +
+		etimeout = max(1, _TEST_LATENCY) + worktime * ExecPool._KILLDELAY * (1 +
 			(len(self._execpool._workers) + len(self._execpool._jobs)) // self._execpool._wkslim)
 		assert etimeout > worktime, 'Additional testcase parameters are invalid'
 		print('jobTimeoutChained() started wth worktime: {}, etimeout: {}'.format(worktime, etimeout))
@@ -266,9 +266,9 @@ class TestExecPool(unittest.TestCase):
 		worktime = _TEST_LATENCY * 5
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
-		# Execution pool timeout; Note: *3 because non-started jobs exist here
-		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3
-		assert _TEST_LATENCY * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
+		# Execution pool timeout; Note: *ExecPool._KILLDELAY because non-started jobs exist here
+		etimeout = (max(1, _TEST_LATENCY) + timeout) * ExecPool._KILLDELAY
+		assert _TEST_LATENCY * ExecPool._KILLDELAY < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
 		# Note: we need another execution pool to set memlimit (10 MB) there
 		epoolMem = 0.2  # Execution pool mem limit, GB
@@ -348,9 +348,9 @@ class TestExecPool(unittest.TestCase):
 		worktime = _TEST_LATENCY * 10  # Note: should be larger than 3*latency
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
-		# Execution pool timeout; Note: *3 because non-started jobs exist here and postponed twice
-		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3
-		assert _TEST_LATENCY * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
+		# Execution pool timeout; Note: * ExecPool._KILLDELAY because non-started jobs exist here and postponed twice
+		etimeout = (max(1, _TEST_LATENCY) + timeout) * ExecPool._KILLDELAY
+		assert _TEST_LATENCY * ExecPool._KILLDELAY < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
 
 		# Note: we need another execution pool to set memlimit (10 MB) there
 		epoolMem = 0.15  # Execution pool mem limit, GB
@@ -420,9 +420,9 @@ class TestExecPool(unittest.TestCase):
 		worktime = _TEST_LATENCY * 10  # Note: should be larger than 3*latency
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
-		# Execution pool timeout; Note: *3 because non-started jobs exist here and postponed twice
-		etimeout = (max(1, _TEST_LATENCY) + timeout) * 4
-		assert _TEST_LATENCY * 3 < worktime/2 and worktime < timeout and (
+		# Execution pool timeout; Note: * ExecPool._KILLDELAY because non-started jobs exist here and postponed twice
+		etimeout = (max(1, _TEST_LATENCY) + timeout) * (1 + ExecPool._KILLDELAY)
+		assert _TEST_LATENCY * ExecPool._KILLDELAY < worktime/2 and worktime < timeout and (
 			timeout < etimeout), 'Testcase parameters validation failed'
 
 		# Note: we need another execution pool to set memlimit (10 MB) there
@@ -469,7 +469,8 @@ class TestExecPool(unittest.TestCase):
 			self.assertFalse(jgms3.proc.returncode)
 			if jgmsp1.tstop > jgmsp2.tstop + _TEST_LATENCY:
 				# Canceled by chained timeout
-				self.assertLessEqual(jgmsp1.tstop - jgmsp1.tstart, worktime*1.25 + _TEST_LATENCY * 3)
+				self.assertLessEqual(jgmsp1.tstop - jgmsp1.tstart
+					, worktime*1.25 + _TEST_LATENCY * ExecPool._KILLDELAY)
 				self.assertTrue(jgmsp1.proc.returncode)
 			self.assertLessEqual(jgmsp2.tstop - jgmsp2.tstart, worktime)
 			self.assertTrue(jgmsp2.proc.returncode)
@@ -590,9 +591,10 @@ subprocess.call(args=('time', PYEXEC, '-c', '''{cprog}'''), stderr=fnull)
 		worktime = _TEST_LATENCY * 6  # Note: should be larger than 3*latency
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
-		# Execution pool timeout; Note: *3 because non-started jobs exist here and postponed twice
-		etimeout = (max(1, _TEST_LATENCY) + timeout) * 3
-		assert _TEST_LATENCY * 3 < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
+		# Execution pool timeout; Note: * ExecPool._KILLDELAY because non-started jobs exist here and postponed twice
+		etimeout = (max(1, _TEST_LATENCY) + timeout) * ExecPool._KILLDELAY
+		assert _TEST_LATENCY * ExecPool._KILLDELAY < worktime < timeout and timeout < etimeout, (
+			'Testcase parameters validation failed')
 
 		# Start not more than 3 simultaneous workers
 		with ExecPool(max(_WPROCSMAX, 3), latency=_TEST_LATENCY) as xpool:
@@ -642,7 +644,7 @@ class TestTasks(unittest.TestCase):
 		"""Test for the successful task execution"""
 		with ExecPool(2, latency=_TEST_LATENCY) as xpool:
 			# Prepare jobs task with the post-processing
-			worktime = max(0.5, _TEST_LATENCY * 3)
+			worktime = max(0.5, _TEST_LATENCY * ExecPool._KILLDELAY)
 			task = Task('TimeoutTask', onstart=mock.MagicMock(), ondone=mock.MagicMock(), params=0)
 			job1 = Job('j1', args=('sleep', str(worktime)), task=task, onstart=mock.MagicMock(), ondone=mock.MagicMock())
 			job2 = Job('j2', args=('sleep', str(worktime)), task=task, ondone=mock.MagicMock(), timeout=worktime*2)
@@ -663,9 +665,9 @@ class TestTasks(unittest.TestCase):
 		"""Test for the task of jobs termination by timeout"""
 		with ExecPool(2, latency=_TEST_LATENCY) as xpool:
 			# Prepare jobs task with the post-processing
-			worktime = max(0.5, _TEST_LATENCY * 3)
+			worktime = max(0.5, _TEST_LATENCY * ExecPool._KILLDELAY)
 			task = Task('TimeoutTask', onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock())
-			timelong = (worktime + _TEST_LATENCY) * 3  # Note: should be larger than 3*latency
+			timelong = (worktime + _TEST_LATENCY) * ExecPool._KILLDELAY  # Note: should be larger than 3*latency
 			job1 = Job('j1', args=('sleep', str(worktime)), task=task, onstart=mock.MagicMock(), ondone=mock.MagicMock())
 			job2 = Job('j2', args=('sleep', str(timelong)), task=task, ondone=mock.MagicMock(), timeout=worktime)
 
@@ -686,13 +688,14 @@ class TestTasks(unittest.TestCase):
 
 	@unittest.skipUnless(mock is not None, 'Requires defined mock')
 	def test_subtasksTimeout(self):
-		"""Test for the termination hierarchy of tasks of jobs by timeout"""
+		"""Test for the termination of the hierarchy of tasks of jobs by the timeout"""
 		# Note: it's OK if this test fails in case the computer has less than 3 CPU cores
 		with ExecPool(3, latency=_TEST_LATENCY) as xpool:
 			# Prepare jobs task with the post-processing
-			worktime = max(0.5, _TEST_LATENCY * 3)
+			worktime = max(0.5, _TEST_LATENCY * ExecPool._KILLDELAY)
+			# Note: should be larger than ExecPool._KILLDELAY*latency
+			timelong = (worktime + _TEST_LATENCY) * ExecPool._KILLDELAY
 			t1 = Task('Task1', onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock())
-			timelong = (worktime + _TEST_LATENCY) * 3  # Note: should be larger than 3*latency
 			j1 = Job('j1', args=('sleep', str(worktime)), task=t1
 				, onstart=mock.MagicMock(), ondone=mock.MagicMock())
 			st1 = Task('Subtask1', onstart=mock.MagicMock(), task=t1
@@ -725,10 +728,52 @@ class TestTasks(unittest.TestCase):
 			self.assertEqual(t1.numterm, 1)
 
 
+	@unittest.skipUnless(mock is not None, 'Requires defined mock')
+	def test_subtasksTimeoutExt(self):
+		"""Test for the termination of the extended hierarchy of tasks of jobs by the timeout"""
+		# Note: it's OK if this test fails in case the computer has less than 3 CPU cores
+		with ExecPool(3, latency=_TEST_LATENCY) as xpool:
+			# Prepare jobs task with the post-processing
+			worktime = max(0.5, _TEST_LATENCY * ExecPool._KILLDELAY)
+			# Note: should be larger than ExecPool._KILLDELAY*latency
+			timelong = worktime + _TEST_LATENCY * ExecPool._KILLDELAY
+			t1 = Task('Task1', onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock())
+			j1 = Job('j1', args=('sleep', str(2*worktime)), task=t1
+				, onstart=mock.MagicMock(), ondone=mock.MagicMock())
+			st1 = Task('Subtask1', onstart=mock.MagicMock(), task=t1
+				, ondone=mock.MagicMock(), onfinish=mock.MagicMock())
+			st1j1 = Job('st1j1', args=('sleep', str(timelong)), task=st1
+				, onstart=mock.MagicMock(), ondone=mock.MagicMock(), timeout=worktime)
+			st1j2 = Job('st1j2', args=('sleep', str(2*worktime)), task=st1, ondone=mock.MagicMock())
+
+			xpool.execute(j1)
+			xpool.execute(st1j1)
+			xpool.execute(st1j2)
+			xpool.join(timelong * 1.1)
+
+			j1.onstart.assert_called_once_with(j1)
+			st1j1.onstart.assert_called_once_with(st1j1)
+			st1.onstart.assert_called_once_with(st1)
+			t1.onstart.assert_called_once_with(t1)
+
+			st1j2.ondone.assert_not_called()
+			st1j1.ondone.assert_not_called()
+			st1.ondone.assert_not_called()
+			st1.onfinish.assert_called_once_with(st1)
+			self.assertEqual(st1.numadded, 2)
+			self.assertEqual(st1.numdone, 0)
+			self.assertEqual(st1.numterm, 2)
+			t1.ondone.assert_not_called()
+			t1.onfinish.assert_called_once_with(t1)
+			self.assertEqual(t1.numadded, 2)
+			self.assertEqual(t1.numdone, 0)
+			self.assertEqual(t1.numterm, 2)
+
+
 ################################################################################
 # WebUI related tests
 # import threading  # To request URL in parallel with execpool joining
-from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt, UiResFltStatus  #pylint: disable=C0413;  UiResCol
+from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt  #pylint: disable=C0413;  UiResCol, UiResFltStatus
 try:
 	# from urllib.parse import urlparse, urlencode
 	from urllib.request import urlopen #, Request
@@ -781,7 +826,8 @@ class TestWebUI(unittest.TestCase):
 		timeout = 10  # Note: should be larger than 3*latency
 		# worktime = max(1, _TEST_LATENCY) + (timeout * 2) // 1  # Job work time
 		worktime = 0.75 * timeout  # Job work time
-		assert _TEST_LATENCY * 3 < timeout and _TEST_LATENCY * 3 < worktime, 'Testcase parameters validation failed'
+		assert _TEST_LATENCY * ExecPool._KILLDELAY < timeout and _TEST_LATENCY * ExecPool._KILLDELAY < worktime, (
+			'Testcase parameters validation failed')
 
 		j1 = Job('j1', args=('sleep', str(worktime)), timeout=timeout)  # , onstart=mock.MagicMock()
 		j2 = Job('j2', args=('sleep', str(worktime*2)), timeout=timeout)  # , onstart=mock.MagicMock()
