@@ -8,15 +8,17 @@ A Lightweight Multi-Process Execution Pool with load balancing and customizable 
 \date: 2015-07 v1, 2017-06 v2
 
 ## Content
+- [Content](#content)
 - [Overview](#overview)
 - [Requirements](#requirements)
 - [API](#api)
 	- [Job](#job)
 	- [Task](#task)
+	- [AffinityMask](#affinitymask)
 	- [ExecPool](#execpool)
 	- [Optional Extensions](#optional-extensions)
 		- [WebUiApp](#webuiapp)
-		- [UICmd](#uicmd)
+		- [UiCmd](#uicmd)
 	- [Accessory Routines](#accessory-routines)
 - [Usage](#usage)
 	- [Usage Example](#usage-example)
@@ -261,8 +263,8 @@ AffinityMask(afnstep, first=True, sequential=cpusequential())
 		single-threaded worker, all units should be used for the multi-threaded
 		apps.
 	sequential  - sequential or cross nodes enumeration of the CPUs in the NUMA nodes:
-		None  - undefined, interpreted as crossnodes (the most widely used on servers)
-		False  - crossnodes
+		None  - undefined, interpreted as cross-nodes (the most widely used on servers)
+		False  - cross-nodes
 		True  - sequential
 
 		For two hardware threads per a physical CPU core, where secondary HW threads
@@ -287,7 +289,7 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 	wksnum: int  - number of resident worker processes, >=1. The reasonable
 		value <= logical CPUs (returned by cpu_count()) = NUMA nodes * node CPUs,
 		where node CPUs = CPU cores * HW treads per core.
-		The recomended value is max(cpu_count() - 1, 1) to leave one logical
+		The recommended value is max(cpu_count() - 1, 1) to leave one logical
 		CPU for the benchmarking framework and OS applications.
 
 		To guarantee minimal average RAM per a process, for example 2.5 GB
@@ -315,7 +317,7 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 
 	Internal attributes:
 	alive  - whether the execution pool is alive or terminating, bool.
-		Should be reseted to True on resuse after the termination.
+		Should be reseted to True on reuse after the termination.
 		NOTE: should be reseted to True if the execution pool is reused
 		after the joining or termination.
 	failures: [JobInfo]  - failed (terminated or crashed) jobs with timestamps.
@@ -424,9 +426,9 @@ def cpunodes():
 	"""
 	
 def cpusequential():
-	"""Enumeration type of the logical CPUs: crossnodes or sequential
+	"""Enumeration type of the logical CPUs: cross-nodes or sequential
 
-	The enumeration can be crossnodes starting with one hardware thread per each
+	The enumeration can be cross-nodes starting with one hardware thread per each
 	NUMA node, or sequential by enumerating all cores and hardware threads in each
 	NUMA node first.
 	For two hardware threads per a physical CPU core, where secondary hw threads
@@ -442,8 +444,8 @@ def cpusequential():
 	See details: http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service
 
 	return  - enumeration type of the logical CPUs, bool or None:
-		None  - was not defined, most likely crossnodes
-		False  - crossnodes
+		None  - was not defined, most likely cross-nodes
+		False  - cross-nodes
 		True  - sequential
 	"""
 ```

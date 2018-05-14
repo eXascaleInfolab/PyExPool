@@ -268,7 +268,8 @@ class TestExecPool(unittest.TestCase):
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
 		# Execution pool timeout; Note: *ExecPool._KILLDELAY because non-started jobs exist here
 		etimeout = (max(1, _TEST_LATENCY) + timeout) * ExecPool._KILLDELAY
-		assert _TEST_LATENCY * ExecPool._KILLDELAY < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
+		assert _TEST_LATENCY * ExecPool._KILLDELAY < worktime < timeout and timeout < etimeout, (
+			'Testcase parameters validation failed')
 
 		# Note: we need another execution pool to set memlimit (10 MB) there
 		epoolMem = 0.2  # Execution pool mem limit, GB
@@ -350,7 +351,8 @@ class TestExecPool(unittest.TestCase):
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
 		# Execution pool timeout; Note: * ExecPool._KILLDELAY because non-started jobs exist here and postponed twice
 		etimeout = (max(1, _TEST_LATENCY) + timeout) * ExecPool._KILLDELAY
-		assert _TEST_LATENCY * ExecPool._KILLDELAY < worktime < timeout and timeout < etimeout, 'Testcase parameters validation failed'
+		assert _TEST_LATENCY * ExecPool._KILLDELAY < worktime < timeout and timeout < etimeout, (
+			'Testcase parameters validation failed')
 
 		# Note: we need another execution pool to set memlimit (10 MB) there
 		epoolMem = 0.15  # Execution pool mem limit, GB
@@ -854,4 +856,4 @@ class TestWebUI(unittest.TestCase):
 
 if __name__ == '__main__':
 	if unittest.main().result:  # verbosity=2
-		print('Try to reexecute the tests (hot run) or set x2-3 larger TEST_LATENCY')
+		print('Try to re-execute the tests (hot run) or set x2-3 larger TEST_LATENCY')
