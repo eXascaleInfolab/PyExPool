@@ -104,7 +104,7 @@ except ImportError:
 _WEBUI = True
 if _WEBUI:
 	try:
-		from mpewui import *  # WebUiApp, UiCmdId, UiResOpt, UiResFmt, UiResCol, UiResFilterVal, SummaryBrief
+		from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt, UiResCol, UiResFilterVal, SummaryBrief
 	except ImportError as wuerr:
 		_WEBUI = False
 
@@ -251,6 +251,19 @@ def infodata(obj, propflt=None, objflt=None):
 			pcon.end is None and pval != pcon.beg) or pval < pcon.beg or pval >= pcon.end:
 				return None
 	return tuple([obj.__getattribute__(prop) for prop in (propflt if propflt else obj.iterprop())])  #pylint: disable=C0325
+
+
+def infoheader(objprops, propflt):
+	"""Form filtered header of the properties of the ObjInfo
+
+	Args:
+		objprops: iterable(str)  - object properties
+		propflt: list(str) - properties filter
+
+	Returns:
+		tuple(str)  - filtered property names
+	"""
+	return tuple([h for h in objprops if not propflt or h in propflt])
 
 
 def propslist(cls):
@@ -1350,16 +1363,35 @@ class ExecPool(object):
 
 
 	def __reviseUi(self):
-		"""Check and handle UI commands"""
+		"""Check and handle UI commands
+
+		The command id is set to None and
+		the result is formed in the following .data attributes:
+		- errmsg: str  - error message if any
+		- summary: SummaryBrief  - execution pool summary
+		- jobsInfo: list  - information about the failed jobs not associated to any tasks
+		- tasksInfo: list  - hierarchical information about the failed jobs with their tasks
+			starting from the root tasks
+		"""
 		# Process on the next iteration if the client request is not ready
 		if self._uicmd.id is None or not self._uicmd.cond.acquire(blocking=False):
 			return
-		if self._uicmd.id == UiCmdId.SUMMARY:
+		try:
 			# self.summary()  # TODO: implement each command in the dedicated function
 			# Read command parameters from the .data
 			data = self._uicmd.data
 			if data:
 				propflt = data.get(UiResOpt.cols)  # Properties (colons header)
+				# Be sure that the job/task name column is always included
+				if UiResCol.name.name not in propflt:
+					# Add name column as the first one
+					try:
+						propflt.insert(0, UiResCol.name.name)
+					except AttributeError as err:
+						data.clear()
+						self._uicmd.data['errmsg'] = ('Unexpected type of the UiResOpt.cols'
+							' filter values (not a list): ' + type(propflt).__name__)
+						raise
 				objflt = data.get(UiResOpt.flt)
 			else:
 				propflt = None
@@ -1371,37 +1403,71 @@ class ExecPool(object):
 			# Summary of the execution pool:
 			# Note: executed in the main thread, so the lock check is required only
 			# to check for the termination
-			acqlock = self.__termlock.acquire(True, 0.05)  # 50 ms
+			acqlock = self.__termlock.acquire(True, 0.1)  # 100 ms
 			if not acqlock or not self.alive:
 				# Note: it just interrupts job start, but does not cause termination
 				# of the whole (already terminated) execution pool
+				self._uicmd.data['errmsg'] = 'The execution pool{} is not alive'.format(
+					'' if not self.name else ' ' + self.name)
 				raise EnvironmentError((errno.EINTR,  # errno.ERESTART
-					'Jobs can not be started because the execution pool has been terminated'))
-			with self.__termlock:
-				smr = SummaryBrief(workers=len(self._workers), jobs=len(self._workers)
-					, jobsFailed=len(self.failures), tasks=len(self.tasks))
-				# Evaluate remained vats
-				# Evaluate tasksFailed and tasksRootFailed from failures
-				tasksRootFailed = 0
-				tasksFailed = set()
+					("WARNING, The execution pool{} is terminated and can't response the UI command: {}"
+					).format('' if not self.name else ' ' + self.name, self._uicmd.id.name, file=sys.stderr)))
+			smr = SummaryBrief(workers=len(self._workers), jobs=len(self._workers)
+				, jobsFailed=len(self.failures), tasks=len(self.tasks))
+			acqlock.release()
+			# Evaluate remained vars
+			# Evaluate tasksFailed and tasksRootFailed from failures
+			tasksRootFailed = 0
+			tasksFailed = set()
+			for fji in self.failures:
+				task = fji.task
+				while task:
+					if task not in tasksFailed:
+						if task.task is None:
+							tasksRootFailed += 1
+						tasksFailed.add(task)
+					task = task.task
+			smr.tasksRootFailed = tasksRootFailed
+			smr.tasksFailed = len(tasksFailed)
+			# Evaluate tasksRoot from tasks
+			tasksRoot = 0
+			for task in self.tasks:
+				if task.task is None:
+					tasksRoot += 1
+			smr.tasksRoot = tasksRoot
+			data['summary'] = smr
+
+			# Form command-specific data
+			if self._uicmd.id == UiCmdId.FAILURES:
+				# Fetch info about the failed jobs considering the filtering
+				jobsInfo = None  # Information about the failed jobs not assigned to any tasks
+				tinfe0 = dict()  # Task information extended, bottom level
+				header = True  # Show jobs header
 				for fji in self.failures:
 					task = fji.task
-					while task:
-						if task not in tasksFailed:
-							if task.task is None:
-								tasksRootFailed += 1
-							tasksFailed.add(task)
-						task = task.task
-				smr.tasksRootFailed = tasksRootFailed
-				smr.tasksFailed = len(tasksFailed)
-				# Evaluate tasksRoot from tasks
-				tasksRoot = 0
-				for task in self.tasks:
-					if task.task is None:
-						tasksRoot += 1
-				smr.tasksRoot = tasksRoot
-				data['summary'] = smr
-				# data['jobsInfo'] = [data in ]
+					data = infodata(fji, propflt, objflt)
+					if task is None:
+						if not data:
+							continue
+						if header:
+							jobsInfo = [infoheader(JobInfo.iterprop(), propflt)]  #pylint: disable=E1101
+							header = False
+						jobsInfo.append(data)
+					else:
+						tie = tinfe0.get(task)
+						if tie is None:
+							tdata = infodata(TaskInfo(task), propflt, objflt)
+							tie = tinfe0.setdefault(task, TaskInfoExt(props=None if not tdata else
+								(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
+								, jobs=[JobInfo.iterprop()]))  #pylint: disable=E1101
+						tie.jobs.append(data)
+				# List jobs only if any payload exists besides the header
+				if len(jobsInfo) >= 2:
+					data['jobsInfo'] = jobsInfo
+				if not tinfe0:
+					return
+
+				
 				# data['tasksInfo'] =
 
 				# Prepare failures considering format, filtering and membership in tasks
@@ -1409,50 +1475,56 @@ class ExecPool(object):
 
 
 
-			# - the number of workers and deferred/postponed jobs;
-			# - the number and statistics (timestamps of the start and end, exit code)
-			# of the terminated or crashed jobs that are not [going to be] restarted.
-			# Note: restarting jobs are restarted at once (on the same iteration) after
-			# they have been notified as completed.
-			# - total execution time, memory consumption vs available, ...
-			# data['summary'] = {
-			# 	'workers': {
-			# 		''
-			# 	}
-			# }
-			# data.append(['#', 'name'])  # Number and Name
-			# data[0].extend(cols)
-			# for job in jobs:
-			# 	i += 1
-			# 	data.append[[i, job.name]]
-			# 	drow = data[-1]
-			# 	while cols:
-			# 		cl = cols.pop()
-			# 		if cl == UiResCol.pid.name:
-			# 			drow.append('' if not job.proc else str(job.proc.pid))
-			# 		elif cl == UiResCol.state.name:
-			# 			drow.append('w' if jobs is self._workers else 'd')
-			# 		elif cl == UiResCol.duration.name:
-			# 			drow.append('' if not job.tstart else str(ctime - job.tstart))
-			# 		elif cl == UiResCol.memory.name:
-			# 			if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
-			# 				drow.append('' if not job.mem else str(job.mem))
-			# 		elif cl == UiResCol.task.name:
-			# 			drow.append(job.task)
-			# 		elif cl == UiResCol.category.name:
-			# 			if _CHAINED_CONSTRAINTS:
-			# 				drow.append(job.category)
-			# 		else:
-			# 			print('WARNING, Unknown column requested: {}. {}'.format(cl, traceback.format_exc(5)), file=sys.stderr)
+				# - the number of workers and deferred/postponed jobs;
+				# - the number and statistics (timestamps of the start and end, exit code)
+				# of the terminated or crashed jobs that are not [going to be] restarted.
+				# Note: restarting jobs are restarted at once (on the same iteration) after
+				# they have been notified as completed.
+				# - total execution time, memory consumption vs available, ...
+				# data['summary'] = {
+				# 	'workers': {
+				# 		''
+				# 	}
+				# }
+				# data.append(['#', 'name'])  # Number and Name
+				# data[0].extend(cols)
+				# for job in jobs:
+				# 	i += 1
+				# 	data.append[[i, job.name]]
+				# 	drow = data[-1]
+				# 	while cols:
+				# 		cl = cols.pop()
+				# 		if cl == UiResCol.pid.name:
+				# 			drow.append('' if not job.proc else str(job.proc.pid))
+				# 		elif cl == UiResCol.state.name:
+				# 			drow.append('w' if jobs is self._workers else 'd')
+				# 		elif cl == UiResCol.duration.name:
+				# 			drow.append('' if not job.tstart else str(ctime - job.tstart))
+				# 		elif cl == UiResCol.memory.name:
+				# 			if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
+				# 				drow.append('' if not job.mem else str(job.mem))
+				# 		elif cl == UiResCol.task.name:
+				# 			drow.append(job.task)
+				# 		elif cl == UiResCol.category.name:
+				# 			if _CHAINED_CONSTRAINTS:
+				# 				drow.append(job.category)
+				# 		else:
+				# 			print('WARNING, Unknown column requested: {}. {}'.format(cl, traceback.format_exc(5)), file=sys.stderr)
+			elif self._uicmd.id == UiCmdId.LIST_JOBS:
+				# TODO: should the self._uicmd.data be reseted for the completed exec pool?
+				if not (self._workers and self._jobs):
+					return
+			else:
+				self._uicmd.data['errmsg'] = 'Unknown UI command: ' + self._uicmd.id.name
+				print('WARNING, Unknown command requested:', self._uicmd.id.name, file=sys.stderr)
+		except Exception as err:
+			print('ERROR, UI command processing failed: {}. {}'.format(
+				err, traceback.format_exc(5)), file=sys.stderr)
+			raise
+		finally:
 			self._uicmd.id = None  # Reset command id for the completed command
 			self._uicmd.cond.notify()
-		elif self._uicmd.id == UiCmdId.LIST_JOBS:
-			# TODO: should the self._uicmd.data be reseted for the completed exec pool?
-			if not (self._workers and self._jobs):
-				return
-		else:
-			print('WARNING, Unknown command requested: {}. {}'.format(self._uicmd.id, traceback.format_exc(5)), file=sys.stderr)
-		self._uicmd.cond.release()
+			self._uicmd.cond.release()
 
 
 	def __enter__(self):
@@ -1551,11 +1623,10 @@ class ExecPool(object):
 			print('WARNING, {} jobs are failed in the ExecPool {}'.format(
 				len(self.failures), '' if not self.name else self.name)
 				, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-		# Header of the jobs
 		indent = '  '  # Indent for each level of the Task/Jobs tree
 		colsep = ' '  # Table column separator
 		tinfe0 = dict()  # Task information extended, bottom level
-		# Body of the jobs data as a table
+		# Print jobs properties as a table or fetch them to compose failed tasks hierarchy
 		header = True  # Show header for the initial output
 		for fji in self.failures:
 			data = infodata(fji)
@@ -1565,7 +1636,8 @@ class ExecPool(object):
 			if fji.task is None:
 				if header:
 					print('\nFAILED jobs not assigned to any tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-					print(colsep.join([tblfmt(v) for v in JobInfo.iterprop()])  #pylint: disable=E1101
+					# Header of the jobs
+					print(colsep.join([tblfmt(h) for h in JobInfo.iterprop()])  #pylint: disable=E1101
 						, file=sys.stderr if _DEBUG_TRACE else sys.stdout)  #pylint: disable=E1101
 					header = False
 				print(colsep.join([tblfmt(v) for v in data]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
@@ -2335,7 +2407,7 @@ class ExecPool(object):
 		timeout: int  - execution timeout in seconds before the workers termination, >= 0.
 			0 means unlimited time. The time is measured SINCE the first job
 			was scheduled UNTIL the completion of all scheduled jobs.
-		return bool  - True on graceful completion, Flase on termination by the specified
+		return bool  - True on graceful completion, False on termination by the specified
 			constraints (timeout, memory limit, etc.)
 		"""
 		#assert timeout >= 0., 'timeout validation failed'

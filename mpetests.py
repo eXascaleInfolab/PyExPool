@@ -841,7 +841,7 @@ class TestWebUI(unittest.TestCase):
 
 		# Fetch data in the concurrent thread
 		# global _webuiapp
-		# _webuiapp.cmd.id = UiCmdId.SUMMARY
+		# _webuiapp.cmd.id = UiCmdId.FAILURES
 		# http://localhost:8080/?fmt=json&fltStatus=work,defer
 		# url = ''.join(('http://', self.host, str(self.port), '/?'
 		# 	, UiResOpt.fmt.name	,'=', UiResFmt.json.name

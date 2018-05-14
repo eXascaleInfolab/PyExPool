@@ -494,7 +494,7 @@ args = (PYEXEC, '-c',
 import subprocess
 
 basenet = '{jobname}' + '{_EXTNETFILE}'
-#print('basenet: ' + basenet, file=sys.stderr)
+#print('basenet:', basenet, file=sys.stderr)
 for i in range(1, {shufnum} + 1):
 	netfile = ''.join(('{jobname}', '.', str(i), '{_EXTNETFILE}'))
 	if {overwrite} or not os.path.exists(netfile):

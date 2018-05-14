@@ -102,7 +102,7 @@ def inferNumType(val):
 	return val
 
 
-UiCmdId = IntEnum('UiCmdId', 'SUMMARY LIST_JOBS')  # 'JOB_INFO', 'LIST_TASKS', 'TASK_INFO'
+UiCmdId = IntEnum('UiCmdId', 'FAILURES LIST_JOBS')  # 'JOB_INFO', 'LIST_TASKS', 'TASK_INFO'
 """UI Command Identifier associated with the REST URL"""
 
 UiResOpt = IntEnum('UiResOpt', 'fmt cols flt')  # fltStatus
@@ -165,6 +165,48 @@ class UiCmd(object):
 		self.data = data
 
 
+class SummaryBrief(object):
+	"""Brief summary of the ExecPool state"""
+
+	__slots__ = ('workers', 'jobs', 'jobsFailed', 'tasks', 'tasksFailed', 'tasksRoot', 'tasksRootFailed')
+
+	def __init__(self, workers=0, jobs=0, jobsFailed=0, tasksFailed=0, tasks=0, tasksRootFailed=0, tasksRoot=0):
+		"""Brief summary initialization
+
+		workers: int  - the number of workers (executors, executing jobs)
+		jobs: int  - the number of (deferred/postoponed/regular) jobs
+		jobsFailed: int  - the number of failed jobs
+		tasks: int  - total number of (flattened) tasks
+		tasksFailed: int  - total number of tasks having at least one subtask/job failed
+		tasksRoot: int  - total number of the root (major/super) tasks
+		tasksRootFailed: int  - total number of root tasks having at least one subtask/job failed
+		"""
+		self.workers = workers
+		self.jobs = jobs
+		self.jobsFailed = jobsFailed
+		self.tasks = tasks
+		self.tasksFailed = tasksFailed
+		self.tasksRoot = tasksRoot
+		self.tasksRootFailed = tasksRootFailed
+
+
+# class Failures(object):
+# 	"""Failed jobs and tasks information extended with the total summary"""
+# 	__slots__ = ('summary', 'jobsInfo', 'tasksInfo')
+#
+# 	def __init__(self, summary, jobsInfo, tasksInfo):
+# 		"""Failres info initialization
+#
+# 		Args:
+# 			summary: SummaryBrief  - brief total summary
+# 			jobsInfo: list  - info about the failed jobs not assigned to any task
+# 			tasksInfo: list  - info about the failed jobs and their owner tasks
+# 		"""
+# 		self.summary = summary
+# 		self.jobsInfo = jobsInfo
+# 		self.tasksInfo = tasksInfo
+
+
 class WebUiApp(threading.Thread):
 	"""WebUI App starting in the dedicated thread and providing remote interface to inspect ExecPool"""
 	def __init__(self, host='localhost', port=8080, name=None, daemon=None, group=None, args=(), kwargs={}):
@@ -192,7 +234,7 @@ class WebUiApp(threading.Thread):
         # Initialize web app before starting the thread
 		webuiapp = bottle.default_app()  # The same as bottle.Bottle()
 		mroot = partial(WebUiApp.root, self.cmd)  # Define partial function with the substituted first parameter
-		webuiapp.route('/', callback=mroot, name=UiCmdId.SUMMARY.name)
+		webuiapp.route('/', callback=mroot, name=UiCmdId.FAILURES.name)
 		webuiapp.route('/jobs', callback=mroot, name=UiCmdId.LIST_JOBS.name)
 		# TODO, add interfaces to inspect tasks and selected jobs/tasks:
 		# webuiapp.route('/job/<name>', callback=mroot, name=UiCmdId.JOB_INFO.name)
@@ -222,7 +264,7 @@ class WebUiApp(threading.Thread):
 
 	@staticmethod
 	def root(cmd):
-		"""Default command of the UI (UiCmdId.SUMMARY)
+		"""Default command of the UI (UiCmdId.FAILURES)
 
 		Shows:
 		- execpool name if any
@@ -260,7 +302,7 @@ class WebUiApp(threading.Thread):
 		"""
 		# return 'Root works'
 		with cmd.cond:
-			cmd.id = UiCmdId.SUMMARY
+			cmd.id = UiCmdId.FAILURES
 			# Parameters fetching options:
 			# 1. The arguments extracted from the URL:
 			# bottle.request.url_args		# Empty
@@ -279,7 +321,9 @@ class WebUiApp(threading.Thread):
 					fmt = UiResFmt[qdict[fmtKey]]  #pylint: disable=E1136
 					# del qdict[fmtKey]  #pylint: disable=E1138
 				except KeyError:
-					bottle.response.status = 400
+					# 400  - Bad Request
+					# 415  - Unsupported Media Type
+					bottle.response.status = 415  # 400
 					return 'Invalid URL parameter value of "{}": {}'.format(fmtKey, qdict[fmtKey])  #pylint: disable=E1136
 					# raise HTTPResponse(body='Invalid URL parameter value of "fmt": ' + qdict['fmt'], status=400)
 			# Prepare .data for the request parameters storage
@@ -318,7 +362,15 @@ class WebUiApp(threading.Thread):
 			# Now .data contains the response results
 			# Read the result and transfer to the client
 			if not cmd.data:
+				# 500 Internal Server Error
+				bottle.response.status = 500
 				return ''
+			elif len(cmd.data) == 1 and cmd.data['errmsg']:
+				# Note: occurs mostly if the execution pool is finished
+				# 503  - Service Unavailable
+				bottle.response.status = 503
+				return cmd.data['errmsg']
+
 			# Expected format of data is a table: header, rows
 			return json.dumps(cmd.data)
 			if fmt == UiResFmt.json:
@@ -339,6 +391,9 @@ class WebUiApp(threading.Thread):
 	@staticmethod
 	def jobs(cmd):
 		"""Jobs listing including workers (UiCmdId.LIST_JOBS)"""
+		# 501 Not Implemented
+		bottle.response.status = 501
+		return 'Not Implemented'
 		with cmd.cond:
 			cmd.id = UiCmdId.LIST_JOBS
 
