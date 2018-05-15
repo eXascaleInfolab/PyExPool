@@ -2059,6 +2059,9 @@ class ExecPool(object):
 		terminating = False  # At least one worker is terminating
 		tcur = time.perf_counter()  # Current timestamp
 		for job in self._workers:
+			# Note: check for the termination in all cycles
+			if not self.alive:
+				return
 			if job.proc.poll() is not None:  # Not None means the process has been terminated / completed
 				completed.add(job)
 				continue
@@ -2123,6 +2126,9 @@ class ExecPool(object):
 		if _CHAINED_CONSTRAINTS and (jtorigs or jmorigs):
 			# Traverse over the workers with defined job category and size
 			for job in self._workers:
+				# Note: check for the termination in all cycles
+				if not self.alive:
+					return
 				# Note: even in the seldom case of the terminating job, it should be marked if chained-dependent
 				# of the constraints violating job, to not be restarted (by request on timeout) or postponed
 				if job.category is not None and job.size:
@@ -2163,7 +2169,7 @@ class ExecPool(object):
 				print('  Updating chained constraints in non-started jobs: ', ', '.join([job.name for job in self._jobs]))
 			jrot = 0  # Accumulated rotation
 			ij = 0  # Job index
-			while ij < len(self._jobs) - jrot:
+			while ij < len(self._jobs) - jrot:  # Note: len(jobs) catches external jobs termination / modification
 				job = self._jobs[ij]
 				if job.category is not None and job.size:
 					# Travers over the chain origins and check matches skipping the origins themselves
@@ -2195,6 +2201,9 @@ class ExecPool(object):
 				ij += 1
 			# Recover initial order of the jobs
 			self._jobs.rotate(jrot)
+		# check for the external termination
+		if not self.alive:
+			return
 		# Remove terminated/completed jobs from worker processes
 		# ATTENTINON: it should be done after the _CHAINED_CONSTRAINTS check to
 		# mark the completed dependent jobs to not be restarted / postponed
@@ -2225,11 +2234,14 @@ class ExecPool(object):
 			while memov >= 0 and len(self._workers) - len(pjobs) > 1:
 				# Reinitialize the heaviest remained jobs and continue
 				for job in self._workers:
-					if not job.terminates and job not in pjobs:
+					if not self.alive or (not job.terminates and job not in pjobs):
 						hws.append(job)
 						break
 				assert self._workers and hws, 'Non-terminated worker processes must exist here'
 				for job in self._workers:
+					# Note: check for the termination in all cycles
+					if not self.alive:
+						return
 					# Note: use some threshold for mem evaluation and consider starting time on scheduling
 					# to terminate first the least worked processes (for approximately the same memory consumption)
 					dr = 0.1  # Threshold parameter ratio, recommended value: 0.05 - 0.15; 0.1 means delta of 10%
@@ -2248,7 +2260,7 @@ class ExecPool(object):
 			# New workers limit for the postponing job  # max(self._wkslim, len(self._workers))
 			wkslim = self._wkslim - len(pjobs)
 			assert wkslim >= 1, 'The number of workers should not be less than 1'
-			if pjobs:
+			if pjobs and self.alive:
 				terminating = True
 				while pjobs:
 					job = pjobs.pop()
@@ -2264,6 +2276,9 @@ class ExecPool(object):
 		# Process completed (and terminated) jobs: execute callbacks and remove the workers
 		#cterminated = False  # Completed terminated procs processed
 		for job in completed:
+			# Note: check for the termination in all cycles
+			if not self.alive:
+				return
 			# The completion is graceful only if the termination requests were not received
 			self.__complete(job, not job.terminates and not job.proc.returncode)
 			exectime = job.tstop - job.tstart
@@ -2321,7 +2336,7 @@ class ExecPool(object):
 		if _DEBUG_TRACE >= 2:
 			print('  Nonstarted jobs: ', ', '.join(['{} ({})'.format(job.name, job.wkslim) for job in self._jobs]))
 		if not terminating:  # Start only after the terminated jobs terminated and released the memory
-			while self._jobs and len(self._workers) < self._wkslim:
+			while self._jobs and len(self._workers) < self._wkslim and self.alive:
 				#if _DEBUG_TRACE >= 3:
 				#	print('  "{}" (expected totmem: {:.4f} / {:.4f} GB) is being rescheduled, {} non-started jobs: {}'
 				#		.format(self._jobs[0].name, 0 if not self.memlimit else memall + job.mem, self.memlimit
