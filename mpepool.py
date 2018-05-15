@@ -104,7 +104,7 @@ except ImportError:
 _WEBUI = True
 if _WEBUI:
 	try:
-		from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt, UiResCol, UiResFilterVal, SummaryBrief
+		from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResCol, SummaryBrief
 	except ImportError as wuerr:
 		_WEBUI = False
 
@@ -417,6 +417,67 @@ class TaskInfoExt(object):
 		self.props = props
 		self.jobs = jobs
 		self.subtasks = subtasks
+
+
+def tasksInfoExt(tinfe0, propflt=None, objflt=None):
+	"""Form hierarchy of the extended information about the tasks
+
+	Args:
+		tinfe0: dict(Task, TaskInfoExt)  - bottom level of the hierarchy (tasks having jobs)
+		propflt: list(str)  - properties filter
+		objflt: dict(str, UiResFilterVal)  - objects (tasks/jobs) filter
+
+	Returns:
+		dict(Task, TaskInfoExt)  - resulting hierarchy of TaskInfoExt
+	"""
+	ties = dict()  # dict(Task, TaskInfoExt) - Tasks Info hierarchy
+	for task, tie in viewitems(tinfe0):
+		# print('> Preparing for the output task {} (super-task: {}), tie {} jobs and {} subtasks'.format(
+		# 	task.name, '-' if not task.task else task.task.name,  0 if not tie.jobs else len(tie.jobs)
+		# 	, 0 if not tie.subtasks else len(tie.subtasks))
+		# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		if task.task is None:
+			# Add or extend with jobs a root task
+			# Note: the task can be already initialized if it has subtasks
+			tinfe = ties.get(task)
+			if tinfe is None:
+				ties[task] = tie
+			else:
+				tinfe.jobs = tie.jobs
+				assert tinfe.props[1] == tie.props[1], task.name + ' task properties desynchronized'
+		else:
+			# print('>> task {} (super-task: {})'.format(task.name, task.task.name), file=sys.stderr)
+			while task.task is not None:
+				task = task.task
+				newtie = ties.get(task)
+				if newtie is None:
+					# Add new super-task to the hierarchy
+					# Note: infodata() should not yield None here
+					newtie = tinfe0.get(task)
+					# It is possible that the super-task has no any [failed] jobs
+					# and, hence, is not present in tinfe0
+					if newtie:
+						assert newtie.subtasks is None, (
+							'New super-task {} should not have any subtasks yet'.format(task.name))
+						newtie.subtasks = [tie]
+					else:
+						tdata = infodata(TaskInfo(task), propflt, objflt)
+						newtie = TaskInfoExt(props=None if not tdata else
+							(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
+							, subtasks=[tie])
+					ties[task] = newtie
+					# print('>> New subtask {} added to {}'.format(tie.props[1][0], task.name)
+					# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+				else:
+					# Note: subtasks can be None if this task contains jobs
+					if newtie.subtasks is None:
+						newtie.subtasks = [tie]
+					else:
+						newtie.subtasks.append(tie)  # Omit the header
+					# print('>> Subtask {} added to {}: {}'.format(tie.props[1][0], task.name, tie.subtasks)
+					# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+				tie = newtie
+	return ties
 
 
 def printDepthFirst(tinfext, cindent='', indstep='  ', colsep=' '):
@@ -1403,8 +1464,10 @@ class ExecPool(object):
 			# Summary of the execution pool:
 			# Note: executed in the main thread, so the lock check is required only
 			# to check for the termination
-			acqlock = self.__termlock.acquire(True, 0.1)  # 100 ms
+			acqlock = self.__termlock.acquire(True, 0.01)  # 10 ms
 			if not acqlock or not self.alive:
+				if acqlock:
+					self.__termlock.release()
 				# Note: it just interrupts job start, but does not cause termination
 				# of the whole (already terminated) execution pool
 				self._uicmd.data['errmsg'] = 'The execution pool{} is not alive'.format(
@@ -1412,6 +1475,7 @@ class ExecPool(object):
 				raise EnvironmentError((errno.EINTR,  # errno.ERESTART
 					("WARNING, The execution pool{} is terminated and can't response the UI command: {}"
 					).format('' if not self.name else ' ' + self.name, self._uicmd.id.name, file=sys.stderr)))
+					
 			smr = SummaryBrief(workers=len(self._workers), jobs=len(self._workers)
 				, jobsFailed=len(self.failures), tasks=len(self.tasks))
 			acqlock.release()
@@ -1441,79 +1505,45 @@ class ExecPool(object):
 			if self._uicmd.id == UiCmdId.FAILURES:
 				# Fetch info about the failed jobs considering the filtering
 				jobsInfo = None  # Information about the failed jobs not assigned to any tasks
-				tinfe0 = dict()  # Task information extended, bottom level
+				tinfe0 = dict()  # dict(Task, TaskInfoExt)  - Task information extended, bottom level of the hierarchy
 				header = True  # Show jobs header
 				for fji in self.failures:
 					task = fji.task
-					data = infodata(fji, propflt, objflt)
+					jdata = infodata(fji, propflt, objflt)
 					if task is None:
-						if not data:
+						if not jdata:
 							continue
 						if header:
 							jobsInfo = [infoheader(JobInfo.iterprop(), propflt)]  #pylint: disable=E1101
 							header = False
-						jobsInfo.append(data)
+						jobsInfo.append(jdata)
 					else:
 						tie = tinfe0.get(task)
 						if tie is None:
 							tdata = infodata(TaskInfo(task), propflt, objflt)
 							tie = tinfe0.setdefault(task, TaskInfoExt(props=None if not tdata else
 								(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
-								, jobs=[JobInfo.iterprop()]))  #pylint: disable=E1101
-						tie.jobs.append(data)
+								, jobs=None if not jdata else [JobInfo.iterprop()]))  #pylint: disable=E1101
+						if jdata:
+							tie.jobs.append(jdata)
 				# List jobs only if any payload exists besides the header
-				if len(jobsInfo) >= 2:
+				if jobsInfo:
+					# Note: jobsInfo should include at least a header and one job if not empty
+					assert len(jobsInfo) >= 2, 'Unexpected length of jobsInfo'
 					data['jobsInfo'] = jobsInfo
 				if not tinfe0:
 					return
 
-				
-				# data['tasksInfo'] =
-
-				# Prepare failures considering format, filtering and membership in tasks
-				# Body of the jobs data as a table
-
-
-
-				# - the number of workers and deferred/postponed jobs;
-				# - the number and statistics (timestamps of the start and end, exit code)
-				# of the terminated or crashed jobs that are not [going to be] restarted.
-				# Note: restarting jobs are restarted at once (on the same iteration) after
-				# they have been notified as completed.
-				# - total execution time, memory consumption vs available, ...
-				# data['summary'] = {
-				# 	'workers': {
-				# 		''
-				# 	}
-				# }
-				# data.append(['#', 'name'])  # Number and Name
-				# data[0].extend(cols)
-				# for job in jobs:
-				# 	i += 1
-				# 	data.append[[i, job.name]]
-				# 	drow = data[-1]
-				# 	while cols:
-				# 		cl = cols.pop()
-				# 		if cl == UiResCol.pid.name:
-				# 			drow.append('' if not job.proc else str(job.proc.pid))
-				# 		elif cl == UiResCol.state.name:
-				# 			drow.append('w' if jobs is self._workers else 'd')
-				# 		elif cl == UiResCol.duration.name:
-				# 			drow.append('' if not job.tstart else str(ctime - job.tstart))
-				# 		elif cl == UiResCol.memory.name:
-				# 			if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
-				# 				drow.append('' if not job.mem else str(job.mem))
-				# 		elif cl == UiResCol.task.name:
-				# 			drow.append(job.task)
-				# 		elif cl == UiResCol.category.name:
-				# 			if _CHAINED_CONSTRAINTS:
-				# 				drow.append(job.category)
-				# 		else:
-				# 			print('WARNING, Unknown column requested: {}. {}'.format(cl, traceback.format_exc(5)), file=sys.stderr)
+				# Iteratively form the hierarchy of tasks from the bottom level
+				ties = tasksInfoExt(tinfe0, propflt, objflt)
+				if ties:
+					data['tasksInfo'] = list(viewvalues(ties))
 			elif self._uicmd.id == UiCmdId.LIST_JOBS:
 				# TODO: should the self._uicmd.data be reseted for the completed exec pool?
 				if not (self._workers and self._jobs):
 					return
+			elif self._uicmd.id == UiCmdId.LIST_TASKS:
+				pass
 			else:
 				self._uicmd.data['errmsg'] = 'Unknown UI command: ' + self._uicmd.id.name
 				print('WARNING, Unknown command requested:', self._uicmd.id.name, file=sys.stderr)
@@ -1619,13 +1649,17 @@ class ExecPool(object):
 
 	def _traceFailures(self):
 		"""Trace failed tasks with their jobs and jobs not belonging to any tasks"""
-		if self.failures:
-			print('WARNING, {} jobs are failed in the ExecPool {}'.format(
-				len(self.failures), '' if not self.name else self.name)
-				, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		# Note: the lock for failures had to be used if the ExecPool would not be finished (unexpected)
+		assert not (self._workers or self._jobs), (
+			'Failures tracing is expected to be called after the ExecPool is finished')
+		if not self.failures:
+			return
+		print('WARNING, {} jobs are failed in the ExecPool {}'.format(
+			len(self.failures), '' if not self.name else self.name)
+			, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		indent = '  '  # Indent for each level of the Task/Jobs tree
 		colsep = ' '  # Table column separator
-		tinfe0 = dict()  # Task information extended, bottom level
+		tinfe0 = dict()  # dict(Task, TaskInfoExt)  - Task information extended, bottom level of the hierarchy
 		# Print jobs properties as a table or fetch them to compose failed tasks hierarchy
 		header = True  # Show header for the initial output
 		for fji in self.failures:
@@ -1651,46 +1685,51 @@ class ExecPool(object):
 			return
 
 		# Iteratively form the hierarchy of failed tasks from the bottom level
-		ties = dict()
-		for task, tie in viewitems(tinfe0):
-			# print('> Preparing for the output task {} (super-task: {}), tie {} jobs and {} subtasks'.format(
-			# 	task.name, '-' if not task.task else task.task.name,  0 if not tie.jobs else len(tie.jobs)
-			# 	, 0 if not tie.subtasks else len(tie.subtasks))
-			# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-			if task.task is None:
-				# Add or extend with jobs a root task
-				tinfe = ties.get(task)
-				if tinfe is None:
-					ties[task] = tie
-				else:
-					tinfe.jobs = tie.jobs
-					assert tinfe.props[1] == tie.props[1], '{} task properties are not synchronized'
-			else:
-				# print('>> task {} (super-task: {})'.format(task.name, task.task.name), file=sys.stderr)
-				while task.task is not None:
-					task = task.task
-					if ties.get(task) is None:
-						# Add new super-task to the hierarchy
-						# Note: infodata() should not yield None here
-						newtie = tinfe0.get(task)
-						# It is possible that the super-task has no any [failed] jobs
-						# and, hence, is not present in tinfe0
-						if newtie:
-							assert newtie.subtasks is None, (
-								'New super-task {} should not have any subtasks yet'.format(task.name))
-							newtie.subtasks = [tie]
-						else:
-							newtie = TaskInfoExt(props=(TaskInfo.iterprop()  #pylint: disable=E1101
-								, infodata(TaskInfo(task))), subtasks=[tie])
-						ties[task] = newtie
-						# print('>> New subtask {} added to {}'.format(tie.props[1][0], task.name)
-						# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-					else:
-						newtie = ties[task]
-						newtie.subtasks.append(tie)  # Omit the header
-						# print('>> Subtask {} added to {}: {}'.format(tie.props[1][0], task.name, tie.subtasks)
-						# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-					tie = newtie
+		ties = tasksInfoExt(tinfe0)
+		# ties = dict()  # dict(Task, TaskInfoExt) - Tasks Info hierarchy
+		# for task, tie in viewitems(tinfe0):
+		# 	# print('> Preparing for the output task {} (super-task: {}), tie {} jobs and {} subtasks'.format(
+		# 	# 	task.name, '-' if not task.task else task.task.name,  0 if not tie.jobs else len(tie.jobs)
+		# 	# 	, 0 if not tie.subtasks else len(tie.subtasks))
+		# 	# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		# 	if task.task is None:
+		# 		# Add or extend with jobs a root task
+		# 		tinfe = ties.get(task)
+		# 		if tinfe is None:
+		# 			ties[task] = tie
+		# 		else:
+		# 			tinfe.jobs = tie.jobs
+		# 			assert tinfe.props[1] == tie.props[1], task.name + ' task properties desynchronized'
+		# 	else:
+		# 		# print('>> task {} (super-task: {})'.format(task.name, task.task.name), file=sys.stderr)
+		# 		while task.task is not None:
+		# 			task = task.task
+		# 			if ties.get(task) is None:
+		# 				# Add new super-task to the hierarchy
+		# 				# Note: infodata() should not yield None here
+		# 				newtie = tinfe0.get(task)
+		# 				# It is possible that the super-task has no any [failed] jobs
+		# 				# and, hence, is not present in tinfe0
+		# 				if newtie:
+		# 					assert newtie.subtasks is None, (
+		# 						'New super-task {} should not have any subtasks yet'.format(task.name))
+		# 					newtie.subtasks = [tie]
+		# 				else:
+		# 					newtie = TaskInfoExt(props=(TaskInfo.iterprop()  #pylint: disable=E1101
+		# 						, infodata(TaskInfo(task))), subtasks=[tie])
+		# 				ties[task] = newtie
+		# 				# print('>> New subtask {} added to {}'.format(tie.props[1][0], task.name)
+		# 				# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		# 			else:
+		# 				newtie = ties[task]
+		# 				# Note: subtasks can be None if this task contains jobs
+		# 				if newtie.subtasks is None:
+		# 					newtie.subtasks = [tie]
+		# 				else:
+		# 					newtie.subtasks.append(tie)  # Omit the header
+		# 				# print('>> Subtask {} added to {}: {}'.format(tie.props[1][0], task.name, tie.subtasks)
+		# 				# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		# 			tie = newtie
 
 		# Print failed tasks statistics
 		print('\nFAILED root tasks ({} failed root / {} failed total / {} total):'.format(
@@ -1899,6 +1938,8 @@ class ExecPool(object):
 						, ' '.join(job.args), job.workdir), file=sys.stderr)
 				acqlock = self.__termlock.acquire(False, 0.01)  # 10 ms
 				if not acqlock or not self.alive:
+					if acqlock:
+						self.__termlock.release()
 					# Note: it just interrupts job start, but does not cause termination
 					# of the whole (already terminated) execution pool
 					raise EnvironmentError((errno.EINTR,  # errno.ERESTART
@@ -2008,6 +2049,7 @@ class ExecPool(object):
 		workers and start the non-started jobs if possible.
 		Apply chained termination and rescheduling on timeout and memory
 		constraints violation if _CHAINED_CONSTRAINTS.
+		NOTE: This function is not termination safe (might yield exceptions) but it doesn't matter.
 		"""
 		# Process completed jobs, check timeouts and memory constraints matching
 		completed = set()  # Completed workers:  {proc,}
