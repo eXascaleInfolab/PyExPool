@@ -341,7 +341,7 @@ class JobInfo(object):
 
 		Args:
 			job: Job  - a job from which the info is fetched
-			tstop: float  - job finishing time, actual for the terminating deferred jobs
+			tstop: float  - job termination time, actual for the terminating deferred jobs
 		"""
 		assert isinstance(job, Job), 'Unexpected type of the job: ' +  type(job).__name__
 		self.name = job.name
@@ -368,7 +368,11 @@ class JobInfo(object):
 	@property
 	def duration(self):
 		"""Execution duration"""
-		return None if self.tstop is None or self.tstart is None else self.tstop - self.tstart
+		if self.tstop is not None:
+			tlast = self.tstop
+		else:
+			tlast = time.perf_counter()
+		return None if self.tstart is None else tlast - self.tstart
 
 
 @propslist
@@ -630,7 +634,7 @@ class Task(object):
 			RuntimeError  - lock acquisition failed
 		"""
 		if not self._lock.acquire(timeout=self._latency):
-			raise RuntimeError('Lock acquisition failed on finished() in "{}"'.format(self.name))
+			raise RuntimeError('Lock acquisition failed on task finished() in "{}"'.format(self.name))
 		try:
 			if succeed:
 				del self._items[subtask]
@@ -731,7 +735,7 @@ class Task(object):
 			return subtask.name
 
 		if not self._lock.acquire(timeout=self._latency):
-			raise RuntimeError('Lock acquisition failed on uncompleted() in "{}"'.format(self.name))
+			raise RuntimeError('Lock acquisition failed on task uncompleted() in "{}"'.format(self.name))
 		try:
 			# List should be generated on place while all the tasks are present
 			# Note: list extension should prevent lazy evaluation of the list generator
@@ -1430,13 +1434,15 @@ class ExecPool(object):
 		the result is formed in the following .data attributes:
 		- errmsg: str  - error message if any
 		- summary: SummaryBrief  - execution pool summary
-		- jobsInfo: list  - information about the failed jobs not associated to any tasks
-		- tasksInfo: list  - hierarchical information about the failed jobs with their tasks
+		- workersInfo: list  - information about the workers (executing jobs)
+		- jobsInfo: list  - information about the [failed/deferred] jobs not associated to any tasks
+		- tasksInfo: list  - hierarchical information about the [failed/available] jobs with their tasks
 			starting from the root tasks
 		"""
 		# Process on the next iteration if the client request is not ready
 		if self._uicmd.id is None or not self._uicmd.cond.acquire(blocking=False):
 			return
+		JOBS_LIMIT = 100  # Default max number of jobs (including task members) to be listed
 		try:
 			# self.summary()  # TODO: implement each command in the dedicated function
 			# Read command parameters from the .data
@@ -1454,9 +1460,11 @@ class ExecPool(object):
 							' filter values (not a list): ' + type(propflt).__name__)
 						raise
 				objflt = data.get(UiResOpt.flt)
+				limit = data.get(UiResOpt.limit, JOBS_LIMIT)
 			else:
 				propflt = None
 				objflt = None
+				limit = JOBS_LIMIT
 			print("> uicmd.id: {}, propflt: {}, objflt: {}".format(
 				self._uicmd.id, propflt, objflt), file=sys.stderr)
 			# Prepare .data for the response results
@@ -1472,9 +1480,9 @@ class ExecPool(object):
 				# of the whole (already terminated) execution pool
 				self._uicmd.data['errmsg'] = 'The execution pool{} is not alive'.format(
 					'' if not self.name else ' ' + self.name)
-				raise EnvironmentError((errno.EINTR,  # errno.ERESTART
-					("WARNING, The execution pool{} is terminated and can't response the UI command: {}"
-					).format('' if not self.name else ' ' + self.name, self._uicmd.id.name, file=sys.stderr)))
+				print("WARNING, The execution pool{} is terminated and can't response the UI command: {}"
+					.format('' if not self.name else ' ' + self.name, self._uicmd.id.name, file=sys.stderr))
+				return
 					
 			smr = SummaryBrief(workers=len(self._workers), jobs=len(self._workers)
 				, jobsFailed=len(self.failures), tasks=len(self.tasks))
@@ -1506,7 +1514,7 @@ class ExecPool(object):
 				# Fetch info about the failed jobs considering the filtering
 				jobsInfo = None  # Information about the failed jobs not assigned to any tasks
 				tinfe0 = dict()  # dict(Task, TaskInfoExt)  - Task information extended, bottom level of the hierarchy
-				header = True  # Show jobs header
+				header = True  # Add jobs header
 				for fji in self.failures:
 					task = fji.task
 					jdata = infodata(fji, propflt, objflt)
@@ -1539,11 +1547,54 @@ class ExecPool(object):
 				if ties:
 					data['tasksInfo'] = list(viewvalues(ties))
 			elif self._uicmd.id == UiCmdId.LIST_JOBS:
-				# TODO: should the self._uicmd.data be reseted for the completed exec pool?
-				if not (self._workers and self._jobs):
+				if not (self._workers and self._jobs and self.alive):
+					self._uicmd.data['errmsg'] = 'The execution pool{} is not alive'.format(
+						'' if not self.name else ' ' + self.name)
 					return
+				# Flat workers listing
+				jobsInfo = None  # Information about the workers
+				header = True  # Add jobs header
+				for job in self._workers:
+					# Note: check for the termination in all cycles
+					if not self.alive:
+						return
+					jdata = infodata(JobInfo(job), propflt, objflt)
+					if not jdata:
+						continue
+					if header:
+						jobsInfo = [infoheader(JobInfo.iterprop(), propflt)]  #pylint: disable=E1101
+						header = False
+					jobsInfo.append(jdata)
+				if jobsInfo:
+					data['workersInfo'] = jobsInfo
+				# List the upcoming jobs up to the specified limit
+				jobsInfo = None  # Information about the jobs
+				header = True  # Add jobs header
+				ctr = 0  # Counter for the showing jobs
+				for job in self._jobs:
+					# Note: check for the termination in all cycles
+					if not self.alive:
+						return
+					jdata = infodata(JobInfo(job), propflt, objflt)
+					if not jdata:
+						continue
+					if header:
+						jobsInfo = [infoheader(JobInfo.iterprop(), propflt)]  #pylint: disable=E1101
+						header = False
+					jobsInfo.append(jdata)
+					ctr += 1  # Note: only the filtered jobs are considered
+					if limit and ctr >= limit:
+						break
+				if jobsInfo:
+					data['jobsInfo'] = jobsInfo
+					jobsInfo = None
 			elif self._uicmd.id == UiCmdId.LIST_TASKS:
+				if not (self._workers and self._jobs and self.alive):
+					self._uicmd.data['errmsg'] = 'The execution pool{} is not alive'.format(
+						'' if not self.name else ' ' + self.name)
+					return
 				pass
+				# List the upcoming jobs up to the specified limit of covered jobs
 			else:
 				self._uicmd.data['errmsg'] = 'Unknown UI command: ' + self._uicmd.id.name
 				print('WARNING, Unknown command requested:', self._uicmd.id.name, file=sys.stderr)

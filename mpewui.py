@@ -102,10 +102,10 @@ def inferNumType(val):
 	return val
 
 
-UiCmdId = IntEnum('UiCmdId', 'FAILURES LIST_JOBS')  # 'JOB_INFO', 'LIST_TASKS', 'TASK_INFO'
+UiCmdId = IntEnum('UiCmdId', 'FAILURES LIST_JOBS LIST_TASKS API_MANUAL')  # JOB_INFO, TASK_INFO
 """UI Command Identifier associated with the REST URL"""
 
-UiResOpt = IntEnum('UiResOpt', 'fmt cols flt')  # fltStatus
+UiResOpt = IntEnum('UiResOpt', 'fmt cols flt limit')  # fltStatus
 # Note: filter keys ending with '*' are optional (such columns allowed
 # to be absent in the target item)
 """UI Command parameters
@@ -114,6 +114,8 @@ fmt  - required format of the result
 cols  - required columns in the result, all by default
 flt  - filter target items per each column:
 	flt=rcode*:-15|duration:5m1.15..2d3h|...
+limit: uint  - limit of the listed number of the active jobs / tasks having this number of jobs, 0 means any;
+	NOTE: limit omission results in the ExecPool default value for the limit, failures are always fully shown.
 """
 # flt=rcode*:-15&flt=duration:5m1.15..2d3h&...
 
@@ -233,12 +235,13 @@ class WebUiApp(threading.Thread):
 		self.cmd = UiCmd(None)  # Shared data between the UI WebApp and MpePool backend
         # Initialize web app before starting the thread
 		webuiapp = bottle.default_app()  # The same as bottle.Bottle()
-		mroot = partial(WebUiApp.root, self.cmd)  # Define partial function with the substituted first parameter
-		webuiapp.route('/', callback=mroot, name=UiCmdId.FAILURES.name)
-		webuiapp.route('/jobs', callback=mroot, name=UiCmdId.LIST_JOBS.name)
+		# Define partial function with the substituted first parameter
+		webuiapp.route('/', callback=partial(WebUiApp.root, self.cmd), name=UiCmdId.FAILURES.name)
+		webuiapp.route('/jobs', callback=partial(WebUiApp.jobs, self.cmd), name=UiCmdId.LIST_JOBS.name)
+		webuiapp.route('/tasks', callback=partial(WebUiApp.tasks, self.cmd), name=UiCmdId.LIST_TASKS.name)
+		webuiapp.route('/apinfo', callback=WebUiApp.apinfo, name=UiCmdId.API_MANUAL.name)
 		# TODO, add interfaces to inspect tasks and selected jobs/tasks:
 		# webuiapp.route('/job/<name>', callback=mroot, name=UiCmdId.JOB_INFO.name)
-		# webuiapp.route('/tasks', callback=mroot, name=UiCmdId.LIST_TASKS.name)
 		# webuiapp.route('/task/<name>', callback=mroot, name=UiCmdId.TASK_INFO.name)
 		kwargs.update({'host': host, 'port': port})
 		super(WebUiApp, self).__init__(group=group, target=bottle.run, name=name, args=args, kwargs=kwargs)
@@ -300,58 +303,66 @@ class WebUiApp(threading.Thread):
 		Returns:
 			Jobs listing for the specified detalization in the specified format
 		"""
-		# return 'Root works'
+		# Parameters fetching options:
+		# 1. The arguments extracted from the URL:
+		# bottle.request.url_args		# Empty
+		# 2. Raw URL params as str:
+		# bottle.request.query_string	# OK
+		# 3. URL params as MultiDict:
+		# bottle.request.query
+
+		# Parse URL parameters and form the UI command parameters
+		fmt = UiResFmt.htm
+		qdict = bottle.request.query
+		# Fetch the required result format
+		fmtKey = UiResOpt.fmt.name
+		# return "query dict: {}, dict.keys: {}, dict[fmt]: {}".format(qdict.items(), qdict.keys(), qdict[fmtKey])
+		if fmtKey in qdict:  #pylint: disable=E1135
+			try:
+				fmt = UiResFmt[qdict[fmtKey]]  #pylint: disable=E1136
+				# del qdict[fmtKey]  #pylint: disable=E1138
+			except KeyError:
+				# 400  - Bad Request
+				# 415  - Unsupported Media Type
+				bottle.response.status = 415  # 400
+				return 'Invalid URL parameter value of "{}": {}'.format(fmtKey, qdict[fmtKey])  #pylint: disable=E1136
+				# raise HTTPResponse(body='Invalid URL parameter value of "fmt": ' + qdict['fmt'], status=400)
+		# Fetch the required resulting columns (property filter)
+		cols = qdict.get(UiResOpt.cols.name)  #pylint: disable=E1101
+		# Fetch the required results filtering options (object filter)
+		flt = qdict.get(UiResOpt.flt.name)  #pylint: disable=E1101
+		# Fetch the jobs limit value if any
+		limit = qdict.get(UiResOpt.limit.name)  #pylint: disable=E1101
+		if flt:
+			# Parse Filter parameters to UiResFilterVal
+			fltopts = {}
+			for prm in flt.split('|'):
+				for k, v in prm.split(':'):
+					# Consider range values and infer the numeric type if possible
+					if v.find('..') != -1:
+						v, ve = v.split('..', 1)
+						ve = inferNumType(ve)
+					else:
+						ve = None
+					v = inferNumType(v)
+					# Consider optional filtering fields
+					val = UiResFilterVal(beg=v, end=ve, opt=k[-1]=='*')  #pylint: disable=C0326
+					if val.opt:
+						k = k[:-1]
+					fltopts[k] = val
 		with cmd.cond:
 			cmd.id = UiCmdId.FAILURES
-			# Parameters fetching options:
-			# 1. The arguments extracted from the URL:
-			# bottle.request.url_args		# Empty
-			# 2. Raw URL params as str:
-			# bottle.request.query_string	# OK
-			# 3. URL params as MultiDict:
-			# bottle.request.query
-
-			# Parse URL parameters and form the UI command parameters
-			fmt = UiResFmt.htm
-			qdict = bottle.request.query
-			fmtKey = UiResOpt.fmt.name
-			# return "query dict: {}, dict.keys: {}, dict[fmt]: {}".format(qdict.items(), qdict.keys(), qdict[fmtKey])
-			if fmtKey in qdict:  #pylint: disable=E1135
-				try:
-					fmt = UiResFmt[qdict[fmtKey]]  #pylint: disable=E1136
-					# del qdict[fmtKey]  #pylint: disable=E1138
-				except KeyError:
-					# 400  - Bad Request
-					# 415  - Unsupported Media Type
-					bottle.response.status = 415  # 400
-					return 'Invalid URL parameter value of "{}": {}'.format(fmtKey, qdict[fmtKey])  #pylint: disable=E1136
-					# raise HTTPResponse(body='Invalid URL parameter value of "fmt": ' + qdict['fmt'], status=400)
 			# Prepare .data for the request parameters storage
 			if cmd.data:
 				cmd.data.clear()
-			cols = qdict.get(UiResOpt.cols.name)  #pylint: disable=E1101
 			if cols:
 				cmd.data[UiResOpt.cols] = cols.split(',')
-			# fltKey = UiResOpt.flt.name
-			flt = qdict.get(UiResOpt.flt.name)  #pylint: disable=E1101
+				cols = None
 			if flt:
-				# Parse Filter parameters to UiResFilterVal
-				fltopts = {}
-				for prm in flt.split('|'):
-					for k, v in prm.split(':'):
-						# Consider range values and infer the numeric type if possible
-						if v.find('..') != -1:
-							v, ve = v.split('..', 1)
-							ve = inferNumType(ve)
-						else:
-							ve = None
-						v = inferNumType(v)
-						# Consider optional filtering fields
-						val = UiResFilterVal(beg=v, end=ve, opt=k[-1]=='*')  #pylint: disable=C0326
-						if val.opt:
-							k = k[:-1]
-						fltopts[k] = val
 				cmd.data[UiResOpt.flt] = fltopts
+				flt = None
+			if limit is not None:
+				cmd.data[UiResOpt.limit] = limit
 			# fltStatus = qdict.get(UiResOpt.fltStatus.name)  #pylint: disable=E1101
 			# if fltStatus:
 			# 	cmd.data[UiResOpt.fltStatus] = fltStatus.split(',')
@@ -391,24 +402,33 @@ class WebUiApp(threading.Thread):
 	@staticmethod
 	def jobs(cmd):
 		"""Jobs listing including workers (UiCmdId.LIST_JOBS)"""
-		# 501 Not Implemented
+		# 501  - Not Implemented
 		bottle.response.status = 501
 		return 'Not Implemented'
 		with cmd.cond:
 			cmd.id = UiCmdId.LIST_JOBS
 
 
+	@staticmethod
+	def tasks(cmd):
+		"""Listing of the hierarchical tasks with their subtasks and jobs"""
+		# 501  - Not Implemented
+		bottle.response.status = 501
+		return 'Not Implemented'
+		with cmd.cond:
+			cmd.id = UiCmdId.LIST_TASKS
+
+
+	@staticmethod
+	def apinfo():
+		# 501  - Not Implemented
+		bottle.response.status = 501
+		return '''<h1>API Manual</h1>
+		'''
+
 	# @staticmethod
 	# def taskInfo(cmd, name):
 	# 	pass
-
-# @webuiapp.route('/')
-# def root():
-# 	return 'Root'
-
-# @route('/create', apply=[sqlite_plugin])
-# def create(db):
-#     db.execute('INSERT INTO ...')
 
 
 if __name__ == '__main__':
