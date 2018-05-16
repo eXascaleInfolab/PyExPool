@@ -30,6 +30,16 @@ setup(
 	'See details on the [PyExPool page](https://github.com/eXascaleInfolab/PyExPool)'
 	' and star the project if you like it! For any further assistance you can drop me'
 	' a email or write [me on Linkedin](https://linkedin.com/in/artemvl).'
+	'\n\n'
+	'''BibTeX:
+```bibtex
+@misc{pyexpool,
+	author = {Artem Lutov and Philippe Cudré-Mauroux},
+	title = {{PyExPool: A Lightweight Execution Pool with Constraint-aware Load-Balancer.}},
+	year = {2017},
+	url = {https://github.com/eXascaleInfolab/PyExPool}
+}
+```'''
 	),
 	long_description_content_type='text/markdown',
 	url='https://github.com/eXascaleInfolab/PyExPool',
