@@ -42,11 +42,11 @@
 		/* Summary layout --------------------------------------------------- */
 		/* Using Flex Layout (HTML5) */
 		.row {
-    		display: flex;
+   		display: flex;
 		}
 		
 		.col2 {
-    		flex: 50%;
+   		flex: 50%;
 			padding-right: 1em;
 		}
 
@@ -61,17 +61,19 @@
 			}
 		}
 
-		.center {
+		.ta-center {
 			text-align: center;
-			/* margin: auto; */
-			/* width: 50%; */
+		}
+
+		.ta-right {
+			text-align: right;
 		}
 
 		/* Table style ------------------------------------------------------ */
-		/* body {background-color: powderblue;} */
 		table.frame {
 			border-collapse: collapse;
 			width: 100%;
+			text-align: center;
 		}
 
 		/* Hierarchy of tasks with their jobs */
@@ -81,16 +83,24 @@
 			padding-right: 1em;
 		}
 
-		.frame th, .frame td { border: 1px solid #444 }
+		/* .frame td { border: none } */
+		.frame th {
+			border-top: thin solid #888;
+			border-bottom: thin solid #888;
+		}
 
 		/* Color even rows; .frame */
 		tr:nth-child(even) { background: #DDD }
+
+		tr:hover {
+			background: lightyellow;
+		}
 	</style>
 </head>
 <body>
 
 <!-- Navigation bar -->
-<nav class="center">
+<nav class="ta-center">
 	<a href="/" \\
 % if get('page') in (None, 'failures'):
 		class="sel" \\
@@ -129,15 +139,15 @@
 	<div class="col2">
 		<table class="noframe">
 			<tr>
-				<td>RSS RAM usage:</td>
+				<td class="ta-right">RSS RAM usage:</td>
 				<td>{{'{:.2%}'.format(ramUsage / ramTotal)}} ({{round(ramUsage, 3)}} / {{round(ramTotal, 3)}} GB)</td>
 			</tr>
 			<tr>
-				<td>CPU loading:</td>
+				<td class="ta-right">CPU loading:</td>
 				<td>{{'{:.2%}'.format(cpuLoad)}} ({{lcpus}} lcpus, {{cpuCores}} cores, {{cpuNodes}} nodes)</td>
 			</tr>
 			<tr>
-				<td>Workers:</td>
+				<td class="ta-right">Workers:</td>
 				<td>{{workers}} / {{wksmax}}</td>
 			</tr>
 		</table>
@@ -148,16 +158,16 @@
 	<div class="col2">
 		<table class="noframe">
 			<tr>
-				<td>Failed Jobs:</td>
+				<td class="ta-right">Failed Jobs:</td>
 				<td>{{jobsFailed}} / {{jobs}}</td>
 			</tr>
 			<tr>
-				<td>Failed Root Tasks:</td>
+				<td class="ta-right">Failed Root Tasks:</td>
 				<td>{{tasksRootFailed}} / {{tasksRoot}}</td>
 			</tr>
 			<tr>
-				<td>Failed Tasks:</td>
-				<td>Failed Tasks: {{tasksFailed}} / {{tasks}}</td>
+				<td class="ta-right">Failed Tasks:</td>
+				<td>{{tasksFailed}} / {{tasks}}</td>
 			</tr>
 		</table>
 		<!-- <div>Failed Jobs: {{jobsFailed}} / {{jobs}}</div>
@@ -192,17 +202,17 @@
 <hr />
 <!-- <table class="noframe">
 	<tr>
--	% for hdr, tfi in get('tasksFailedInfo'):
--		% if hdr:
--			% for tprop in tfi:
-		<th>{{tprop}}</th>
--			% end
--		% else:
--			% for tprop in tfi:
-		<td>{{tprop}}</td>
--			% end
--		% end
--	% end
+#	% for hdr, tfi in get('tasksFailedInfo'):
+#		% if hdr:
+#			% for tprop in tfi:
+#		<th>{ {tprop}}</th>
+#			% end
+#		% else:
+#			% for tprop in tfi:
+#		<td>{ {tprop}}</td>
+#			% end
+#		% end
+#	% end
 	</tr>
 </table> -->
 <hr />
