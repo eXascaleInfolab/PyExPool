@@ -787,7 +787,7 @@ except ImportError:
 
 _webuiapp = None  # Global WebUI application
 
-@unittest.skip('Under development, currently used manually')
+# @unittest.skip('Under development, currently used manually')
 class TestWebUI(unittest.TestCase):
 	"""WebUI tests"""
 
@@ -823,21 +823,29 @@ class TestWebUI(unittest.TestCase):
 
 
 	# @unittest.skipUnless(mock is not None, 'Requires defined mock')
-	def test_summary(self):
-		"""Test WebUI summary listing"""
-		timeout = 10  # Note: should be larger than 3*latency
+	def test_failures(self):
+		"""Test WebUI listing of the ExecPool failures"""
+		timeout = 120  # Note: should be larger than 3*latency
 		# worktime = max(1, _TEST_LATENCY) + (timeout * 2) // 1  # Job work time
 		worktime = 0.75 * timeout  # Job work time
 		assert _TEST_LATENCY * ExecPool._KILLDELAY < timeout and _TEST_LATENCY * ExecPool._KILLDELAY < worktime, (
 			'Testcase parameters validation failed')
 
-		j1 = Job('j1', args=('sleep', str(worktime)), timeout=timeout)  # , onstart=mock.MagicMock()
-		j2 = Job('j2', args=('sleep', str(worktime*2)), timeout=timeout)  # , onstart=mock.MagicMock()
+		t1 = Task('Task1')  # onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock()
+		j1 = Job('j1f', args=('sleep', str(worktime)), task=t1, timeout=_TEST_LATENCY)  # , onstart=mock.MagicMock()
+		j2 = Job('j2', args=('sleep', str(timeout/10.)), timeout=timeout)  # , onstart=mock.MagicMock()
 		j3 = Job('j3', args=('sleep', str(worktime)), timeout=timeout)  # , onstart=mock.MagicMock()
+		j4 = Job('j4', args=('sleep', str(timeout/5.)), task=t1, timeout=timeout)  # , onstart=mock.MagicMock()
+		j5 = Job('j5', args=('sleep', str(worktime)), timeout=timeout)  # , onstart=mock.MagicMock()
+		j6 = Job('j6f', args=('sleep', str(worktime)), timeout=_TEST_LATENCY)  # , onstart=mock.MagicMock()
 		time.sleep(_TEST_LATENCY)
 		self._execpool.execute(j1)
 		self._execpool.execute(j2)
+		self._execpool.execute(j6)
 		self._execpool.execute(j3)
+		time.sleep(_TEST_LATENCY)
+		self._execpool.execute(j4)
+		self._execpool.execute(j5)
 
 		# Fetch data in the concurrent thread
 		# global _webuiapp
@@ -850,7 +858,7 @@ class TestWebUI(unittest.TestCase):
 		# print(json)
 
 		# Verify successful completion of the execution pool
-		self.assertTrue(self._execpool.join())
+		self.assertTrue(self._execpool.join(timeout*1.1))
 
 
 

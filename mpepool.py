@@ -236,7 +236,7 @@ def infodata(obj, propflt=None, objflt=None):
 	# Pass the objflt or return None
 	if objflt:
 		for prop, pcon in viewitems(objflt):  # Property name and constraint
-			print('>>> prop: {}, cpon: {}; objname: {}, objpv: {}'.format(prop, pcon, obj.name, obj.__getattribute__(prop)))
+			# print('>>> prop: {}, cpon: {}; objname: {}, objpv: {}'.format(prop, pcon, obj.name, obj.__getattribute__(prop)))
 			#assert isinstance(prop, str) and isinstance(pcon, UiResFilterVal
 			# 	), 'Invalid type of arguments:  prop: {}, pflt: {}'.format(
 			# 	type(prop).__name__, type(pcon).__name__)
@@ -250,10 +250,9 @@ def infodata(obj, propflt=None, objflt=None):
 					type(obj).__name__, prop), file=sys.stderr)
 			if (not pcon.opt and prop not in obj) or (pcon.end is None and pval != pcon.beg
 			) or pcon.end is not None and (pval < pcon.beg or pval >= pcon.end):
-				print('>>> ret None, 1:', prop not in obj, '2:', pcon.end is None and pval != pcon.beg
-					, '3:', pcon.end is not None, '4:', pval < pcon.beg or pval >= pcon.end)
+				# print('>>> ret None, 1:', prop not in obj, '2:', pcon.end is None and pval != pcon.beg
+				# 	, '3:', pcon.end is not None, '4:', pval < pcon.beg or pval >= pcon.end)
 				return None
-	print('>>> ret: ', str([obj.__getattribute__(prop) for prop in (propflt if propflt else obj.iterprop())]))
 	return tuple([obj.__getattribute__(prop) for prop in (propflt if propflt else obj.iterprop())])  #pylint: disable=C0325
 
 
@@ -511,6 +510,33 @@ def printDepthFirst(tinfext, cindent='', indstep='  ', colsep=' '):
 	if tinfext.subtasks:  # Consider None
 		for tie in tinfext.subtasks:
 			printDepthFirst(tie, cindent=cindent, indstep=indstep, colsep=colsep)
+
+
+def unfoldDepthFirst(tinfext, cindent='', indstep='  ', colsep=' '):
+	"""Print TaskInfoExt hierarchy using the depth first traversing
+
+	Args:
+		tinfext: TaskInfoExt  - extended task info to be unfolded and printed
+		cindent: str  - current indent for the output hierarchy formatting
+		indstep: str  - indent step for each subsequent level of the hierarchy
+		colsep: str  - column separator for the printing variables (columns)
+	"""
+	res = []
+	# Print task properties (properties header and values)
+	for props in tinfext.props:
+		res.append(cindent + colsep.join([tblfmt(v) for v in props]))
+	# assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
+	# Print task jobs and subtasks
+	cindent += indstep
+	if tinfext.jobs:  # Consider None
+		for tie in tinfext.jobs:
+			res.append(cindent + colsep.join([tblfmt(v) for v in tie]))
+	# print('>> Outputting task {} with {} subtasks'.format(tinfext.props[1][0]
+	# 	, 0 if not tinfext.subtasks else len(tinfext.subtasks)), file=sys.stderr)
+	if tinfext.subtasks:  # Consider None
+		for tie in tinfext.subtasks:
+			unfoldDepthFirst(tie, cindent=cindent, indstep=indstep, colsep=colsep)
+	return res
 
 
 class Task(object):
@@ -1566,7 +1592,10 @@ class ExecPool(object):
 				# Iteratively form the hierarchy of tasks from the bottom level
 				ties = tasksInfoExt(tinfe0, propflt, objflt)
 				if ties:
-					data['tasksInfo'] = list(viewvalues(ties))
+					tasksInfo = []
+					for tie in viewvalues(ties):
+						tasksInfo.extend(unfoldDepthFirst(tie, cindent='', indstep='  ', colsep=' '))
+					data['tasksInfo'] = tasksInfo  # list(viewvalues(ties))
 			elif self._uicmd.id == UiCmdId.LIST_JOBS:
 				if (not self._workers and not self._jobs) or not self.alive:
 					return
