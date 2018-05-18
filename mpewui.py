@@ -139,21 +139,22 @@ opt: bool  - target property of the filter is optional, i.e. omit the filter if 
 
 # # Note: 'exec' is a keyword in Python 2 and can't be used as an object attribute
 # work - working (executing) jobs (workers), defer - deferred (regular, postponed) jobs
-# UiResFltStatus = IntEnum('UiResFltStatus', 'work defer task')
-# """UI Command: Result filtration by the job status: executing (worker job), deferred (scheduled obj)"""
+UiResFltStatus = IntEnum('UiResFltStatus', 'work defer task')
+"""UI Command: Result filtration by the job status: executing (worker job), deferred (scheduled obj)"""
 
 class ResultOptions(object):
+	"""Result options extractor from the URL GET query"""
 
 	def __init__(self, qdict):
 		"""[summary]
-		
+
 		Args:
 			qdict ([type]): [description]
-		
+
 		Raises:
 			KeyError
 			#HTTPResponse: [description]
-		
+
 		Returns:
 			[type]: [description]
 		"""
@@ -197,7 +198,7 @@ class ResultOptions(object):
 				if val.opt:
 					k = k[:-1]
 				self.fltopts[k] = val
-		
+
 
 
 class UiCmd(object):
@@ -523,7 +524,7 @@ class WebUiApp(threading.Thread):
 				# 503  - Service Unavailable
 				bottle.response.status = 503
 				return cmderr
-			
+
 			smr = cmd.data.get('summary')
 			return bottle.template('webui', pageRefresh=None, title='Jobs'
 				, pageDescr='Information about the executing (workers) and deffered jobs.'
@@ -559,7 +560,7 @@ class WebUiApp(threading.Thread):
 			# 	res.append('<span>Failed Tasks: ')
 			# 	res.append('{} / {}'.format(smr.tasksFailed, smr.tasks))
 			# 	res.append('</span></div>')
-				
+
 			# workersInfo = cmd.data.get('workersInfo')
 			# jobsInfo = cmd.data.get('jobsInfo')
 			# return ''.join(res)

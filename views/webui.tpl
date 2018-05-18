@@ -1,16 +1,20 @@
 <!-- Page parameters:
 title  - page title
 page  - base page URL path, '' for the root
+...
 -->
-
 <html>
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>{{title}}</title>
-	<meta name="description" content="Free Web tutorials">
-	<meta name="keywords" content="HTML, CSS, XML, JavaScript">
-	<!-- <meta http-equiv="refresh" content="30">  <!- - Refresh this page every 30 seconds - -> -->
+% if get('pageDescr'):
+	<meta name="description" content="{{pageDescr}}">
+% end
+	<!-- <meta name="keywords" content="HTML, CSS, XML, JavaScript"> -->
+% if get('pageRefresh') is not None:
+	<meta http-equiv="refresh" content="{{max(2, pageRefresh)}}">  <!-- Refresh this page every pageRefresh>=2 seconds -->
+% end
 
 	<style>
 		/* Errors */
@@ -27,10 +31,16 @@ page  - base page URL path, '' for the root
 		/* Layout --------------------------------------------------------------- */
 		/* Using Flex Layout (HTML5) */
 		.row {
-    	display: flex;
+    		display: flex;
 		}
 		.col2 {
-    	flex: 50%;
+    		flex: 50%;
+		}
+
+		.center {
+			text-align: center;
+			/* margin: auto; */
+			/* width: 50%; */
 		}
 
 		/* Using Float Layout */
@@ -55,7 +65,7 @@ page  - base page URL path, '' for the root
 </head>
 <body>
 
-<nav>
+<nav class="center">
 	<a href="/" \\
 % if not get('page'):
 		class="sel" \\
@@ -81,20 +91,22 @@ page  - base page URL path, '' for the root
 	>API Manual</a>
 </nav>
 
-<h1>{{title}}</h1>
+<!-- <h1>{{title}}</h1> -->
 
-% if defined('errmsg')
-<p class="err">errmsg</p>
+% if get('errmsg'):
+<pre class="err">{{errmsg}}</pre>
 % end
 
-% if defined('summary'):
+% if get('summary'):
 <h2>Summary</h2>
 <div class="row">
 	<div class="col2">
-		<div>Workers: {{workers}}</div>
-		<div>Failed Jobs: {{jobsFailed}} / {{jobs}}</div>
+		<div>RSS RAM usage: {{'{:.1%}'.format(ramUsage / ramTotal)}} ({{ramUsage}} / {{ramTotal}} GB)</div>
+		<div>CPU loading: {{cpuLoad}} ({{lcpus}} lcpus, {{cpuCores}} cores, {{cpuNodes}} nodes)</div>
+		<div>Workers: {{workers}} / {{wksmax}}</div>
 	</div>
 	<div class="col2">
+		<div>Failed Jobs: {{jobsFailed}} / {{jobs}}</div>
 		<div>Failed Root Tasks: {{tasksRootFailed}} / {{tasksRoot}}</div>
 		<div>Failed Tasks: {{tasksFailed}} / {{tasks}}</div>
 	</div>
@@ -109,7 +121,7 @@ page  - base page URL path, '' for the root
 % end
 
 <!-- Failures page specific data ########################################### -->
-% if defined('jobsFailedInfo'):
+% if get('jobsFailedInfo'):
 <h2>Failed Jobs not Assigned to Tasks</h2>
 <table style="width:100%">
 	<!-- <caption>Failed Jobs not Assigned to Tasks</caption> -->
@@ -117,52 +129,52 @@ page  - base page URL path, '' for the root
 	<tr>
 		% for jprop in jfi:
 		<th>{{jprop}}</th>
-		%end
+		% end
 	</tr>
-	%end
+	% end
 </table>
 % end  # jobsFailedInfo
 
-% if defined('tasksFailedInfo'):
+% if get('tasksFailedInfo'):
 <h2>Failed Tasks with Jobs</h2>
-TODO: Complete
-% end  # tasksFailedInfo
-% if defined('jlim'):
+	TODO: Complete
+	% if get('jlim'):
 <!-- Show jobs limit, which restricts the number of shown failed tasks -->
 <p>Jobs limit: {{jlim}}</p>
-%end
+	% end
+% end  # tasksFailedInfo
 
 <!-- Jobs page specific data ############################################### -->
-% if defined('workersInfo'):
+% if get('workersInfo'):
 <h2>Workers</h2>
 <table style="width:100%">
 	<!-- <caption>Failed Jobs not Assigned to Tasks</caption> -->
-	% for jfi in jobsFailedInfo:
+	% for jfi in workersInfo:
 	<tr>
 		% for jprop in jfi:
 		<th>{{jprop}}</th>
-		%end
+		% end
 	</tr>
-	%end
+	% end
 </table>
 % end  # workersInfo
 
-% if defined('jobsInfo'):
+% if get('jobsInfo'):
 <h2>Jobs</h2>
 <table style="width:100%">
 	<!-- <caption>Failed Jobs not Assigned to Tasks</caption> -->
-	% for jfi in jobsFailedInfo:
+	% for jfi in jobsInfo:
 	<tr>
 		% for jprop in jfi:
 		<th>{{jprop}}</th>
-		%end
+		% end
 	</tr>
-	%end
+	% end
 </table>
 <!-- Show jobs limit, which restricts the number of shown jobs -->
-% if defined('jlim'):
+	% if get('jlim'):
 <p>Jobs limit: {{jlim}}</p>
-%end
+	% end
 % end  # jobsInfo
 
 <!-- Tasks page specific data ############################################## -->
