@@ -1523,6 +1523,9 @@ class ExecPool(object):
 			if _LIMIT_WORKERS_RAM:
 				data['cpuLoad'] = psutil.cpu_percent() / 100.  # float E[0, 1]
 				data['ramUsage'] = inGigabytes(psutil.virtual_memory().used)  # float E [0, 1]
+			else:
+				data['cpuLoad'] = 0
+				data['ramUsage'] = 0
 			# Set the actual Jobs limit value
 			data[UiResOpt.jlim] = jlim
 			# Summary of the execution pool:

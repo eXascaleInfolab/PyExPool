@@ -1,40 +1,64 @@
-<!-- Page parameters:
-title  - page title
-page  - base page URL path, '' for the root
-...
--->
 <html>
 <head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<meta name="application-name" content="[PyExPool (Web UI)](https://github.com/eXascaleInfolab/PyExPool)" />
+	<meta name="author" content="Artem Lutov <artem@exascale.info>" />
 	<title>{{title}}</title>
 % if get('pageDescr'):
-	<meta name="description" content="{{pageDescr}}">
+	<meta name="description" content="{{pageDescr}}" />
 % end
 	<!-- <meta name="keywords" content="HTML, CSS, XML, JavaScript"> -->
 % if get('pageRefresh') is not None:
-	<meta http-equiv="refresh" content="{{max(2, pageRefresh)}}">  <!-- Refresh this page every pageRefresh>=2 seconds -->
+	<meta http-equiv="refresh" content="{{max(2, pageRefresh)}}" />  <!-- Refresh this page every pageRefresh>=2 seconds -->
 % end
 
 	<style>
+		body {
+			background: #EEE;
+			font-family: Garamond, Helvetica, Times, serif;
+		}
+
+		h1, h2, h3, h4, h5, h6 {
+			font-family: Arial, Helvetica, sans-serif;
+		}
+
 		/* Errors */
 		.err {
 			color: red;
 			font-size: larger;
 		}
-		/* Selected items */
+
+		/* Selected items (in the navigation bar) */
 		a.sel {
 			color: black;
 			text-decoration: none;
 		}
 
-		/* Layout --------------------------------------------------------------- */
+		.label {
+			padding-right: 1em;
+		}
+
+		/* Summary layout --------------------------------------------------- */
 		/* Using Flex Layout (HTML5) */
 		.row {
     		display: flex;
 		}
+		
 		.col2 {
     		flex: 50%;
+			padding-right: 1em;
+		}
+
+		/* Consider small screens */
+		@media screen and (max-width: 600px) {
+			.col2 {
+				flex: auto;
+			}
+
+			.row {
+				flex-direction: column;
+			}
 		}
 
 		.center {
@@ -43,44 +67,35 @@ page  - base page URL path, '' for the root
 			/* width: 50%; */
 		}
 
-		/* Using Float Layout */
-		/* .col2 {
-			float: left;
-			width: 50%;
-		} */
-		/* Clear floats after the columns */
-		/* .row:after {
-				content: "";
-				display: table;
-				clear: both;
-		} */
-		/* ---------------------------------------------------------------------- */
-
+		/* Table style ------------------------------------------------------ */
 		/* body {background-color: powderblue;} */
-		table {
+		table.frame {
 			border-collapse: collapse;
 			width: 100%;
 		}
 
-		tr:nth-child(even) { background: #DDD }
-
-		th, td { border: 1px solid black }
-
-		/* Hirarchy of tasks with their jobs */
-		.hier {
+		/* Hierarchy of tasks with their jobs */
+		.noframe, .noframe th, .noframe td  {
 			border: none;
 			width: auto;
+			padding-right: 1em;
 		}
+
+		.frame th, .frame td { border: 1px solid #444 }
+
+		/* Color even rows; .frame */
+		tr:nth-child(even) { background: #DDD }
 	</style>
 </head>
 <body>
 
+<!-- Navigation bar -->
 <nav class="center">
 	<a href="/" \\
-% if not get('page'):
+% if get('page') in (None, 'failures'):
 		class="sel" \\
 % end
-	>Fiailures</a> |
+	>Failures</a> |
 
 	<a href="/jobs" \\
 % if get('page') == 'jobs':
@@ -103,6 +118,7 @@ page  - base page URL path, '' for the root
 
 <!-- <h1>{{title}}</h1> -->
 
+<!-- Show the error if occurred -->
 % if get('errmsg'):
 <pre class="err">{{errmsg}}</pre>
 % end
@@ -111,29 +127,50 @@ page  - base page URL path, '' for the root
 <h2>Summary</h2>
 <div class="row">
 	<div class="col2">
-		<div>RSS RAM usage: {{'{:.2%}'.format(ramUsage / ramTotal)}} ({{round(ramUsage, 3)}} / {{round(ramTotal, 3)}} GB)</div>
+		<table class="noframe">
+			<tr>
+				<td>RSS RAM usage:</td>
+				<td>{{'{:.2%}'.format(ramUsage / ramTotal)}} ({{round(ramUsage, 3)}} / {{round(ramTotal, 3)}} GB)</td>
+			</tr>
+			<tr>
+				<td>CPU loading:</td>
+				<td>{{'{:.2%}'.format(cpuLoad)}} ({{lcpus}} lcpus, {{cpuCores}} cores, {{cpuNodes}} nodes)</td>
+			</tr>
+			<tr>
+				<td>Workers:</td>
+				<td>{{workers}} / {{wksmax}}</td>
+			</tr>
+		</table>
+		<!-- <div>RSS RAM usage: {{'{:.2%}'.format(ramUsage / ramTotal)}} ({{round(ramUsage, 3)}} / {{round(ramTotal, 3)}} GB)</div>
 		<div>CPU loading: {{'{:.2%}'.format(cpuLoad)}} ({{lcpus}} lcpus, {{cpuCores}} cores, {{cpuNodes}} nodes)</div>
-		<div>Workers: {{workers}} / {{wksmax}}</div>
+		<div>Workers: {{workers}} / {{wksmax}}</div> -->
 	</div>
 	<div class="col2">
-		<div>Failed Jobs: {{jobsFailed}} / {{jobs}}</div>
+		<table class="noframe">
+			<tr>
+				<td>Failed Jobs:</td>
+				<td>{{jobsFailed}} / {{jobs}}</td>
+			</tr>
+			<tr>
+				<td>Failed Root Tasks:</td>
+				<td>{{tasksRootFailed}} / {{tasksRoot}}</td>
+			</tr>
+			<tr>
+				<td>Failed Tasks:</td>
+				<td>Failed Tasks: {{tasksFailed}} / {{tasks}}</td>
+			</tr>
+		</table>
+		<!-- <div>Failed Jobs: {{jobsFailed}} / {{jobs}}</div>
 		<div>Failed Root Tasks: {{tasksRootFailed}} / {{tasksRoot}}</div>
-		<div>Failed Tasks: {{tasksFailed}} / {{tasks}}</div>
+		<div>Failed Tasks: {{tasksFailed}} / {{tasks}}</div> -->
 	</div>
-	<!-- <span class="col2">Workers: {{workers}}</span>
-	<span class="col2">Failed Root Tasks: {{tasksRootFailed}} / {{tasksRoot}}</span> -->
 </div>
-<!-- <div class="row">
-	<div class="col2">Failed Tasks: {{tasksFailed}} / {{tasks}}</div>
-	<!- - <span class="col2">Failed Jobs: {{jobsFailed}} / {{jobs}}</span>
-	<span class="col2">Failed Tasks: {{tasksFailed}} / {{tasks}}</span> - ->
-</div> -->
 % end
 
 <!-- Failures page specific data ########################################### -->
 % if get('jobsFailedInfo'):
 <h2>Failed Jobs not Assigned to Tasks</h2>
-<table>   <!-- style="width:100%" -->
+<table class="frame">   <!-- style="width:100%" -->
 	<!-- <caption>Failed Jobs not Assigned to Tasks</caption> -->
 	<tr>
 		% for jprop in jobsFailedInfo[0]:
@@ -153,11 +190,17 @@ page  - base page URL path, '' for the root
 % if get('tasksFailedInfo'):
 <h2>Failed Tasks with Jobs</h2>
 <hr />
-<!-- <table class="hier">
+<!-- <table class="noframe">
 	<tr>
--	% for tfi in get('tasksFailedInfo'):
--		% for tprop in tfi:
-		<th>{{jprop}}</th>
+-	% for hdr, tfi in get('tasksFailedInfo'):
+-		% if hdr:
+-			% for tprop in tfi:
+		<th>{{tprop}}</th>
+-			% end
+-		% else:
+-			% for tprop in tfi:
+		<td>{{tprop}}</td>
+-			% end
 -		% end
 -	% end
 	</tr>
@@ -165,14 +208,14 @@ page  - base page URL path, '' for the root
 <hr />
 	% if get('jlim'):
 <!-- Show jobs limit, which restricts the number of shown failed tasks -->
-<p>Jobs limit: {{jlim}}</p>
+<p><span class="label">Jobs limit:</span> {{jlim}}</p>
 	% end
 % end  # tasksFailedInfo
 
 <!-- Jobs page specific data ############################################### -->
 % if get('workersInfo'):
 <h2>Workers</h2>
-<table style="width:100%">
+<table class="frame">
 	<!-- <caption>Failed Jobs not Assigned to Tasks</caption> -->
 	<tr>
 		% for jprop in workersInfo[0]:
@@ -191,7 +234,7 @@ page  - base page URL path, '' for the root
 
 % if get('jobsInfo'):
 <h2>Jobs</h2>
-<table style="width:100%">
+<table class="frame">
 	<!-- <caption>Failed Jobs not Assigned to Tasks</caption> -->
 	<tr>
 		% for jprop in jobsInfo[0]:
@@ -208,7 +251,7 @@ page  - base page URL path, '' for the root
 </table>
 <!-- Show jobs limit, which restricts the number of shown jobs -->
 	% if get('jlim'):
-<p>Jobs limit: {{jlim}}</p>
+<p><span class="label">Jobs limit:</span> {{jlim}}</p>
 	% end
 % end  # jobsInfo
 
