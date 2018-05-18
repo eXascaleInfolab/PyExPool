@@ -57,9 +57,19 @@ page  - base page URL path, '' for the root
 		/* ---------------------------------------------------------------------- */
 
 		/* body {background-color: powderblue;} */
-		table, th, td {
-			border: 1px solid black;
+		table {
 			border-collapse: collapse;
+			width: 100%;
+		}
+
+		tr:nth-child(even) { background: #DDD }
+
+		th, td { border: 1px solid black }
+
+		/* Hirarchy of tasks with their jobs */
+		.hier {
+			border: none;
+			width: auto;
 		}
 	</style>
 </head>
@@ -101,8 +111,8 @@ page  - base page URL path, '' for the root
 <h2>Summary</h2>
 <div class="row">
 	<div class="col2">
-		<div>RSS RAM usage: {{'{:.1%}'.format(ramUsage / ramTotal)}} ({{ramUsage}} / {{ramTotal}} GB)</div>
-		<div>CPU loading: {{cpuLoad}} ({{lcpus}} lcpus, {{cpuCores}} cores, {{cpuNodes}} nodes)</div>
+		<div>RSS RAM usage: {{'{:.2%}'.format(ramUsage / ramTotal)}} ({{round(ramUsage, 3)}} / {{round(ramTotal, 3)}} GB)</div>
+		<div>CPU loading: {{'{:.2%}'.format(cpuLoad)}} ({{lcpus}} lcpus, {{cpuCores}} cores, {{cpuNodes}} nodes)</div>
 		<div>Workers: {{workers}} / {{wksmax}}</div>
 	</div>
 	<div class="col2">
@@ -123,12 +133,17 @@ page  - base page URL path, '' for the root
 <!-- Failures page specific data ########################################### -->
 % if get('jobsFailedInfo'):
 <h2>Failed Jobs not Assigned to Tasks</h2>
-<table style="width:100%">
+<table>   <!-- style="width:100%" -->
 	<!-- <caption>Failed Jobs not Assigned to Tasks</caption> -->
-	% for jfi in jobsFailedInfo:
+	<tr>
+		% for jprop in jobsFailedInfo[0]:
+		<th>{{jprop}}</th>
+		% end
+	</tr>
+	% for jfi in jobsFailedInfo[1:]:
 	<tr>
 		% for jprop in jfi:
-		<th>{{jprop}}</th>
+		<td>{{jprop if jprop is not None else ''}}</td>
 		% end
 	</tr>
 	% end
@@ -137,7 +152,17 @@ page  - base page URL path, '' for the root
 
 % if get('tasksFailedInfo'):
 <h2>Failed Tasks with Jobs</h2>
-	TODO: Complete
+<hr />
+<!-- <table class="hier">
+	<tr>
+-	% for tfi in get('tasksFailedInfo'):
+-		% for tprop in tfi:
+		<th>{{jprop}}</th>
+-		% end
+-	% end
+	</tr>
+</table> -->
+<hr />
 	% if get('jlim'):
 <!-- Show jobs limit, which restricts the number of shown failed tasks -->
 <p>Jobs limit: {{jlim}}</p>
@@ -149,10 +174,15 @@ page  - base page URL path, '' for the root
 <h2>Workers</h2>
 <table style="width:100%">
 	<!-- <caption>Failed Jobs not Assigned to Tasks</caption> -->
-	% for jfi in workersInfo:
+	<tr>
+		% for jprop in workersInfo[0]:
+		<th>{{jprop}}</th>
+		% end
+	</tr>
+	% for jfi in workersInfo[1:]:
 	<tr>
 		% for jprop in jfi:
-		<th>{{jprop}}</th>
+		<td>{{jprop if jprop is not None else ''}}</td>
 		% end
 	</tr>
 	% end
@@ -163,10 +193,15 @@ page  - base page URL path, '' for the root
 <h2>Jobs</h2>
 <table style="width:100%">
 	<!-- <caption>Failed Jobs not Assigned to Tasks</caption> -->
-	% for jfi in jobsInfo:
+	<tr>
+		% for jprop in jobsInfo[0]:
+		<th>{{jprop}}</th>
+		% end
+	</tr>
+	% for jfi in jobsInfo[1:]:
 	<tr>
 		% for jprop in jfi:
-		<th>{{jprop}}</th>
+		<td>{{jprop if jprop is not None else ''}}</td>
 		% end
 	</tr>
 	% end

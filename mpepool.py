@@ -183,17 +183,20 @@ def inBytes(gb):
 	return gb * 1024. ** 3
 
 
-def tblfmt(v):
-	"""Table-like formatting of the value"""
+def tblfmt(v, strpad=0):
+	"""Table-like formatting of the value
+
+	strpad: int  - string padding
+	"""
 	if isinstance(v, float):
 		return '{:.3f}'.format(v)
 	elif isinstance(v, int):
-		return '{:9}'.format(v)
+		return str(strpad).join(('{:','}')).format(v)
 	if v is None:
 		v = '-'
 	elif not isinstance(v, str):
 		v = str(v)
-	return v.rjust(9)
+	return v.rjust(strpad)
 
 
 def applyCallback(callback, owner):
@@ -284,7 +287,8 @@ def propslist(cls):
 	"""
 	def contains(self, prop):
 		"""Whether the specified property is present"""
-		return self._props.endswith(prop) or self._props.find(prop + ' ') != -1  #pylint: disable=W0212
+		assert len(self._props) >= 2, 'At least 2 properties are expected'
+		return self._props.endswith(' ' + prop) or self._props.find(prop + ' ') != -1  #pylint: disable=W0212
 
 	def iterprop(cls):
 		"""Properties generator/iterator"""
@@ -303,7 +307,7 @@ def propslist(cls):
 	#assert hasattr(cls, '__slots__'), 'The class should have slots: ' + cls.__name__
 	cslots = set(cls.__slots__)
 	cls._props = ' '.join(itertools.chain(cls.__slots__,  #pylint: disable=W0212
-		[m for m in dir(cls) if not m.startswith('_') if m not in cslots]))  # Note: dir() list also slots
+		[m for m in dir(cls) if not m.startswith('_') and m not in cslots]))  # Note: dir() list also slots
 	# Define required methods
 	# ATTENTION: the methods are bound automatically to self (but not to the cls in Python2)
 	# since they are defined before the class is created.
@@ -496,15 +500,16 @@ def printDepthFirst(tinfext, cindent='', indstep='  ', colsep=' '):
 		indstep: str  - indent step for each subsequent level of the hierarchy
 		colsep: str  - column separator for the printing variables (columns)
 	"""
+	strpad = 9  # Padding of the string cells
 	# Print task properties (properties header and values)
 	for props in tinfext.props:
-		print(cindent, colsep.join([tblfmt(v) for v in props]), sep='', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		print(cindent, colsep.join([tblfmt(v, strpad) for v in props]), sep='', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 	# assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
 	# Print task jobs and subtasks
 	cindent += indstep
 	if tinfext.jobs:  # Consider None
 		for tie in tinfext.jobs:
-			print(cindent, colsep.join([tblfmt(v) for v in tie]), sep='', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+			print(cindent, colsep.join([tblfmt(v, strpad) for v in tie]), sep='', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 	# print('>> Outputting task {} with {} subtasks'.format(tinfext.props[1][0]
 	# 	, 0 if not tinfext.subtasks else len(tinfext.subtasks)), file=sys.stderr)
 	if tinfext.subtasks:  # Consider None
@@ -512,30 +517,32 @@ def printDepthFirst(tinfext, cindent='', indstep='  ', colsep=' '):
 			printDepthFirst(tie, cindent=cindent, indstep=indstep, colsep=colsep)
 
 
-def unfoldDepthFirst(tinfext, cindent='', indstep='  ', colsep=' '):
+def unfoldDepthFirst(tinfext, indent=0):
 	"""Print TaskInfoExt hierarchy using the depth first traversing
 
 	Args:
 		tinfext: TaskInfoExt  - extended task info to be unfolded and printed
-		cindent: str  - current indent for the output hierarchy formatting
-		indstep: str  - indent step for each subsequent level of the hierarchy
-		colsep: str  - column separator for the printing variables (columns)
+		indent: int  - current indent for the output hierarchy formatting
 	"""
 	res = []
 	# Print task properties (properties header and values)
 	for props in tinfext.props:
-		res.append(cindent + colsep.join([tblfmt(v) for v in props]))
+		row = [None for i in range(indent)]
+		row.extend([tblfmt(v) for v in props])
+		res.append(row)
 	# assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
 	# Print task jobs and subtasks
-	cindent += indstep
+	indent += 1
 	if tinfext.jobs:  # Consider None
 		for tie in tinfext.jobs:
-			res.append(cindent + colsep.join([tblfmt(v) for v in tie]))
+			row = [None for i in range(indent)]
+			row.extend([tblfmt(v) for v in tie])
+			res.append(row)
 	# print('>> Outputting task {} with {} subtasks'.format(tinfext.props[1][0]
 	# 	, 0 if not tinfext.subtasks else len(tinfext.subtasks)), file=sys.stderr)
 	if tinfext.subtasks:  # Consider None
 		for tie in tinfext.subtasks:
-			unfoldDepthFirst(tie, cindent=cindent, indstep=indstep, colsep=colsep)
+			unfoldDepthFirst(tie, indent=indent)
 	return res
 
 
@@ -1514,8 +1521,8 @@ class ExecPool(object):
 			data.clear()
 			# Set CPU and RAM consuption statistics
 			if _LIMIT_WORKERS_RAM:
-				data['cpuLoad'] = psutil.cpu_percent()
-				data['ramUsage'] = psutil.cpu_percent()
+				data['cpuLoad'] = psutil.cpu_percent() / 100.  # float E[0, 1]
+				data['ramUsage'] = inGigabytes(psutil.virtual_memory().used)  # float E [0, 1]
 			# Set the actual Jobs limit value
 			data[UiResOpt.jlim] = jlim
 			# Summary of the execution pool:
@@ -1594,7 +1601,7 @@ class ExecPool(object):
 				if ties:
 					tasksInfo = []
 					for tie in viewvalues(ties):
-						tasksInfo.extend(unfoldDepthFirst(tie, cindent='', indstep='  ', colsep=' '))
+						tasksInfo.extend(unfoldDepthFirst(tie, indent=0))
 					data['tasksInfo'] = tasksInfo  # list(viewvalues(ties))
 			elif self._uicmd.id == UiCmdId.LIST_JOBS:
 				if (not self._workers and not self._jobs) or not self.alive:
@@ -1787,6 +1794,7 @@ class ExecPool(object):
 		tinfe0 = dict()  # dict(Task, TaskInfoExt)  - Task information extended, bottom level of the hierarchy
 		# Print jobs properties as a table or fetch them to compose failed tasks hierarchy
 		header = True  # Show header for the initial output
+		strpad = 9  # Padding of the string cells
 		for fji in self.failures:
 			data = infodata(fji)
 			# Note: data should not be None here
@@ -1796,10 +1804,10 @@ class ExecPool(object):
 				if header:
 					print('\nFAILED jobs not assigned to any tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 					# Header of the jobs
-					print(colsep.join([tblfmt(h) for h in JobInfo.iterprop()])  #pylint: disable=E1101
+					print(colsep.join([tblfmt(h, strpad) for h in JobInfo.iterprop()])  #pylint: disable=E1101
 						, file=sys.stderr if _DEBUG_TRACE else sys.stdout)  #pylint: disable=E1101
 					header = False
-				print(colsep.join([tblfmt(v) for v in data]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+				print(colsep.join([tblfmt(v, strpad) for v in data]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 			else:
 				tie = tinfe0.get(fji.task)
 				if tie is None:
@@ -1811,50 +1819,6 @@ class ExecPool(object):
 
 		# Iteratively form the hierarchy of failed tasks from the bottom level
 		ties = tasksInfoExt(tinfe0)
-		# ties = dict()  # dict(Task, TaskInfoExt) - Tasks Info hierarchy
-		# for task, tie in viewitems(tinfe0):
-		# 	# print('> Preparing for the output task {} (super-task: {}), tie {} jobs and {} subtasks'.format(
-		# 	# 	task.name, '-' if not task.task else task.task.name,  0 if not tie.jobs else len(tie.jobs)
-		# 	# 	, 0 if not tie.subtasks else len(tie.subtasks))
-		# 	# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-		# 	if task.task is None:
-		# 		# Add or extend with jobs a root task
-		# 		tinfe = ties.get(task)
-		# 		if tinfe is None:
-		# 			ties[task] = tie
-		# 		else:
-		# 			tinfe.jobs = tie.jobs
-		# 			assert tinfe.props[1] == tie.props[1], task.name + ' task properties desynchronized'
-		# 	else:
-		# 		# print('>> task {} (super-task: {})'.format(task.name, task.task.name), file=sys.stderr)
-		# 		while task.task is not None:
-		# 			task = task.task
-		# 			if ties.get(task) is None:
-		# 				# Add new super-task to the hierarchy
-		# 				# Note: infodata() should not yield None here
-		# 				newtie = tinfe0.get(task)
-		# 				# It is possible that the super-task has no any [failed] jobs
-		# 				# and, hence, is not present in tinfe0
-		# 				if newtie:
-		# 					assert newtie.subtasks is None, (
-		# 						'New super-task {} should not have any subtasks yet'.format(task.name))
-		# 					newtie.subtasks = [tie]
-		# 				else:
-		# 					newtie = TaskInfoExt(props=(TaskInfo.iterprop()  #pylint: disable=E1101
-		# 						, infodata(TaskInfo(task))), subtasks=[tie])
-		# 				ties[task] = newtie
-		# 				# print('>> New subtask {} added to {}'.format(tie.props[1][0], task.name)
-		# 				# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-		# 			else:
-		# 				newtie = ties[task]
-		# 				# Note: subtasks can be None if this task contains jobs
-		# 				if newtie.subtasks is None:
-		# 					newtie.subtasks = [tie]
-		# 				else:
-		# 					newtie.subtasks.append(tie)  # Omit the header
-		# 				# print('>> Subtask {} added to {}: {}'.format(tie.props[1][0], task.name, tie.subtasks)
-		# 				# 	, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-		# 			tie = newtie
 
 		# Print failed tasks statistics
 		print('\nFAILED root tasks ({} failed root / {} failed total / {} total):'.format(
