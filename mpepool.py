@@ -139,7 +139,7 @@ def timeheader(timestamp=time.gmtime()):
 if not (_WEBUI and _LIMIT_WORKERS_RAM):
 	print(timeheader(), file=sys.stderr)
 	if not _WEBUI:
-		print('WARNING, Web UI is disabled because the "bottle" module import failed: ', lwerr, file=sys.stderr)
+		print('WARNING, Web UI is disabled because the "bottle" module import failed: ', wuerr, file=sys.stderr)
 	if not _LIMIT_WORKERS_RAM:
 		print('WARNING, RAM constraints are disabled because the "psutil" module import failed: '
 			, lwerr, file=sys.stderr)
@@ -236,6 +236,7 @@ def infodata(obj, propflt=None, objflt=None):
 	# Pass the objflt or return None
 	if objflt:
 		for prop, pcon in viewitems(objflt):  # Property name and constraint
+			print('>>> prop: {}, cpon: {}; objname: {}, objpv: {}'.format(prop, pcon, obj.name, obj.__getattribute__(prop)))
 			#assert isinstance(prop, str) and isinstance(pcon, UiResFilterVal
 			# 	), 'Invalid type of arguments:  prop: {}, pflt: {}'.format(
 			# 	type(prop).__name__, type(pcon).__name__)
@@ -247,9 +248,12 @@ def infodata(obj, propflt=None, objflt=None):
 			if _DEBUG_TRACE and pval is None:
 				print('  WARNING, objflt item does not belong to the {}: {}'.format(
 					type(obj).__name__, prop), file=sys.stderr)
-			if (not pcon.opt and prop not in obj) or (
-			pcon.end is None and pval != pcon.beg) or pval < pcon.beg or pval >= pcon.end:
+			if (not pcon.opt and prop not in obj) or (pcon.end is None and pval != pcon.beg
+			) or pcon.end is not None and (pval < pcon.beg or pval >= pcon.end):
+				print('>>> ret None, 1:', prop not in obj, '2:', pcon.end is None and pval != pcon.beg
+					, '3:', pcon.end is not None, '4:', pval < pcon.beg or pval >= pcon.end)
 				return None
+	print('>>> ret: ', str([obj.__getattribute__(prop) for prop in (propflt if propflt else obj.iterprop())]))
 	return tuple([obj.__getattribute__(prop) for prop in (propflt if propflt else obj.iterprop())])  #pylint: disable=C0325
 
 
@@ -1413,6 +1417,16 @@ class ExecPool(object):
 			assert isinstance(webuiapp, WebUiApp), 'Unexpected type of webuiapp: ' + type(webuiapp).__name__
 			#uiapp = WebUiApp(host='localhost', port=8080, name='MpepoolWebUI', daemon=True)
 			self._uicmd = webuiapp.cmd
+			if WebUiApp.RAM is None:
+				WebUiApp.RAM = _RAM_SIZE
+			if WebUiApp.LCPUS is None:
+				WebUiApp.LCPUS = AffinityMask.CPUS
+			if WebUiApp.CPUCORES is None:
+				WebUiApp.CPUCORES = AffinityMask.CORES
+			if WebUiApp.CPUNODES is None:
+				WebUiApp.CPUNODES = AffinityMask.NODES  # NUMA nodes (typically, physical CPUs)
+			if WebUiApp.WKSMAX is None:
+				WebUiApp.WKSMAX = wksnum
 			if not webuiapp.is_alive():
 				try:
 					webuiapp.start()
@@ -1450,25 +1464,34 @@ class ExecPool(object):
 			if data:
 				propflt = data.get(UiResOpt.cols)  # Properties (colons header)
 				# Be sure that the job/task name column is always included
-				if UiResCol.name.name not in propflt:
+				# Note: at least on Python2 if enum has 'name' member then
+				# it's .name attribute changes semantic => _name_ should be used
+				# print('>>> name:', UiResCol.name._name_, file=sys.stderr)
+				if UiResCol.name._name_ not in propflt:  # Note: .name attribute of the name col
 					# Add name column as the first one
 					try:
-						propflt.insert(0, UiResCol.name.name)
+						propflt.insert(0, UiResCol.name._name_)
 					except AttributeError as err:
 						data.clear()
 						self._uicmd.data['errmsg'] = ('Unexpected type of the UiResOpt.cols'
 							' filter values (not a list): ' + type(propflt).__name__)
 						raise
 				objflt = data.get(UiResOpt.flt)
-				limit = data.get(UiResOpt.limit, JOBS_LIMIT)
+				jlim = data.get(UiResOpt.jlim, JOBS_LIMIT)
 			else:
 				propflt = None
 				objflt = None
-				limit = JOBS_LIMIT
+				jlim = JOBS_LIMIT
 			print("> uicmd.id: {}, propflt: {}, objflt: {}".format(
 				self._uicmd.id, propflt, objflt), file=sys.stderr)
 			# Prepare .data for the response results
 			data.clear()
+			# Set CPU and RAM consuption statistics
+			if _LIMIT_WORKERS_RAM:
+				data['cpuLoad'] = psutil.cpu_percent()
+				data['ramUsage'] = psutil.cpu_percent()
+			# Set the actual Jobs limit value
+			data[UiResOpt.jlim] = jlim
 			# Summary of the execution pool:
 			# Note: executed in the main thread, so the lock check is required only
 			# to check for the termination
@@ -1478,15 +1501,13 @@ class ExecPool(object):
 					self.__termlock.release()
 				# Note: it just interrupts job start, but does not cause termination
 				# of the whole (already terminated) execution pool
-				self._uicmd.data['errmsg'] = 'The execution pool{} is not alive'.format(
-					'' if not self.name else ' ' + self.name)
 				print("WARNING, The execution pool{} is terminated and can't response the UI command: {}"
 					.format('' if not self.name else ' ' + self.name, self._uicmd.id.name, file=sys.stderr))
 				return
-					
+
 			smr = SummaryBrief(workers=len(self._workers), jobs=len(self._workers)
 				, jobsFailed=len(self.failures), tasks=len(self.tasks))
-			acqlock.release()
+			self.__termlock.release()
 			# Evaluate remained vars
 			# Evaluate tasksFailed and tasksRootFailed from failures
 			tasksRootFailed = 0
@@ -1547,9 +1568,7 @@ class ExecPool(object):
 				if ties:
 					data['tasksInfo'] = list(viewvalues(ties))
 			elif self._uicmd.id == UiCmdId.LIST_JOBS:
-				if not (self._workers and self._jobs and self.alive):
-					self._uicmd.data['errmsg'] = 'The execution pool{} is not alive'.format(
-						'' if not self.name else ' ' + self.name)
+				if (not self._workers and not self._jobs) or not self.alive:
 					return
 				# Flat workers listing
 				jobsInfo = None  # Information about the workers
@@ -1570,7 +1589,7 @@ class ExecPool(object):
 				# List the upcoming jobs up to the specified limit
 				jobsInfo = None  # Information about the jobs
 				header = True  # Add jobs header
-				ctr = 0  # Counter for the showing jobs
+				jnum = 0  # Counter of the showing jobs
 				for job in self._jobs:
 					# Note: check for the termination in all cycles
 					if not self.alive:
@@ -1582,27 +1601,53 @@ class ExecPool(object):
 						jobsInfo = [infoheader(JobInfo.iterprop(), propflt)]  #pylint: disable=E1101
 						header = False
 					jobsInfo.append(jdata)
-					ctr += 1  # Note: only the filtered jobs are considered
-					if limit and ctr >= limit:
+					jnum += 1  # Note: only the filtered jobs are considered
+					if jlim and jnum >= jlim:
 						break
 				if jobsInfo:
 					data['jobsInfo'] = jobsInfo
 					jobsInfo = None
 			elif self._uicmd.id == UiCmdId.LIST_TASKS:
-				if not (self._workers and self._jobs and self.alive):
-					self._uicmd.data['errmsg'] = 'The execution pool{} is not alive'.format(
-						'' if not self.name else ' ' + self.name)
+				if (not self._workers and not self._jobs) or not self.alive:
 					return
-				pass
-				# List the upcoming jobs up to the specified limit of covered jobs
+				# List the tasks with their jobs up to the specified limit of covered jobs
+				jnum = 0  # Counter of the showing jobs
+				tinfe0 = dict()  # dict(Task, TaskInfoExt)  - Task information extended, bottom level of the hierarchy
+				for job in self._jobs:
+					# Note: check for the termination in all cycles
+					if not self.alive:
+						return
+					if job.task is None:
+						continue
+					jdata = infodata(fji, propflt, objflt)
+					tie = tinfe0.get(job.task)
+					if tie is None:
+						tdata = infodata(TaskInfo(task), propflt, objflt)
+						tie = tinfe0.setdefault(task, TaskInfoExt(props=None if not tdata else
+							(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
+							, jobs=None if not jdata else [infoheader(JobInfo.iterprop(), propflt)]))  #pylint: disable=E1101
+					if jdata:
+						tie.jobs.append(jdata)
+				if not tinfe0:
+					return
+				# Iteratively form the hierarchy of tasks from the bottom level
+				ties = tasksInfoExt(tinfe0, propflt, objflt)
+				if ties:
+					data['tasksInfo'] = list(viewvalues(ties))
 			else:
 				self._uicmd.data['errmsg'] = 'Unknown UI command: ' + self._uicmd.id.name
 				print('WARNING, Unknown command requested:', self._uicmd.id.name, file=sys.stderr)
 		except Exception as err:
-			print('ERROR, UI command processing failed: {}. {}'.format(
-				err, traceback.format_exc(5)), file=sys.stderr)
-			raise
+			errmsg = 'ERROR, UI command processing failed: {}. {}'.format(
+				err, traceback.format_exc(5))
+			self._uicmd.data['errmsg'] = errmsg
+			print(errmsg, file=sys.stderr)
 		finally:
+			if (not self._workers and not self._jobs) or not self.alive:
+				errmsg = self._uicmd.data.get('errmsg', '')
+				errmsg = '{}The execution pool{} is not alive'.format(
+					'' if not errmsg else '. ' + errmsg, '' if not self.name else ' ' + self.name)
+				self._uicmd.data['errmsg'] = errmsg
 			self._uicmd.id = None  # Reset command id for the completed command
 			self._uicmd.cond.notify()
 			self._uicmd.cond.release()

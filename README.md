@@ -48,9 +48,9 @@ A Lightweight Multi-Process Execution Pool with load balancing to schedule Jobs 
 > Automatic rescheduling of the workers on low memory condition for the in-RAM computations is an optional and the only feature that requires an external package, [psutil](https://pypi.python.org/pypi/psutil).  
 All scheduling jobs share the same CPU affinity policy, which is convenient for the benchmarking, but not so suitable for scheduling both single and multi-threaded apps with distinct demands for the CPU cache.
 
-All main functionality is implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](//github.com/eXascaleInfolab/PyCABeM)), not as a separate library. Additionally, an optional minimalistic Web interface is provided in the separate file to inspect the load balancer and execution pool.  
+All main functionality is implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](https://github.com/eXascaleInfolab/PyCABeM)), not as a separate library. Additionally, an optional minimalistic Web interface is provided in the separate file to inspect and profile the load balancer and execution pool.  
 The main purpose of the main single-file module is the **concurrent execution of modules and external executables with custom resource consumption constraints, cache / parallelization tuning and automatic balancing of the worker processes for the in memory computations on the single server**. PyExPool is typically used as an application framework for benchmarking or heavy-loaded multi-process execution activities on constrained computational resources.  
-If the concurrent execution of *Python functions* is required, usage of external modules is not a problem and the automatic jobs scheduling for the in-RAM computations is not necessary, then a more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library. If a distributed task queue is required with advanced monitoring and reporting facilities then [Celery](http://www.celeryproject.org/) might be a good choice. For the parallel execution of the shell scripts a good option can be the [GNU parallel](https://en.wikipedia.org/wiki/GNU_parallel).
+If the concurrent execution of *Python functions* is required, usage of external modules is not a problem and the automatic jobs scheduling for the in-RAM computations is not necessary, then a more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library. A pretty convenient transparent parallel computations are provided by the [Joblib](https://pythonhosted.org/joblib/). If a distributed task queue is required with advanced monitoring and reporting facilities then [Celery](http://www.celeryproject.org/) might be a good choice. For the comprehensive parallel computing [Dask](http://dask.pydata.org) is a good choice. For the parallel execution of only the shell scripts the [GNU parallel](https://en.wikipedia.org/wiki/GNU_parallel) might be a good option.
 
 The **load balancing** is enabled when the global variables `_LIMIT_WORKERS_RAM` and `_CHAINED_CONSTRAINTS` are set, jobs `.category` and relative `.size` (if known) specified. The balancing is performed to use as much RAM and CPU resources as possible performing in-RAM computations and meeting the specified timeout and memory constraints for each job and for the whole pool.  
 Large executing jobs can be postponed for the later execution with less number of worker processes after completion of the smaller jobs. The number of workers is reduced automatically (balanced) on the jobs queue processing to meet memory constraints. It is recommended to add jobs in the order of the increasing memory/time complexity if possible to reduce the number of worker processes terminations on jobs postponing (rescheduling).
@@ -332,7 +332,7 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 	failures: [JobInfo]  - failed (terminated or crashed) jobs with timestamps.
 		NOTE: failures contain both terminated, crashed jobs that jobs completed with non-zero return code
 		excluding the jobs terminated by timeout that have set .rsrtonto (will be restarted)
-	tasks: set(Task)  - tasks associated with the sheduled jobs
+	tasks: set(Task)  - tasks associated with the scheduled jobs
 	"""
 
 	execute(job, concur=True):
@@ -350,7 +350,7 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 		timeout: int  - execution timeout in seconds before the workers termination, >= 0.
 			0 means unlimited time. The time is measured SINCE the first job
 			was scheduled UNTIL the completion of all scheduled jobs.
-		return bool  - True on graceful completion, Flase on termination by the specified
+		return bool  - True on graceful completion, False on termination by the specified
 			constrainets (timeout, memory limit, etc.)
 		"""
 
