@@ -191,7 +191,7 @@ def tblfmt(v, strpad=0):
 	if isinstance(v, float):
 		return '{:.3f}'.format(v)
 	elif isinstance(v, int):
-		return str(strpad).join(('{:','}')).format(v)
+		return str(strpad).join(('{:', '}')).format(v)
 	if v is None:
 		v = '-'
 	elif not isinstance(v, str):
@@ -258,7 +258,7 @@ def infodata(obj, propflt=None, objflt=None):
 				# print('>>> ret None, 1:', prop not in obj, '2:', pcon.end is None and pval != pcon.beg
 				# 	, '3:', pcon.end is not None, '4:', pval < pcon.beg or pval >= pcon.end)
 				return None
-	return tuple([obj.__getattribute__(prop) for prop in (propflt if propflt else obj.iterprop())])  #pylint: disable=C0325
+	return tuple([tblfmt(obj.__getattribute__(prop)) for prop in (propflt if propflt else obj.iterprop())])  #pylint: disable=C0325
 
 
 def infoheader(objprops, propflt):
