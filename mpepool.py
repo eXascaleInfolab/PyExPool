@@ -271,7 +271,11 @@ def infoheader(objprops, propflt):
 	Returns:
 		tuple(str)  - filtered property names
 	"""
-	return tuple([h for h in objprops if not propflt or h in propflt])
+	if propflt:
+		opr = set(objprops)
+		return tuple([h for h in propflt if h in opr])
+	return tuple([h for h in objprops])
+	# return tuple([h for h in objprops if not propflt or h in propflt])
 
 
 def propslist(cls):
