@@ -251,8 +251,10 @@ def infodata(obj, propflt=None, objflt=None):
 			if _DEBUG_TRACE and pval is None:
 				print('  WARNING, objflt item does not belong to the {}: {}'.format(
 					type(obj).__name__, prop), file=sys.stderr)
-			if (not pcon.opt and prop not in obj) or (pcon.end is None and pval != pcon.beg
-			) or pcon.end is not None and (pval < pcon.beg or pval >= pcon.end):
+			# Note: pcon is None requires non-None pval (any non-None value should be present) to not be filtered out
+			if ((pcon is None or not pcon.opt) and prop not in obj) or (pcon is None and pval is None
+			) or (pcon is not None and ((pcon.end is None and pval != pcon.beg)
+			or pcon.end is not None and (pval < pcon.beg or pval >= pcon.end))):
 				# print('>>> ret None, 1:', prop not in obj, '2:', pcon.end is None and pval != pcon.beg
 				# 	, '3:', pcon.end is not None, '4:', pval < pcon.beg or pval >= pcon.end)
 				return None
@@ -1500,7 +1502,7 @@ class ExecPool(object):
 				# Note: at least on Python2 if enum has 'name' member then
 				# it's .name attribute changes semantic => _name_ should be used
 				# print('>>> name:', UiResCol.name._name_, file=sys.stderr)
-				if UiResCol.name._name_ not in propflt:  # Note: .name attribute of the name col
+				if propflt and UiResCol.name._name_ not in propflt:  # Note: .name attribute of the name col
 					# Add name column as the first one
 					try:
 						propflt.insert(0, UiResCol.name._name_)
@@ -1586,6 +1588,8 @@ class ExecPool(object):
 						tie = tinfe0.get(task)
 						if tie is None:
 							tdata = infodata(TaskInfo(task), propflt, objflt)
+							if not tdata:
+								continue
 							tie = tinfe0.setdefault(task, TaskInfoExt(props=None if not tdata else
 								(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
 								, jobs=None if not jdata else [JobInfo.iterprop()]))  #pylint: disable=E1101
@@ -1662,6 +1666,8 @@ class ExecPool(object):
 					tie = tinfe0.get(job.task)
 					if tie is None:
 						tdata = infodata(TaskInfo(task), propflt, objflt)
+						if not tdata:
+							continue
 						tie = tinfe0.setdefault(task, TaskInfoExt(props=None if not tdata else
 							(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
 							, jobs=None if not jdata else [infoheader(JobInfo.iterprop(), propflt)]))  #pylint: disable=E1101

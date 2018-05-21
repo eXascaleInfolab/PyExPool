@@ -48,8 +48,8 @@ except ImportError:
 		>>> IntEnum('UiResFmt', 'json htm txt').htm.name
 		'htm'
 
-		>>> IntEnum('UiResKind', 'work defer').defer.name
-		'defer'
+		>>> IntEnum('UiResFmt', 'json htm txt').txt.name
+		'txt'
 		"""
 
 		def valobj(clsname, name, val):
@@ -105,21 +105,25 @@ def inferNumType(val):
 UiCmdId = IntEnum('UiCmdId', 'FAILURES LIST_JOBS LIST_TASKS API_MANUAL')  # JOB_INFO, TASK_INFO
 """UI Command Identifier associated with the REST URL"""
 
-UiResOpt = IntEnum('UiResOpt', 'fmt cols flt kind jlim refresh')  # fltStatus
+UiResOpt = IntEnum('UiResOpt', 'fmt cols flt jlim refresh')  # fltStatus / kind
 # Note: filter keys ending with '*' are optional (such columns allowed
 # to be absent in the target item)
 """UI Command parameters
+NOTE: None UI command parameters means that any non-None value of the respective property should be present
 
 fmt: str(UiResFmt)  - required format of the result
 cols: str(UiResCol)  - required columns in the result, all by default
-flt: str(UiResFilterVal)  - filter target items per each column, ! - invert condition, * - optional column:
-	?flt=rcode*!:-15|duration:5m1.15..2d3h|...
-kind: str(UiResKind)  - kind of the showing items
+flt: str(UiResFilterVal)  - filter target items per each column, notations:
+* - optional column, absense of the value(:xxx) - the property should present with any non-None value:
+	?flt=rcode*:-15|duration:5m1.15..2d3h|pid|...
 jlim: uint  - limit of the listed number of the active jobs / tasks having this number of jobs, 0 means any;
 	NOTE: jlim omission results in the ExecPool default value for the jlim, failures are always fully shown.
 refresh: uint  - page refresh time, seconds >= 2
 """
+# TODO: add inverse notation the the item filter: ! - invert condition
+#	?flt=rcode*!:-15|...
 # flt=rcode*:-15&flt=duration:5m1.15..2d3h&...
+# kind: str(UiResKind)  - kind of the showing items
 
 UiResFmt = IntEnum('UiResFmt', 'json htm txt')
 """UI Command: `fmt` parameter values"""
@@ -137,10 +141,11 @@ end  - end of the range bound
 opt: bool  - target property of the filter is optional, i.e. omit the filter if the property is absent or None
 """
 
-# # Note: 'exec' is a keyword in Python 2 and can't be used as an object attribute
-# work - working (executing) jobs (workers), defer - deferred (regular, postponed) jobs
-UiResKind = IntEnum('UiResKind', 'work defer task')
-"""UI Command: Result filtration by the job status: executing (worker job), deferred (scheduled obj)"""
+# Note: jobs by status can be filtered in more generalized way using the UiResFilterVal
+# # # Note: 'exec' is a keyword in Python 2 and can't be used as an object attribute
+# # work - working (executing) jobs (workers), defer - deferred (regular, postponed) jobs
+# UiResKind = IntEnum('UiResKind', 'work defer')  #  task
+# """UI Command: Result filtration by the job status: executed (worked job), deferred (scheduled obj)"""
 
 class ResultOptions(object):
 	"""Result options extractor from the URL GET query"""
@@ -180,23 +185,32 @@ class ResultOptions(object):
 			# Parse Filter parameters to UiResFilterVal
 			self.fltopts = {}
 			for prm in self.flt.split('|'):
-				k, v =  prm.split(':')
-				# Consider range values and infer the numeric type if possible
-				if v.find('..') != -1:
-					v, ve = v.split('..', 1)
-					ve = inferNumType(ve)
+				pkv = prm.split(':')
+				k = pkv[0]
+				if len(pkv) > 1:
+					v = pkv[1]
+					# Consider range values and infer the numeric type if possible
+					if v.find('..') != -1:
+						v, ve = v.split('..', 1)
+						ve = inferNumType(ve)
+					else:
+						ve = None
+					v = inferNumType(v)
+					# Consider optional filtering fields
+					val = UiResFilterVal(beg=v, end=ve, opt=k[-1]=='*')  #pylint: disable=C0326
+					if val.opt:
+						k = k[:-1]
+					self.fltopts[k] = val
 				else:
-					ve = None
-				v = inferNumType(v)
-				# Consider optional filtering fields
-				val = UiResFilterVal(beg=v, end=ve, opt=k[-1]=='*')  #pylint: disable=C0326
-				if val.opt:
-					k = k[:-1]
-				self.fltopts[k] = val
-		# Fetch the kind of items to be shown
-		self.kind = qdict.get(UiResOpt.kind.name)  #pylint: disable=E1101
-		if self.kind:
-			self.kind = self.kind.split(',')
+					# Filter meaning: the option should present with any (non-None) value
+					self.fltopts[k] = None
+		# # Fetch the kind of items to be shown
+		# self.kind = qdict.get(UiResOpt.kind.name)  #pylint: disable=E1101
+		# if self.kind:
+		# 	self.kind = self.kind.split(',')
+		# 	# Validate kind values
+		# 	for kind in self.kind:  #pylint: disable=W0104
+		# 		UiResKind[kind]  # Note: KeyError is thrown on invalid value
 		# Fetch the jobs limit value if any
 		self.jlim = qdict.get(UiResOpt.jlim.name)  #pylint: disable=E1101
 		# Fetch the refresh time if any
