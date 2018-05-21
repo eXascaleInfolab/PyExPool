@@ -351,7 +351,7 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 			0 means unlimited time. The time is measured SINCE the first job
 			was scheduled UNTIL the completion of all scheduled jobs.
 		return bool  - True on graceful completion, False on termination by the specified
-			constrainets (timeout, memory limit, etc.)
+			constraints (timeout, memory limit, etc.)
 		"""
 
 	clear():
@@ -431,7 +431,7 @@ def cpucorethreads():
 def cpunodes():
 	"""The number of NUMA nodes, where CPUs are located
 
-	Used to evaluate CPU index from the affinity table index considerin the NUMA architectore.
+	Used to evaluate CPU index from the affinity table index considering the NUMA architecture.
 	"""
 	
 def cpusequential():

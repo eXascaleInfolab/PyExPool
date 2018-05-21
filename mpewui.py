@@ -48,7 +48,7 @@ except ImportError:
 		>>> IntEnum('UiResFmt', 'json htm txt').htm.name
 		'htm'
 
-		>>> IntEnum('UiResFltStatus', 'work defer').defer.name
+		>>> IntEnum('UiResKind', 'work defer').defer.name
 		'defer'
 		"""
 
@@ -105,20 +105,21 @@ def inferNumType(val):
 UiCmdId = IntEnum('UiCmdId', 'FAILURES LIST_JOBS LIST_TASKS API_MANUAL')  # JOB_INFO, TASK_INFO
 """UI Command Identifier associated with the REST URL"""
 
-UiResOpt = IntEnum('UiResOpt', 'fmt cols flt jlim')  # fltStatus
+UiResOpt = IntEnum('UiResOpt', 'fmt cols flt kind jlim refresh')  # fltStatus
 # Note: filter keys ending with '*' are optional (such columns allowed
 # to be absent in the target item)
 """UI Command parameters
 
-fmt  - required format of the result
-cols  - required columns in the result, all by default
-flt  - filter target items per each column:
-	flt=rcode*:-15|duration:5m1.15..2d3h|...
+fmt: str(UiResFmt)  - required format of the result
+cols: str(UiResCol)  - required columns in the result, all by default
+flt: str(UiResFilterVal)  - filter target items per each column, ! - invert condition, * - optional column:
+	?flt=rcode*!:-15|duration:5m1.15..2d3h|...
+kind: str(UiResKind)  - kind of the showing items
 jlim: uint  - limit of the listed number of the active jobs / tasks having this number of jobs, 0 means any;
 	NOTE: jlim omission results in the ExecPool default value for the jlim, failures are always fully shown.
+refresh: uint  - page refresh time, seconds >= 2
 """
 # flt=rcode*:-15&flt=duration:5m1.15..2d3h&...
-
 
 UiResFmt = IntEnum('UiResFmt', 'json htm txt')
 """UI Command: `fmt` parameter values"""
@@ -127,7 +128,6 @@ UiResFmt = IntEnum('UiResFmt', 'json htm txt')
 UiResCol = IntEnum('UiResCol',
 	'category rcode duration memkind memsize name numadded numdone numterm pid task tstart tstop')
 """UI Command: `cols` parameter values for Jobs and Tasks listing"""
-
 
 UiResFilterVal = namedtuple('UiResFilterVal', 'beg end opt')
 """Property value constraint of the item filter for the ObjInfo (Task/Job Info)
@@ -139,24 +139,21 @@ opt: bool  - target property of the filter is optional, i.e. omit the filter if 
 
 # # Note: 'exec' is a keyword in Python 2 and can't be used as an object attribute
 # work - working (executing) jobs (workers), defer - deferred (regular, postponed) jobs
-UiResFltStatus = IntEnum('UiResFltStatus', 'work defer task')
+UiResKind = IntEnum('UiResKind', 'work defer task')
 """UI Command: Result filtration by the job status: executing (worker job), deferred (scheduled obj)"""
 
 class ResultOptions(object):
 	"""Result options extractor from the URL GET query"""
 
 	def __init__(self, qdict):
-		"""[summary]
+		"""Initialization of the result options
 
 		Args:
-			qdict ([type]): [description]
+			qdict: FormsDict(MultiDict)  - user query parsed to the multi dictionary
 
 		Raises:
-			KeyError
-			#HTTPResponse: [description]
-
-		Returns:
-			[type]: [description]
+			KeyError  - parameter value does not correspond to the expected one
+			ValueError  - parameter value has unexpected format
 		"""
 		self.fmt = UiResFmt.htm
 		# Fetch the required result format
@@ -179,8 +176,6 @@ class ResultOptions(object):
 		self.cols = qdict.get(UiResOpt.cols.name)  #pylint: disable=E1101
 		# Fetch the required results filtering options (object filter)
 		self.flt = qdict.get(UiResOpt.flt.name)  #pylint: disable=E1101
-		# Fetch the jobs limit value if any
-		self.jlim = qdict.get(UiResOpt.jlim.name)  #pylint: disable=E1101
 		if self.flt:
 			# Parse Filter parameters to UiResFilterVal
 			self.fltopts = {}
@@ -198,6 +193,16 @@ class ResultOptions(object):
 				if val.opt:
 					k = k[:-1]
 				self.fltopts[k] = val
+		# Fetch the kind of items to be shown
+		self.kind = qdict.get(UiResOpt.kind.name)  #pylint: disable=E1101
+		if self.kind:
+			self.kind = self.kind.split(',')
+		# Fetch the jobs limit value if any
+		self.jlim = qdict.get(UiResOpt.jlim.name)  #pylint: disable=E1101
+		# Fetch the refresh time if any
+		self.refresh = qdict.get(UiResOpt.refresh.name)
+		if self.refresh:
+			self.refresh = float(self.refresh)
 
 
 
@@ -235,7 +240,7 @@ class SummaryBrief(object):
 		"""Brief summary initialization
 
 		workers: int  - the number of workers (executors, executing jobs)
-		jobs: int  - the number of (deferred/postoponed/regular) jobs
+		jobs: int  - the number of (deferred/postponed/regular) jobs
 		jobsFailed: int  - the number of failed jobs
 		tasks: int  - total number of (flattened) tasks
 		tasksFailed: int  - total number of tasks having at least one subtask/job failed
@@ -260,7 +265,7 @@ class SummaryBrief(object):
 # 	__slots__ = ('summary', 'jobsInfo', 'tasksInfo')
 #
 # 	def __init__(self, summary, jobsInfo, tasksInfo):
-# 		"""Failres info initialization
+# 		"""Failures info initialization
 #
 # 		Args:
 # 			summary: SummaryBrief  - brief total summary
@@ -383,10 +388,14 @@ class WebUiApp(threading.Thread):
 		# Parse URL parameters and form the UI command parameters
 		try:
 			resopts = ResultOptions(bottle.request.query)
-		except KeyError:
-			bottle.response.status = 415  # 400
-			return 'Invalid URL parameter value of "{}": {}'.format(UiResOpt.fmt.name
-				, bottle.request.query[UiResOpt.fmt.name])  #pylint: disable=E1136
+		except (KeyError, ValueError) as err:
+			# 400  - Bad Request
+			# 415  - Unsupported Media Type
+			bottle.response.status = 400
+			return 'Invalid value of the URL parameter, {}'.format(err)
+			# return 'Invalid URL parameter value of "{}": {}'.format(UiResOpt.fmt.name
+			# 	, bottle.request.query[UiResOpt.fmt.name])  #pylint: disable=E1136
+
 		with cmd.cond:
 			cmd.id = UiCmdId.FAILURES
 			# Prepare .data for the request parameters storage
@@ -433,7 +442,7 @@ class WebUiApp(threading.Thread):
 			else:
 				smr = cmd.data.get('summary')
 				# print('>>> jobsInfo: {}'.format(cmd.data.get('jobsInfo')))
-				return bottle.template('webui', pageRefresh=None, title='Failures'
+				return bottle.template('webui', pageRefresh=resopts.refresh, title='Failures'
 					, pageDescr='Information about the failed tasks and jobs.'
 					, page='failures', errmsg=cmderr
 					, summary=smr is not None, ramUsage=cmd.data.get('ramUsage', 'NA')
@@ -456,9 +465,10 @@ class WebUiApp(threading.Thread):
 		try:
 			resopts = ResultOptions(bottle.request.query)
 		except KeyError:
-			bottle.response.status = 415  # 400
-			return 'Invalid URL parameter value of "{}": {}'.format(UiResOpt.fmt.name
-				, bottle.request.query[UiResOpt.fmt.name])  #pylint: disable=E1136
+			# 400  - Bad Request
+			# 415  - Unsupported Media Type
+			bottle.response.status = 400
+			return 'Invalid value of the URL parameter, {}'.format(err)
 
 		with cmd.cond:
 			cmd.id = UiCmdId.LIST_JOBS
@@ -491,8 +501,8 @@ class WebUiApp(threading.Thread):
 				return cmderr
 
 			smr = cmd.data.get('summary')
-			return bottle.template('webui', pageRefresh=None, title='Jobs'
-				, pageDescr='Information about the executing (workers) and deffered jobs.'
+			return bottle.template('webui', pageRefresh=resopts.refresh, title='Jobs'
+				, pageDescr='Information about the executing (workers) and deferred jobs.'
 				, page='jobs', errmsg=cmderr
 				, summary=smr is not None, ramUsage=cmd.data.get('ramUsage', 'NA')
 						, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
@@ -503,32 +513,6 @@ class WebUiApp(threading.Thread):
 				, workersInfo=cmd.data.get('workersInfo'), jobsInfo=cmd.data.get('jobsInfo')
 				, jlim=cmd.data.get(UiResOpt.jlim)
 				)
-			# res = []
-			# if cmderr:
-			# 	res.append('<div class="err">')
-			# 	res.append(cmderr)
-			# 	res.append('</div>')
-			# smr = cmd.data.get('summary')
-			# if smr:
-			# 	res.append('<h2>Summary</h2>')
-			# 	res.append('<div><span>Workers: ')
-			# 	res.append(str(smr.workers))
-			# 	res.append('</span>')
-			# 	res.append('&nbsp;'*10)
-			# 	res.append('<span>Failed Root Tasks: ')
-			# 	res.append('{} / {}'.format(smr.tasksRootFailed, smr.tasksRoot))
-			# 	res.append('</span></div>')
-			# 	res.append('<div><span>Failed Jobs: ')
-			# 	res.append('{} / {}'.format(smr.jobsFailed, smr.jobs))
-			# 	res.append('</span>')
-			# 	res.append('&nbsp;'*10)
-			# 	res.append('<span>Failed Tasks: ')
-			# 	res.append('{} / {}'.format(smr.tasksFailed, smr.tasks))
-			# 	res.append('</span></div>')
-
-			# workersInfo = cmd.data.get('workersInfo')
-			# jobsInfo = cmd.data.get('jobsInfo')
-			# return ''.join(res)
 
 
 	@staticmethod
