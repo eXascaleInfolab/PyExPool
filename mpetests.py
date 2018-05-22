@@ -775,7 +775,8 @@ class TestTasks(unittest.TestCase):
 ################################################################################
 # WebUI related tests
 # import threading  # To request URL in parallel with execpool joining
-from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt  #pylint: disable=C0413;  UiResCol, UiResFltStatus
+import os
+from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt  #pylint: disable=C0413;  UiResCol
 try:
 	# from urllib.parse import urlparse, urlencode
 	from urllib.request import urlopen #, Request
@@ -788,6 +789,8 @@ except ImportError:
 _webuiapp = None  # Global WebUI application
 
 # @unittest.skip('Under development, currently used manually')
+@unittest.skipUnless(os.getenv('MANUAL'),
+	'Only the manual WebUI testing is supported now, MANUAL evn var should be set')
 class TestWebUI(unittest.TestCase):
 	"""WebUI tests"""
 
@@ -825,23 +828,26 @@ class TestWebUI(unittest.TestCase):
 	# @unittest.skipUnless(mock is not None, 'Requires defined mock')
 	def test_failures(self):
 		"""Test WebUI listing of the ExecPool failures"""
-		timeout = 120  # Note: should be larger than 3*latency
+		timeout = 100  # Note: should be larger than 3*latency
 		# worktime = max(1, _TEST_LATENCY) + (timeout * 2) // 1  # Job work time
 		worktime = 0.75 * timeout  # Job work time
 		assert _TEST_LATENCY * ExecPool._KILLDELAY < timeout and _TEST_LATENCY * ExecPool._KILLDELAY < worktime, (
 			'Testcase parameters validation failed')
 
 		t1 = Task('Task1')  # onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock()
+		st1 = Task('SubTask1.1', task=t1)  # onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock()
 		j1 = Job('j1f', args=('sleep', str(worktime)), task=t1, timeout=_TEST_LATENCY)  # , onstart=mock.MagicMock()
-		j2 = Job('j2', args=('sleep', str(timeout/10.)), timeout=timeout)  # , onstart=mock.MagicMock()
+		j2 = Job('j2', args=('sleep', str(timeout/10.)), task=st1, timeout=timeout)  # , onstart=mock.MagicMock()
 		j3 = Job('j3', args=('sleep', str(worktime)), timeout=timeout)  # , onstart=mock.MagicMock()
 		j4 = Job('j4', args=('sleep', str(timeout/5.)), task=t1, timeout=timeout)  # , onstart=mock.MagicMock()
 		j5 = Job('j5', args=('sleep', str(worktime)), timeout=timeout)  # , onstart=mock.MagicMock()
 		j6 = Job('j6f', args=('sleep', str(worktime)), timeout=_TEST_LATENCY)  # , onstart=mock.MagicMock()
+		# j7 = Job('j7f', args=('sleep', str(worktime)), task=st1, timeout=_TEST_LATENCY)  # , onstart=mock.MagicMock()
 		time.sleep(_TEST_LATENCY)
 		self._execpool.execute(j1)
 		self._execpool.execute(j2)
 		self._execpool.execute(j6)
+		# self._execpool.execute(j7)
 		self._execpool.execute(j3)
 		time.sleep(_TEST_LATENCY)
 		self._execpool.execute(j4)
@@ -853,7 +859,7 @@ class TestWebUI(unittest.TestCase):
 		# http://localhost:8080/?fmt=json&fltStatus=work,defer
 		# url = ''.join(('http://', self.host, str(self.port), '/?'
 		# 	, UiResOpt.fmt.name	,'=', UiResFmt.json.name
-		# 	, '&', UiResOpt.fltStatus.name, '=', UiResFltStatus.work.name, ',', UiResFltStatus.defer.name))
+		# 	, '&', UiResOpt.fltStatus.name, '=', UiResKind.work.name, ',', UiResKind.defer.name))
 		# json = urlopen(url).read().decode('utf-8')
 		# print(json)
 
