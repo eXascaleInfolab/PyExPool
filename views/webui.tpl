@@ -72,6 +72,8 @@
 		/* Table style ------------------------------------------------------ */
 		table.frame {
 			border-collapse: collapse;
+			border-top: 1px solid #888;
+			border-bottom: 1px solid #888;
 			width: 100%;
 			text-align: center;
 		}
@@ -85,12 +87,21 @@
 
 		/* .frame td { border: none } */
 		.frame th {
-			border-top: thin solid #888;
-			border-bottom: thin solid #888;
+			/* border-top: thin solid #888; */
+			border-bottom: 1px solid #888;
 		}
 
+		/* Header cell for the hierarchy of tasks */
+		td.hdr {
+			border-top: 1px solid #888;
+			font-weight: bold;
+			text-align: center;
+		}
+
+		td.task { background: #DDD }
+
 		/* Color even rows; .frame */
-		tr:nth-child(even) { background: #DDD }
+		tr.frame:nth-child(even) { background: #DDD }
 
 		tr:hover {
 			background: lightyellow;
@@ -158,8 +169,8 @@
 	<div class="col2">
 		<table class="noframe">
 			<tr>
-				<td class="ta-right">Failed Jobs:</td>
-				<td>{{jobsFailed}} / {{jobs}}</td>
+				<td class="ta-right">Failed | Remained Jobs:</td>
+				<td>{{jobsFailed}} | {{jobs}}</td>
 			</tr>
 			<tr>
 				<td class="ta-right">Failed Root Tasks:</td>
@@ -199,22 +210,33 @@
 
 % if get('tasksFailedInfo'):
 <h2>Failed Tasks with Jobs</h2>
-<hr />
-<!-- <table class="noframe">
+<!-- <hr /> -->
+<table class="noframe">
+	% tiw = get('tasksFailedInfoWide')
+	%	for tfi in get('tasksFailedInfo'):
 	<tr>
-#	% for hdr, tfi in get('tasksFailedInfo'):
-#		% if hdr:
-#			% for tprop in tfi:
-#		<th>{ {tprop}}</th>
-#			% end
-#		% else:
-#			% for tprop in tfi:
-#		<td>{ {tprop}}</td>
-#			% end
-#		% end
-#	% end
+		% for idt in range(tfi.ident):  # Left align the output
+		<td></td>
+		% end
+		% for tv in tfi.data:  # Output the data
+			%	if tfi.compound is not None:
+				%	if tfi.compound:
+				<td class="hdr task">
+				%	else:
+				<td class="hdr">
+				% end  # if
+			%	else:
+			<td>
+			% end  # if
+				{{tv}}
+			</td>
+		% end  # tv
+		% for idt in range(tiw - tfi.ident - len(tfi.data)):  # Right align the output
+		<td></td>
+		% end
 	</tr>
-</table> -->
+	% end  # tfi
+</table>
 <hr />
 	% if get('jlim'):
 <!-- Show jobs limit, which restricts the number of shown failed tasks -->
@@ -226,7 +248,7 @@
 % if get('workersInfo'):
 <h2>Workers</h2>
 <table class="frame">
-	<!-- <caption>Failed Jobs not Assigned to Tasks</caption> -->
+	<!-- <caption>Executing jobs (workers)</caption> -->
 	<tr>
 		% for jprop in workersInfo[0]:
 		<th>{{jprop}}</th>
@@ -245,7 +267,7 @@
 % if get('jobsInfo'):
 <h2>Jobs</h2>
 <table class="frame">
-	<!-- <caption>Failed Jobs not Assigned to Tasks</caption> -->
+	<!-- <caption>Deferred jobs</caption> -->
 	<tr>
 		% for jprop in jobsInfo[0]:
 		<th>{{jprop}}</th>
@@ -259,13 +281,48 @@
 	</tr>
 	% end
 </table>
-<!-- Show jobs limit, which restricts the number of shown jobs -->
+	<!-- Show jobs limit, which restricts the number of shown jobs -->
 	% if get('jlim'):
 <p><span class="label">Jobs limit:</span> {{jlim}}</p>
 	% end
 % end  # jobsInfo
 
 <!-- Tasks page specific data ############################################## -->
+% if get('tasksInfo'):
+<h2>Remained Tasks with Jobs</h2>
+<!-- <hr /> -->
+<table class="noframe">
+	% tiw = get('tasksInfoWide')
+	%	for tfi in get('tasksInfo'):
+	<tr>
+		% for idt in range(tfi.ident):  # Left align the output
+		<td></td>
+		% end
+		% for tv in tfi.data:  # Output the data
+			%	if tfi.compound is not None:
+				%	if tfi.compound:
+				<td class="hdr task">
+				%	else:
+				<td class="hdr">
+				% end  # if
+			%	else:
+			<td>
+			% end  # if
+				{{tv}}
+			</td>
+		% end  # tv
+		% for idt in range(tiw - tfi.ident - len(tfi.data)):  # Right align the output
+		<td></td>
+		% end
+	</tr>
+	% end  # tfi
+</table>
+<hr />
+	% if get('jlim'):
+<!-- Show jobs limit, which restricts the number of shown failed tasks -->
+<p><span class="label">Jobs limit:</span> {{jlim}}</p>
+	% end
+% end  # tasksInfo
 
 <!-- API Manual page specific data ######################################### -->
 

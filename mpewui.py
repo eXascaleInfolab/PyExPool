@@ -216,7 +216,7 @@ class ResultOptions(object):
 		# Fetch the refresh time if any
 		self.refresh = qdict.get(UiResOpt.refresh.name)
 		if self.refresh:
-			self.refresh = float(self.refresh)
+			self.refresh = int(self.refresh)  # Note: refresh content value is int
 
 
 
@@ -272,23 +272,6 @@ class SummaryBrief(object):
 	# @property
 	# def __dict__(self):
 	# 	return dict({p: self.__getattribute__(p) for p in self.__slots__})
-
-
-# class Failures(object):
-# 	"""Failed jobs and tasks information extended with the total summary"""
-# 	__slots__ = ('summary', 'jobsInfo', 'tasksInfo')
-#
-# 	def __init__(self, summary, jobsInfo, tasksInfo):
-# 		"""Failures info initialization
-#
-# 		Args:
-# 			summary: SummaryBrief  - brief total summary
-# 			jobsInfo: list  - info about the failed jobs not assigned to any task
-# 			tasksInfo: list  - info about the failed jobs and their owner tasks
-# 		"""
-# 		self.summary = summary
-# 		self.jobsInfo = jobsInfo
-# 		self.tasksInfo = tasksInfo
 
 
 class WebUiApp(threading.Thread):
@@ -466,7 +449,7 @@ class WebUiApp(threading.Thread):
 						, tasksRootFailed=smr.tasksRootFailed, tasksRoot=smr.tasksRoot
 						, tasksFailed=smr.tasksFailed, tasks=smr.tasks
 					, jobsFailedInfo=cmd.data.get('jobsInfo'), tasksFailedInfo=cmd.data.get('tasksInfo')
-					, jlim=cmd.data.get(UiResOpt.jlim)
+					, tasksFailedInfoWide=cmd.data.get('tasksInfoWide'), jlim=cmd.data.get(UiResOpt.jlim)
 					)
 
 
@@ -478,7 +461,7 @@ class WebUiApp(threading.Thread):
 		# return 'Not Implemented'
 		try:
 			resopts = ResultOptions(bottle.request.query)
-		except KeyError:
+		except (KeyError, ValueError) as err:
 			# 400  - Bad Request
 			# 415  - Unsupported Media Type
 			bottle.response.status = 400
@@ -516,7 +499,7 @@ class WebUiApp(threading.Thread):
 
 			smr = cmd.data.get('summary')
 			return bottle.template('webui', pageRefresh=resopts.refresh, title='Jobs'
-				, pageDescr='Information about the executing (workers) and deferred jobs.'
+				, pageDescr='Information about the executing (workers) and deferred jobs (non-finished items only).'
 				, page='jobs', errmsg=cmderr
 				, summary=smr is not None, ramUsage=cmd.data.get('ramUsage', 'NA')
 						, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
@@ -532,11 +515,54 @@ class WebUiApp(threading.Thread):
 	@staticmethod
 	def tasks(cmd):
 		"""Listing of the hierarchical tasks with their subtasks and jobs"""
-		# 501  - Not Implemented
-		bottle.response.status = 501
-		return 'Not Implemented'
+		try:
+			resopts = ResultOptions(bottle.request.query)
+		except (KeyError, ValueError) as err:
+			# 400  - Bad Request
+			# 415  - Unsupported Media Type
+			bottle.response.status = 400
+			return 'Invalid value of the URL parameter, {}'.format(err)
+
 		with cmd.cond:
 			cmd.id = UiCmdId.LIST_TASKS
+			# Prepare .data for the request parameters storage
+			if cmd.data:
+				cmd.data.clear()
+			if resopts.cols:
+				cmd.data[UiResOpt.cols] = resopts.cols.split(',')
+			if resopts.flt:
+				cmd.data[UiResOpt.flt] = resopts.fltopts
+			if resopts.jlim is not None:
+				cmd.data[UiResOpt.jlim] = resopts.jlim
+
+			cmd.cond.wait()
+			# Now .data contains the response results
+			# Read the result and transfer to the client
+			if not cmd.data:
+				# 500 Internal Server Error
+				bottle.response.status = 500
+				return 'Service error occurred, the command has not been executed'
+
+			cmderr = cmd.data.get('errmsg')  # Error message
+			if len(cmd.data) == 1 and cmderr:
+				# Note: occurs mostly if the execution pool is finished
+				# 503  - Service Unavailable
+				bottle.response.status = 503
+				return cmderr
+
+			smr = cmd.data.get('summary')
+			return bottle.template('webui', pageRefresh=resopts.refresh, title='Tasks'
+				, pageDescr='Information about the non-finished hierarchy of tasks with their jobs.'
+				, page='tasks', errmsg=cmderr
+				, summary=smr is not None, ramUsage=cmd.data.get('ramUsage', 'NA')
+						, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
+						, lcpus=WebUiApp.LCPUS, cpuCores=WebUiApp.CPUCORES, cpuNodes=WebUiApp.CPUNODES
+					, workers=smr.workers, wksmax=WebUiApp.WKSMAX, jobsFailed=smr.jobsFailed, jobs=smr.jobs
+					, tasksRootFailed=smr.tasksRootFailed, tasksRoot=smr.tasksRoot
+					, tasksFailed=smr.tasksFailed, tasks=smr.tasks
+				, tasksInfo=cmd.data.get('tasksInfo'), tasksInfoWide=cmd.data.get('tasksInfoWide')
+				, jlim=cmd.data.get(UiResOpt.jlim)
+				)
 
 
 	@staticmethod

@@ -235,7 +235,7 @@ def infodata(obj, propflt=None, objflt=None):
 	Raises:
 		AttributeError  - propflt item does not belong to the JobInfo slots
 	"""
-	#assert hasattr(obj, '__slots__'), 'The object should contain slots'
+	assert hasattr(obj, '__slots__'), 'The object should contain slots'
 	# Pass the objflt or return None
 	if objflt:
 		for prop, pcon in viewitems(objflt):  # Property name and constraint
@@ -509,18 +509,38 @@ def printDepthFirst(tinfext, cindent='', indstep='  ', colsep=' '):
 	strpad = 9  # Padding of the string cells
 	# Print task properties (properties header and values)
 	for props in tinfext.props:
-		print(cindent, colsep.join([tblfmt(v, strpad) for v in props]), sep='', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		print(cindent, colsep.join([tblfmt(v, strpad) for v in props]), sep=''
+			, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 	# assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
 	# Print task jobs and subtasks
 	cindent += indstep
 	if tinfext.jobs:  # Consider None
 		for tie in tinfext.jobs:
-			print(cindent, colsep.join([tblfmt(v, strpad) for v in tie]), sep='', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+			print(cindent, colsep.join([tblfmt(v, strpad) for v in tie]), sep=''
+				, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 	# print('>> Outputting task {} with {} subtasks'.format(tinfext.props[1][0]
 	# 	, 0 if not tinfext.subtasks else len(tinfext.subtasks)), file=sys.stderr)
 	if tinfext.subtasks:  # Consider None
 		for tie in tinfext.subtasks:
 			printDepthFirst(tie, cindent=cindent, indstep=indstep, colsep=colsep)
+
+
+class TaskInfoPrefmt(object):
+	"""Preformatted Task info"""
+	__slots__ = ('compound', 'ident', 'data')
+
+	def __init__(self, data, ident=0, compound=None):
+		"""Initialization of the preformated task info:
+
+		data: list  - data to be displayed (property name/value)
+		ident: uint  - current identation
+		compound: bool  - whether the item is a header of the compound item (task),
+			None means that the item is not a header at all
+		"""
+		# header: bool  - whether the vals represent a header or a payload data
+		self.compound = compound
+		self.ident = ident
+		self.data = data
 
 
 def unfoldDepthFirst(tinfext, indent=0):
@@ -529,27 +549,38 @@ def unfoldDepthFirst(tinfext, indent=0):
 	Args:
 		tinfext: TaskInfoExt  - extended task info to be unfolded and printed
 		indent: int  - current indent for the output hierarchy formatting
+	return  - list(hdr, ident, list(vals)), maxident:
+		hdr: bool  - whether the row is a header
+		ident: uint  - current identation
+		vals  - outputting values
+		wide: uint  - [max] output wide in items/cols considering the identation
 	"""
+	wide = indent
 	res = []
 	# Print task properties (properties header and values)
-	for props in tinfext.props:
-		row = [None for i in range(indent)]
-		row.extend([tblfmt(v) for v in props])
-		res.append(row)
+	# Format task's job properties header
+	if tinfext.props:
+		assert len(tinfext.props) == 2, (
+			'Task properties should contain the header and value rows: ' + str(len(tinfext.props)))
+		res.append(TaskInfoPrefmt(compound=True, ident=indent, data=tinfext.props[0]))
+		wide = indent + len(res[-1].data)
+		res.append(TaskInfoPrefmt(compound=None, ident=indent, data=[tblfmt(v) for v in tinfext.props[1]]))
 	# assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
-	# Print task jobs and subtasks
+	# Format task's jobs' properties
 	indent += 1
 	if tinfext.jobs:  # Consider None
-		for tie in tinfext.jobs:
-			row = [None for i in range(indent)]
-			row.extend([tblfmt(v) for v in tie])
-			res.append(row)
+		res.append(TaskInfoPrefmt(compound=False, ident=indent, data=[tblfmt(v) for v in tinfext.jobs[0]]))
+		wide = indent + len(res[-1].data)
+		for tie in tinfext.jobs[1:]:
+			res.append(TaskInfoPrefmt(compound=None, ident=indent, data=[tblfmt(v) for v in tie]))
+	# Unfold subtasks
 	# print('>> Outputting task {} with {} subtasks'.format(tinfext.props[1][0]
 	# 	, 0 if not tinfext.subtasks else len(tinfext.subtasks)), file=sys.stderr)
 	if tinfext.subtasks:  # Consider None
 		for tie in tinfext.subtasks:
-			unfoldDepthFirst(tie, indent=indent)
-	return res
+			sres, wide = unfoldDepthFirst(tie, indent=indent)
+			res.extend(sres)
+	return res, wide
 
 
 class Task(object):
@@ -1579,6 +1610,9 @@ class ExecPool(object):
 				tinfe0 = dict()  # dict(Task, TaskInfoExt)  - Task information extended, bottom level of the hierarchy
 				header = True  # Add jobs header
 				for fji in self.failures:
+					# Note: check for the termination in all cycles
+					if not self.alive:
+						return
 					task = fji.task
 					jdata = infodata(fji, propflt, objflt)
 					if task is None:
@@ -1611,10 +1645,17 @@ class ExecPool(object):
 				ties = tasksInfoExt(tinfe0, propflt, objflt)
 				if ties:
 					tasksInfo = []
+					tixwide = 0  # tasksInfo max wide
 					for tie in viewvalues(ties):
-						tasksInfo.extend(unfoldDepthFirst(tie, indent=0))
+						tls, twide = unfoldDepthFirst(tie, indent=0)
+						tasksInfo.extend(tls)
+						if twide > tixwide:
+							tixwide = twide
+					tls = None
 					data['tasksInfo'] = tasksInfo  # list(viewvalues(ties))
+					data['tasksInfoWide'] = tixwide
 			elif self._uicmd.id == UiCmdId.LIST_JOBS:
+				# Remained Jobs
 				if (not self._workers and not self._jobs) or not self.alive:
 					return
 				# Flat workers listing
@@ -1655,6 +1696,7 @@ class ExecPool(object):
 					data['jobsInfo'] = jobsInfo
 					jobsInfo = None
 			elif self._uicmd.id == UiCmdId.LIST_TASKS:
+				# Tasks for the remained Jobs
 				if (not self._workers and not self._jobs) or not self.alive:
 					return
 				# List the tasks with their jobs up to the specified limit of covered jobs
@@ -1666,7 +1708,8 @@ class ExecPool(object):
 						return
 					if job.task is None:
 						continue
-					jdata = infodata(fji, propflt, objflt)
+					# print('>>> Non-zero task: {}'.format(job.task.name))
+					jdata = infodata(JobInfo(job), propflt, objflt)
 					tie = tinfe0.get(job.task)
 					if tie is None:
 						tdata = infodata(TaskInfo(task), propflt, objflt)
@@ -1681,12 +1724,24 @@ class ExecPool(object):
 					return
 				# Iteratively form the hierarchy of tasks from the bottom level
 				ties = tasksInfoExt(tinfe0, propflt, objflt)
+				# if ties:
+				# 	data['tasksInfo'] = list(viewvalues(ties))
 				if ties:
-					data['tasksInfo'] = list(viewvalues(ties))
+					# print('>>> ties size: {}'.format(len(ties)))
+					tasksInfo = []
+					tixwide = 0  # tasksInfo max wide
+					for tie in viewvalues(ties):
+						tls, twide = unfoldDepthFirst(tie, indent=0)
+						tasksInfo.extend(tls)
+						if twide > tixwide:
+							tixwide = twide
+					tls = None
+					data['tasksInfo'] = tasksInfo  # list(viewvalues(ties))
+					data['tasksInfoWide'] = tixwide
 			else:
 				self._uicmd.data['errmsg'] = 'Unknown UI command: ' + self._uicmd.id.name
 				print('WARNING, Unknown command requested:', self._uicmd.id.name, file=sys.stderr)
-		except Exception as err:
+		except Exception as err:  #pylint: disable=W0703
 			errmsg = 'ERROR, UI command processing failed: {}. {}'.format(
 				err, traceback.format_exc(5))
 			self._uicmd.data['errmsg'] = errmsg
