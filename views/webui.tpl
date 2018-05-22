@@ -327,7 +327,7 @@
 <!-- API Manual page specific data ######################################### -->
 % if get('restApi'):
 <h2>REST API Manual</h2>
-% include('restapi.htb')
+% include('restapi.htm')
 % end  # restApi
 <!-- ####################################################################### -->
 

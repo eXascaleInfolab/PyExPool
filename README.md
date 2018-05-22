@@ -408,7 +408,8 @@ UiCmd(cid, data={})
 	"""
 ```
 
-See [WebUI queries tutorial](webui.md#webui-queries) for details.
+See [WebUI queries tutorial](views/restapi.htb) for details.
+<!-- webui.md#webui-queries -->
 
 ### Accessory Routines
 ```python

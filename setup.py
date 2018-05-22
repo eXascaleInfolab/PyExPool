@@ -11,7 +11,8 @@ from setuptools import setup
 
 setup(
 	name='pyexpool',  # This is the name of your PyPI-package.
-	version='2.2.0',  # Update the version number for new releases
+	# version='2.2.0',  # Update the version number for new releases
+	version='3.0.0',  # Update the version number for new releases
 	description=('A lightweight multi-process Execution Pool with load balancing'
 	' and customizable resource consumption constraints.'),  # Required, "Summary" metadata field
 	long_description=(
@@ -23,9 +24,9 @@ setup(
 	'(like in [PyCaBeM](https://github.com/eXascaleInfolab/PyCABeM)), not as a'
 	' separate library. Additionally, an optional minimalistic Web interface is'
 	' provided in the separate file to inspect the load balancer and execution pool.'
-	' Typically, PyExPool is used as an application framework for benchmarking or'
-	' heavy-loaded multi-process execution activities on constrained computational'
-	' resources.'
+	' Typically, PyExPool is used as an application framework for benchmarking,'
+	' load testing or other heavy-loaded multi-process execution activities on'
+	' constrained computational resources.'
 	'\n\n'
 	'See details on the [PyExPool page](https://github.com/eXascaleInfolab/PyExPool)'
 	' and star the project if you like it! For any further assistance you can drop me'
@@ -92,9 +93,9 @@ setup(
 		'Programming Language :: Python :: Implementation :: CPython',
 		'Programming Language :: Python :: Implementation :: PyPy',
 
-		'Topic :: Software Development :: Libraries :: Application Frameworks',
 		'Topic :: System :: Benchmark',
 		'Topic :: System :: Monitoring',
+		'Topic :: Software Development :: Libraries :: Application Frameworks',
 		'Topic :: Software Development :: Testing',
 		'Topic :: Software Development :: Libraries :: Python Modules',
 		'Topic :: Software Development',
@@ -129,9 +130,9 @@ setup(
 	#
 	# For an analysis of "install_requires" vs pip's requirements files see:
 	# https://packaging.python.org/en/latest/requirements.html
-	install_requires=['psutil>=5','bottle'
+	install_requires=['psutil>=5', 'bottle'
 		# For Python2
-		,'future', 'enum34>=1'],  # Optional
+		, 'future', 'enum34>=1'],  # Optional
 
 	# List additional groups of dependencies here (e.g. development
 	# dependencies). Users will be able to install these using the "extras"
@@ -153,12 +154,14 @@ setup(
 	#
 	# If using Python 2.6 or earlier, then these have to be included in
 	# MANIFEST.in as well.
+	#
+	# Include bottle template views and docs
 	package_data={  # Optional
 		# 'sample': ['package_data.dat'],
 		# 'pyexpool': ['README.md', 'images/*'],
-		# '': ['README.md', 'images/*'],  # ! Include specified files from the current directory
 		# Note: images are relatively heavy
-		'': ['*.md']  # ! Include specified files from the current directory
+		# '': ['README.md', 'views/*', 'images/*'],  # ! Include specified files from the current directory
+		'': ['*.md', 'views/*']  # ! Include specified files from the current directory
 	},
 	# include_package_data=True,  # Deprecated
 
