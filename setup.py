@@ -7,7 +7,12 @@
 :Organizations: eXascale Infolab <http://exascale.info/>, Lumais <http://www.lumais.com/>
 :Date: 2018-05
 """
+from glob import glob  # Wildcards for files
 from setuptools import setup
+
+views = glob('views/*')
+# print('>>> Views size:', str(len(views)), ', items:', views)
+# images = glob('images/*')
 
 setup(
 	name='pyexpool',  # This is the name of your PyPI-package.
@@ -32,15 +37,15 @@ setup(
 	' and star the project if you like it! For any further assistance you can drop me'
 	' a email or write [me on Linkedin](https://linkedin.com/in/artemvl).'
 	'\n\n'
-	'''BibTeX:
+	"""BibTeX:
 ```bibtex
 @misc{pyexpool,
 	author = {Artem Lutov and Philippe Cudré-Mauroux},
-	title = {{PyExPool: A Lightweight Execution Pool with Constraint-aware Load-Balancer.}},
-	year = {2017},
+	title = {{PyExPool-v.3: A Lightweight Execution Pool with Constraint-aware Load-Balancer.}},
+	year = {2018},
 	url = {https://github.com/eXascaleInfolab/PyExPool}
 }
-```'''
+```"""
 	),
 	long_description_content_type='text/markdown',
 	url='https://github.com/eXascaleInfolab/PyExPool',
@@ -109,7 +114,8 @@ setup(
 	# project page. What does your project relate to?
 	#
 	# Note that this is a string of words separated by whitespace, not a list.
-	keywords='execution-pool load-balancer execution-constraints NUMA concurrent multi-process benchmarking',  # Optional
+	keywords=('execution-pool load-balancer task-queue multi-process benchmarking-framework'
+		' execution-constraints NUMA concurrent parallel-computing cache-control monitoring-server'),  # Optional
 
 	# You can just specify package directories manually here if your project is
 	# simple. Or you can use find_packages().
@@ -121,6 +127,7 @@ setup(
 	# py_modules=["my_module"],
 	# packages=find_packages(exclude=['contrib', 'docs', 'tests']),  # Required
 	# packages=['pyexpool'],
+	# packages=setuptools.find_packages(),
 	# packages=['__init__'],
 	py_modules=['mpepool', 'mpewui'],
 
@@ -132,7 +139,7 @@ setup(
 	# https://packaging.python.org/en/latest/requirements.html
 	install_requires=['psutil>=5', 'bottle'
 		# For Python2
-		, 'future', 'enum34>=1'],  # Optional
+		, 'future;python_version<"3"', 'enum34>=1;python_version<"3.4"'],  # Optional
 
 	# List additional groups of dependencies here (e.g. development
 	# dependencies). Users will be able to install these using the "extras"
@@ -144,7 +151,7 @@ setup(
 	# projects.
 	extras_require={  # Optional
 		#'dev': ['check-manifest'],
-		'test': ['mock>=2'],  # Only for Python 2
+		'test': ['mock>=2;python_version<"3"'],  # Only for Python 2
 	},
 
 	#package_dir={'pyexpool': '.'},
@@ -157,11 +164,12 @@ setup(
 	#
 	# Include bottle template views and docs
 	package_data={  # Optional
-		# 'sample': ['package_data.dat'],
-		# 'pyexpool': ['README.md', 'images/*'],
-		# Note: images are relatively heavy
-		# '': ['README.md', 'views/*', 'images/*'],  # ! Include specified files from the current directory
-		'': ['*.md', 'views/*']  # ! Include specified files from the current directory
+		# Note: images are relatively heavy, wildcards/regexp are not supported out of the box
+		# '': ['views/restapi.htm'],  # Add README.md to the root and views list to the 'views'
+		'': ['README.md'],  # Add README.md to the root and views list to the 'views'
+		'views': views,  # Include views (bottle WebUI html templates)
+		# 'views': ['webui.tpl'],  # Include views (bottle WebUI html templates)
+		# 'images': images,  # Include images to the 'images'
 	},
 	# include_package_data=True,  # Deprecated
 
@@ -171,8 +179,10 @@ setup(
 	#
 	# In this case, 'data_file' will be installed into '<sys.prefix>/my_data'
 	# data_files specifies a sequence of (directory, files) pairs in the following way
-	# data_files=[('', ['README.md']),
-	# 	('images', ["images/*.png"]),
+	# data_files=[
+	# 	# ('', ['README.md']),
+	# 	# ('images', glob("images/*.png")),
+	# 	('views2', views),
 	# ],  # Optional
 
 	# To provide executable scripts, use entry points in preference to the

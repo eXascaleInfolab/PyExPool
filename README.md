@@ -5,14 +5,14 @@ A Lightweight Multi-Process Execution Pool with load balancing and customizable 
 \author: (c) Artem Lutov <artem@exascale.info>  
 \license:  [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0)  
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
-\date: 2015-07 v1, 2017-06 v2
+\date: 2015-07 v1, 2017-06 v2, 2018-05 v3
 
 BibTeX:
 ```bibtex
 @misc{pyexpool,
 	author = {Artem Lutov and Philippe Cudré-Mauroux},
-	title = {{PyExPool: A Lightweight Execution Pool with Constraint-aware Load-Balancer.}},
-	year = {2017},
+	title = {{PyExPool-v.3: A Lightweight Execution Pool with Constraint-aware Load-Balancer.}},
+	year = {2018},
 	url = {https://github.com/eXascaleInfolab/PyExPool}
 }
 ```
