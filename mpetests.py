@@ -67,7 +67,7 @@ if {duration} is not None:
 _WPROCSMAX = max(AffinityMask.CPUS-1, 1)  # Maximal number of the worker processes, should be >= 1
 # Note: 0.1 is specified just for the faster tests execution on the non-first run,
 # generally at least 0.2 should be used
-_TEST_LATENCY = 0.1  # Approximate minimal latency of ExecPool in seconds
+_TEST_LATENCY = 0.2  # Approximate minimal latency of ExecPool in seconds
 
 class TestExecPool(unittest.TestCase):
 	"""Basic tests for the ExecPool"""
@@ -229,8 +229,8 @@ class TestExecPool(unittest.TestCase):
 		self._execpool.execute(jsf)
 
 		# Execution pool timeout
-		etimeout = max(1, _TEST_LATENCY) + worktime * ExecPool._KILLDELAY * (1 +
-			(len(self._execpool._workers) + len(self._execpool._jobs)) // self._execpool._wkslim)
+		etimeout = ExecPool._KILLDELAY * (max(1, _TEST_LATENCY) + worktime * (1 +
+			(len(self._execpool._workers) + len(self._execpool._jobs)) // self._execpool._wkslim))
 		assert etimeout > worktime, 'Additional testcase parameters are invalid'
 		print('jobTimeoutChained() started wth worktime: {}, etimeout: {}'.format(worktime, etimeout))
 
@@ -740,13 +740,13 @@ class TestTasks(unittest.TestCase):
 			# Note: should be larger than ExecPool._KILLDELAY*latency
 			timelong = worktime + _TEST_LATENCY * ExecPool._KILLDELAY
 			t1 = Task('Task1', onstart=mock.MagicMock(), ondone=mock.MagicMock(), onfinish=mock.MagicMock())
-			j1 = Job('j1', args=('sleep', str(2*worktime)), task=t1
+			j1 = Job('j1', args=('sleep', str(timelong)), task=t1, timeout=worktime
 				, onstart=mock.MagicMock(), ondone=mock.MagicMock())
 			st1 = Task('Subtask1', onstart=mock.MagicMock(), task=t1
 				, ondone=mock.MagicMock(), onfinish=mock.MagicMock())
 			st1j1 = Job('st1j1', args=('sleep', str(timelong)), task=st1
 				, onstart=mock.MagicMock(), ondone=mock.MagicMock(), timeout=worktime)
-			st1j2 = Job('st1j2', args=('sleep', str(2*worktime)), task=st1, ondone=mock.MagicMock())
+			st1j2 = Job('st1j2', args=('sleep', str(2*timelong)), task=st1, ondone=mock.MagicMock())
 
 			xpool.execute(j1)
 			xpool.execute(st1j1)

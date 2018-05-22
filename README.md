@@ -395,20 +395,11 @@ WebUiApp(host='localhost', port=8080, name=None, daemon=None, group=None, args=(
 
 #### UiCmd
 ```python
-UiCmd(cid, data={})
-	"""UI Command (for the MVC controller)
-
-	Args:
-		cid: UiCmdId  - Command identifier
-		data: dict  - request (parameters) to the ExecPool on it's call and
-			resulting (response) data (or empty dict) afterwards
-
-	Internal attributes:
-		cond: Condition  - synchronizing condition
-	"""
+UiCmdId = IntEnum('UiCmdId', 'FAILURES LIST_JOBS LIST_TASKS API_MANUAL')
+"""UI Command Identifier associated with the REST URL"""
 ```
 
-See [WebUI queries tutorial](views/restapi.htb) for details.
+See [WebUI queries tutorial](views/restapi.htm) for details.
 <!-- webui.md#webui-queries -->
 
 ### Accessory Routines
