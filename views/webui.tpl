@@ -98,10 +98,10 @@
 			text-align: center;
 		}
 
-		td.task { background: #DDD }
+		td.task { background: #CCC }
 
 		/* Color even rows; .frame */
-		tr.frame:nth-child(even) { background: #DDD }
+		.frame tr:nth-child(even) { background: #DDD }
 
 		tr:hover {
 			background: lightyellow;
