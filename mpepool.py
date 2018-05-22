@@ -605,6 +605,9 @@ class Task(object):
 		, task=None, latency=1.5, stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize task, which is a group of subtasks including jobs to be executed
 
+		Note: the task is considered to be failed if at least one subtask / job is failed
+		(terminated or completed with non-zero return code).
+
 		name: str  - task name
 		timeout  - execution timeout in seconds. Default: 0, means infinity. ATTENTION: not implemented
 		onstart  - a callback, which is executed on the task start (before the subtasks/jobs execution
@@ -631,7 +634,7 @@ class Task(object):
 		numadded: uint  - the number of direct added subtasks
 		numdone: uint  - the number of completed DIRECT subtasks
 			(each subtask may contain multiple jobs or sub-sub-tasks)
-		numterm: uint  - the number of terminated direct subtask
+		numterm: uint  - the number of terminated direct subtasks (i.e. jobs)
 		"""
 		assert isinstance(name, str) and (latency is None or latency >= 0) and (
 			task is None or (isinstance(task, Task) and task != self)), 'Arguments are invalid'

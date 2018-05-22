@@ -198,7 +198,9 @@ Task(name, timeout=0, onstart=None, ondone=None, onfinish=None, params=None
 	, task=None, latency=1.5, stdout=sys.stdout, stderr=sys.stderr):
 	"""Initialize task, which is a group of subtasks including jobs to be executed
 
-	Task is a managing container for subtasks and Jobs
+	Task is a managing container for subtasks and Jobs.
+	Note: the task is considered to be failed if at least one subtask / job is failed
+	(terminated or completed with non-zero return code).
 
 	name: str  - task name
 	timeout  - execution timeout in seconds. Default: 0, means infinity. ATTENTION: not implemented
@@ -213,8 +215,9 @@ Task(name, timeout=0, onstart=None, ondone=None, onfinish=None, params=None
 		CONTEXT OF THE CALLER (main process) with the single argument, the task. Default: None
 		ATTENTION: must be lightweight
 	params  - additional parameters to be used in callbacks
-	task: Task  - optional owner supertask
-	latency: float  - lock timeout in seconds: None means infinite, <= 0 means non-bocking, > 0 is the actual timeout
+	task: Task  - optional owner super-task
+	latency: float  - lock timeout in seconds: None means infinite,
+		<= 0 means non-bocking, > 0 is the actual timeout
 	stdout  - None or file name or PIPE for the buffered output to be APPENDED
 	stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 		ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited
@@ -223,8 +226,9 @@ Task(name, timeout=0, onstart=None, ondone=None, onfinish=None, params=None
 	tstart  - start time is filled automatically on the execution start (before onstart). Default: None
 	tstop  - termination / completion time after ondone.
 	numadded: uint  - the number of direct added subtasks
-	numdone: uint  - the number of completed DIRECT subtasks (each subtask may contain multiple jobs or subsubtasks)
-	numterm: uint  - the number of terminated direct subtask
+	numdone: uint  - the number of completed DIRECT subtasks
+		(each subtask may contain multiple jobs or sub-sub-tasks)
+	numterm: uint  - the number of terminated direct subtasks (i.e. jobs)
 	"""
 ```
 
