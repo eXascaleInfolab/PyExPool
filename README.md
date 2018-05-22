@@ -63,6 +63,9 @@ Demo of the *scheduling with cache L1 maximization* for single-threaded processe
 ![mpepool_cacheL1_1](images/mpepool_cacheL1_1.png)
 ![mpepool_cacheL1_2](images/mpepool_cacheL1_2.png)
 
+Demo of the WebUI for the Jobs and Tasks tracing and profiling:
+![WebUI, Falures page (root)](images/webui.png)
+
 
 ## Requirements
 
