@@ -1493,7 +1493,8 @@ class ExecPool(object):
 			#uiapp = WebUiApp(host='localhost', port=8080, name='MpepoolWebUI', daemon=True)
 			self._uicmd = webuiapp.cmd
 			if WebUiApp.RAM is None:
-				WebUiApp.RAM = _RAM_SIZE
+				# Note: it's more reasonable to display the specified RAM limit than available memory
+				WebUiApp.RAM = _RAM_LIMIT  # _RAM_SIZE
 			if WebUiApp.LCPUS is None:
 				WebUiApp.LCPUS = AffinityMask.CPUS
 			if WebUiApp.CPUCORES is None:

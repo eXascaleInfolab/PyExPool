@@ -65,6 +65,8 @@ Demo of the *scheduling with cache L1 maximization* for single-threaded processe
 
 Demo of the WebUI for the Jobs and Tasks tracing and profiling:
 ![WebUI, Falures page (root)](images/webui.png)
+Exactly the same fully funcitonal interface is accessible from the console using [w3m](http://w3m.sourceforge.net/) or other terminal browsers:
+![WebUI Console, Falures page (root)](images/webui_console.png)
 
 
 ## Requirements
