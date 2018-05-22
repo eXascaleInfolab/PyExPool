@@ -251,9 +251,9 @@ def infodata(obj, propflt=None, objflt=None):
 			if _DEBUG_TRACE and pval is None:
 				print('  WARNING, objflt item does not belong to the {}: {}'.format(
 					type(obj).__name__, prop), file=sys.stderr)
-			# Note: pcon is None requires non-None pval (any non-None value should be present) to not be filtered out
-			if ((pcon is None or not pcon.opt) and prop not in obj) or (pcon is None and pval is None
-			) or (pcon is not None and ((pcon.end is None and pval != pcon.beg)
+			# Note: pcon is None requires non-None pval
+			if (not pcon.opt and prop not in obj) or (pcon is None and pval is None) or (
+			pcon is not None and ((pcon.end is None and pval != pcon.beg)
 			or pcon.end is not None and (pval < pcon.beg or pval >= pcon.end))):
 				# print('>>> ret None, 1:', prop not in obj, '2:', pcon.end is None and pval != pcon.beg
 				# 	, '3:', pcon.end is not None, '4:', pval < pcon.beg or pval >= pcon.end)

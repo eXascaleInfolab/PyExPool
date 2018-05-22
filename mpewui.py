@@ -115,12 +115,15 @@ fmt: str(UiResFmt)  - required format of the result
 cols: str(UiResCol)  - required columns in the result, all by default
 flt: str(UiResFilterVal)  - filter target items per each column, notations:
 * - optional column, absense of the value(:xxx) - the property should present with any non-None value:
-	?flt=rcode*:-15|duration:5m1.15..2d3h|pid|...
+	?flt=rcode*:-15|duration:1.5..3600|category*|...
 jlim: uint  - limit of the listed number of the active jobs / tasks having this number of jobs, 0 means any;
 	NOTE: jlim omission results in the ExecPool default value for the jlim, failures are always fully shown.
 refresh: uint  - page refresh time, seconds >= 2
 """
-# TODO: add inverse notation the the item filter: ! - invert condition
+# TODO:
+# - add inverse notation the the item filter: ! - invert condition
+# - add human-readable Duration type with inferType support: NdNhNmF, where N: uint, F: ufloat, for example:
+# 	duration:5m1.15..2d3h
 #	?flt=rcode*!:-15|...
 # flt=rcode*:-15&flt=duration:5m1.15..2d3h&...
 # kind: str(UiResKind)  - kind of the showing items
@@ -250,7 +253,8 @@ class SummaryBrief(object):
 
 	__slots__ = ('workers', 'jobs', 'jobsDone', 'jobsFailed', 'tasks', 'tasksFailed', 'tasksRoot', 'tasksRootFailed')
 
-	def __init__(self, workers=0, jobs=0, jobsDone=0, jobsFailed=0, tasksFailed=0, tasks=0, tasksRootFailed=0, tasksRoot=0):
+	def __init__(self, workers=0, jobs=0, jobsDone=0, jobsFailed=0, tasksFailed=0
+	, tasks=0, tasksRootFailed=0, tasksRoot=0):
 		"""Brief summary initialization
 
 		workers: int  - the number of workers (executors, executing jobs)
@@ -277,13 +281,13 @@ class SummaryBrief(object):
 
 
 class WebUiApp(threading.Thread):
+	"""WebUI App starting in the dedicated thread and providing remote interface to inspect ExecPool"""
 	RAM = None
 	LCPUS = None  # Logical CPUs
 	CPUCORES = None  # CPU Cores <= LCPUS
 	CPUNODES = None  # NUMA nodes (typically, physical CPUs)
 	WKSMAX = None
 
-	"""WebUI App starting in the dedicated thread and providing remote interface to inspect ExecPool"""
 	def __init__(self, host='localhost', port=8080, name=None, daemon=None, group=None, args=(), kwargs={}):
 		"""WebUI App constructor
 
@@ -330,10 +334,10 @@ class WebUiApp(threading.Thread):
 
 	@bottle.error(404)
 	@staticmethod
-	def error404(error, msg=''):
+	def error404(err, msg=''):
 		"""Custom page not found"""
 		if msg:
-			return 'The URL is invalid: ' + msg
+			return 'The URL is invalid: {}, {}'.format(msg, err)
 		else:
 			return 'Nothing here, sorry'
 
@@ -431,14 +435,17 @@ class WebUiApp(threading.Thread):
 				return cmderr
 
 			# Expected format of data is a table: header, rows
-			# return json.dumps(cmd.data)
 			if resopts.fmt == UiResFmt.json:
+				# TODO: implements JSON serializer
 				return json.dumps(cmd.data)
 			elif resopts.fmt == UiResFmt.txt:
+				# 501  - Not Implemented
+				bottle.response.status = 501
+				return 'Not Implemented'
 				# TOFIX
-				return '\n'.join(['\t'.join([str(v) for v in cols]) for cols in cmd.data])
+				# return '\n'.join(['\t'.join([str(v) for v in cols]) for cols in cmd.data])
 			#elif fmt == UiResFmt.htm:
-			else:
+			else:  # HTML format by default
 				smr = cmd.data.get('summary')
 				# print('>>> jobsInfo: {}'.format(cmd.data.get('jobsInfo')))
 				return bottle.template('webui', pageRefresh=resopts.refresh, title='Failures'
@@ -500,20 +507,31 @@ class WebUiApp(threading.Thread):
 				bottle.response.status = 503
 				return cmderr
 
-			smr = cmd.data.get('summary')
-			return bottle.template('webui', pageRefresh=resopts.refresh, title='Jobs'
-				, pageDescr='Information about the executing (workers) and deferred jobs (non-finished items only).'
-				, page='jobs', errmsg=cmderr
-				, summary=smr is not None, ramUsage=cmd.data.get('ramUsage', 'NA')
-					, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
-					, lcpus=WebUiApp.LCPUS, cpuCores=WebUiApp.CPUCORES, cpuNodes=WebUiApp.CPUNODES
-					, workers=smr.workers, wksmax=WebUiApp.WKSMAX
-					, jobsFailed=smr.jobsFailed, jobs=smr.jobs, jobsDone=smr.jobsDone
-					, tasksRootFailed=smr.tasksRootFailed, tasksRoot=smr.tasksRoot
-					, tasksFailed=smr.tasksFailed, tasks=smr.tasks
-				, workersInfo=cmd.data.get('workersInfo'), jobsInfo=cmd.data.get('jobsInfo')
-				, jlim=cmd.data.get(UiResOpt.jlim)
-				)
+			if resopts.fmt == UiResFmt.json:
+				# TOFIX: implements JSON serializer
+				return json.dumps(cmd.data)
+			elif resopts.fmt == UiResFmt.txt:
+				# 501  - Not Implemented
+				bottle.response.status = 501
+				return 'Not Implemented'
+				# TOFIX
+				# return '\n'.join(['\t'.join([str(v) for v in cols]) for cols in cmd.data])
+			#elif fmt == UiResFmt.htm:
+			else:  # HTML format by default
+				smr = cmd.data.get('summary')
+				return bottle.template('webui', pageRefresh=resopts.refresh, title='Jobs'
+					, pageDescr='Information about the executing (workers) and deferred jobs (non-finished items only).'
+					, page='jobs', errmsg=cmderr
+					, summary=smr is not None, ramUsage=cmd.data.get('ramUsage', 'NA')
+						, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
+						, lcpus=WebUiApp.LCPUS, cpuCores=WebUiApp.CPUCORES, cpuNodes=WebUiApp.CPUNODES
+						, workers=smr.workers, wksmax=WebUiApp.WKSMAX
+						, jobsFailed=smr.jobsFailed, jobs=smr.jobs, jobsDone=smr.jobsDone
+						, tasksRootFailed=smr.tasksRootFailed, tasksRoot=smr.tasksRoot
+						, tasksFailed=smr.tasksFailed, tasks=smr.tasks
+					, workersInfo=cmd.data.get('workersInfo'), jobsInfo=cmd.data.get('jobsInfo')
+					, jlim=cmd.data.get(UiResOpt.jlim)
+					)
 
 
 	@staticmethod
@@ -554,29 +572,41 @@ class WebUiApp(threading.Thread):
 				bottle.response.status = 503
 				return cmderr
 
-			smr = cmd.data.get('summary')
-			return bottle.template('webui', pageRefresh=resopts.refresh, title='Tasks'
-				, pageDescr='Information about the non-finished hierarchy of tasks with their jobs.'
-				, page='tasks', errmsg=cmderr
-				, summary=smr is not None, ramUsage=cmd.data.get('ramUsage', 'NA')
-					, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
-					, lcpus=WebUiApp.LCPUS, cpuCores=WebUiApp.CPUCORES, cpuNodes=WebUiApp.CPUNODES
-					, workers=smr.workers, wksmax=WebUiApp.WKSMAX
-					, jobsFailed=smr.jobsFailed, jobs=smr.jobs, jobsDone=smr.jobsDone
-					, tasksRootFailed=smr.tasksRootFailed, tasksRoot=smr.tasksRoot
-					, tasksFailed=smr.tasksFailed, tasks=smr.tasks
-				, tasksInfo=cmd.data.get('tasksInfo'), tasksInfoWide=cmd.data.get('tasksInfoWide')
-				, jlim=cmd.data.get(UiResOpt.jlim)
-				)
+			if resopts.fmt == UiResFmt.json:
+				# TOFIX: implements JSON serializer
+				return json.dumps(cmd.data)
+			elif resopts.fmt == UiResFmt.txt:
+				# 501  - Not Implemented
+				bottle.response.status = 501
+				return 'Not Implemented'
+				# TOFIX
+				# return '\n'.join(['\t'.join([str(v) for v in cols]) for cols in cmd.data])
+			#elif fmt == UiResFmt.htm:
+			else:  # HTML format by default
+				smr = cmd.data.get('summary')
+				return bottle.template('webui', pageRefresh=resopts.refresh, title='Tasks'
+					, pageDescr='Information about the non-finished hierarchy of tasks with their jobs.'
+					, page='tasks', errmsg=cmderr
+					, summary=smr is not None, ramUsage=cmd.data.get('ramUsage', 'NA')
+						, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
+						, lcpus=WebUiApp.LCPUS, cpuCores=WebUiApp.CPUCORES, cpuNodes=WebUiApp.CPUNODES
+						, workers=smr.workers, wksmax=WebUiApp.WKSMAX
+						, jobsFailed=smr.jobsFailed, jobs=smr.jobs, jobsDone=smr.jobsDone
+						, tasksRootFailed=smr.tasksRootFailed, tasksRoot=smr.tasksRoot
+						, tasksFailed=smr.tasksFailed, tasks=smr.tasks
+					, tasksInfo=cmd.data.get('tasksInfo'), tasksInfoWide=cmd.data.get('tasksInfoWide')
+					, jlim=cmd.data.get(UiResOpt.jlim)
+					)
 
 
 	@staticmethod
 	def apinfo():
 		"""API manual"""
 		# 501  - Not Implemented
-		bottle.response.status = 501
-		return '''<h1>API Manual</h1>
-		'''
+		# bottle.response.status = 501
+		return bottle.template('webui', title='REST API Manual'
+			, pageDescr='REST API Manual.', page='apinfo', restApi=True)
+
 
 	# @staticmethod
 	# def taskInfo(cmd, name):
@@ -584,7 +614,7 @@ class WebUiApp(threading.Thread):
 
 
 if __name__ == '__main__':
-	"""Doc tests execution"""
+	# Doc tests execution
 	import doctest
 	import sys
 	#doctest.testmod()  # Detailed tests output
