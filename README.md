@@ -19,6 +19,7 @@ BibTeX:
 
 ## Content  <!-- omit in toc -->
 - [Overview](#overview)
+- [Installation](#installation)
 - [Requirements](#requirements)
 - [API](#api)
 	- [Job](#job)
@@ -67,6 +68,19 @@ Demo of the WebUI for the Jobs and Tasks tracing and profiling:
 ![WebUI, Falures page (root)](images/webui.png)
 Exactly the same fully funcitonal interface is accessible from the console using [w3m](http://w3m.sourceforge.net/) or other terminal browsers:
 ![WebUI Console, Falures page (root)](images/webui_console.png)
+
+## Installation
+
+Include the following modules:
+- [mpepool](mpepool.py)  - execution pool with load balancer, the only mandatory module,
+- [mpewui](mpewui.py)  - optional WebUI for the interactive profiling of the scheduled Jobs and Tasks.
+
+or just install everything from the [pypi repository](https://pypi.org/project/pyexpool/):
+```sh
+$ pip install pyexpool
+```
+
+> Additionally, [hwloc / lstopo](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) should be installed if customized CPU affinity masking and cach control are required, see [Requirements](#requirements) section.
 
 
 ## Requirements
