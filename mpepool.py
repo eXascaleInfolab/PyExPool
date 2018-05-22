@@ -1428,6 +1428,7 @@ class ExecPool(object):
 		failures: [JobInfo]  - failed (terminated or crashed) jobs with timestamps.
 			NOTE: failures contain both terminated, crashed jobs that jobs completed with non-zero return code
 			excluding the jobs terminated by timeout that have set .rsrtonto (will be restarted)
+		jobsdone: uint  - the number of successfully completed (non-terminated) jobs with zero code
 		tasks: set(Task)  - tasks associated with the scheduled jobs
 		"""
 		assert (wksnum >= 1 and (afnmask is None or isinstance(afnmask, AffinityMask))
@@ -1472,7 +1473,8 @@ class ExecPool(object):
 		# Lock for the __terminate() to avoid simultaneous call by the signal and normal execution flow
 		self.__termlock = Lock()
 		self.alive = True  # The execution pool is in the working state (has not been terminated)
-		self.failures = []
+		self.failures = []  # Failed jobs (terminated or having non-zero return code)
+		self.jobsdone = 0  # The number of successfuly completed jobs (non-terminated and with zero return code)
 		self.tasks = set()
 
 		if self.memlimit and self.memlimit != memlimit:
@@ -1578,8 +1580,8 @@ class ExecPool(object):
 					.format('' if not self.name else ' ' + self.name, self._uicmd.id.name, file=sys.stderr))
 				return
 
-			smr = SummaryBrief(workers=len(self._workers), jobs=len(self._workers)
-				, jobsFailed=len(self.failures), tasks=len(self.tasks))
+			smr = SummaryBrief(workers=len(self._workers), jobs=len(self._jobs)
+				, jobsDone=self.jobsdone, jobsFailed=len(self.failures), tasks=len(self.tasks))
 			self.__termlock.release()
 			# Evaluate remained vars
 			# Evaluate tasksFailed and tasksRootFailed from failures
@@ -2194,7 +2196,9 @@ class ExecPool(object):
 			graceful = not job.terminates and job.proc is not None and not job.proc.returncode
 		job.complete(graceful)
 		# Update failures list skipping the tasks restarting on timeout
-		if not graceful and (not job.rsrtonto or job.tstart is None or job.tstop is None
+		if graceful:
+			self.jobsdone += 1
+		elif (not job.rsrtonto or job.tstart is None or job.tstop is None
 		or job.tstop - job.tstart < job.timeout):
 			self.failures.append(JobInfo(job))  # Note: job.tstop should be defined here
 

@@ -248,13 +248,14 @@ class UiCmd(object):
 class SummaryBrief(object):
 	"""Brief summary of the ExecPool state"""
 
-	__slots__ = ('workers', 'jobs', 'jobsFailed', 'tasks', 'tasksFailed', 'tasksRoot', 'tasksRootFailed')
+	__slots__ = ('workers', 'jobs', 'jobsDone', 'jobsFailed', 'tasks', 'tasksFailed', 'tasksRoot', 'tasksRootFailed')
 
-	def __init__(self, workers=0, jobs=0, jobsFailed=0, tasksFailed=0, tasks=0, tasksRootFailed=0, tasksRoot=0):
+	def __init__(self, workers=0, jobs=0, jobsDone=0, jobsFailed=0, tasksFailed=0, tasks=0, tasksRootFailed=0, tasksRoot=0):
 		"""Brief summary initialization
 
 		workers: int  - the number of workers (executors, executing jobs)
-		jobs: int  - the number of (deferred/postponed/regular) jobs
+		jobs: int  - the number of (deferred/postponed/regular) non-finished jobs
+		jobsDone: int  - the number of [successfully] completed jobs
 		jobsFailed: int  - the number of failed jobs
 		tasks: int  - total number of (flattened) tasks
 		tasksFailed: int  - total number of tasks having at least one subtask/job failed
@@ -264,6 +265,7 @@ class SummaryBrief(object):
 		self.workers = workers
 		self.jobs = jobs
 		self.jobsFailed = jobsFailed
+		self.jobsDone = jobsDone
 		self.tasks = tasks
 		self.tasksFailed = tasksFailed
 		self.tasksRoot = tasksRoot
@@ -443,9 +445,10 @@ class WebUiApp(threading.Thread):
 					, pageDescr='Information about the failed tasks and jobs.'
 					, page='failures', errmsg=cmderr
 					, summary=smr is not None, ramUsage=cmd.data.get('ramUsage', 'NA')
-							, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
-							, lcpus=WebUiApp.LCPUS, cpuCores=WebUiApp.CPUCORES, cpuNodes=WebUiApp.CPUNODES
-						, workers=smr.workers, wksmax=WebUiApp.WKSMAX, jobsFailed=smr.jobsFailed, jobs=smr.jobs
+						, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
+						, lcpus=WebUiApp.LCPUS, cpuCores=WebUiApp.CPUCORES, cpuNodes=WebUiApp.CPUNODES
+						, workers=smr.workers, wksmax=WebUiApp.WKSMAX
+						, jobsFailed=smr.jobsFailed, jobs=smr.jobs, jobsDone=smr.jobsDone
 						, tasksRootFailed=smr.tasksRootFailed, tasksRoot=smr.tasksRoot
 						, tasksFailed=smr.tasksFailed, tasks=smr.tasks
 					, jobsFailedInfo=cmd.data.get('jobsInfo'), tasksFailedInfo=cmd.data.get('tasksInfo')
@@ -502,9 +505,10 @@ class WebUiApp(threading.Thread):
 				, pageDescr='Information about the executing (workers) and deferred jobs (non-finished items only).'
 				, page='jobs', errmsg=cmderr
 				, summary=smr is not None, ramUsage=cmd.data.get('ramUsage', 'NA')
-						, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
-						, lcpus=WebUiApp.LCPUS, cpuCores=WebUiApp.CPUCORES, cpuNodes=WebUiApp.CPUNODES
-					, workers=smr.workers, wksmax=WebUiApp.WKSMAX, jobsFailed=smr.jobsFailed, jobs=smr.jobs
+					, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
+					, lcpus=WebUiApp.LCPUS, cpuCores=WebUiApp.CPUCORES, cpuNodes=WebUiApp.CPUNODES
+					, workers=smr.workers, wksmax=WebUiApp.WKSMAX
+					, jobsFailed=smr.jobsFailed, jobs=smr.jobs, jobsDone=smr.jobsDone
 					, tasksRootFailed=smr.tasksRootFailed, tasksRoot=smr.tasksRoot
 					, tasksFailed=smr.tasksFailed, tasks=smr.tasks
 				, workersInfo=cmd.data.get('workersInfo'), jobsInfo=cmd.data.get('jobsInfo')
@@ -555,9 +559,10 @@ class WebUiApp(threading.Thread):
 				, pageDescr='Information about the non-finished hierarchy of tasks with their jobs.'
 				, page='tasks', errmsg=cmderr
 				, summary=smr is not None, ramUsage=cmd.data.get('ramUsage', 'NA')
-						, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
-						, lcpus=WebUiApp.LCPUS, cpuCores=WebUiApp.CPUCORES, cpuNodes=WebUiApp.CPUNODES
-					, workers=smr.workers, wksmax=WebUiApp.WKSMAX, jobsFailed=smr.jobsFailed, jobs=smr.jobs
+					, ramTotal=WebUiApp.RAM, cpuLoad=cmd.data.get('cpuLoad', 'NA')
+					, lcpus=WebUiApp.LCPUS, cpuCores=WebUiApp.CPUCORES, cpuNodes=WebUiApp.CPUNODES
+					, workers=smr.workers, wksmax=WebUiApp.WKSMAX
+					, jobsFailed=smr.jobsFailed, jobs=smr.jobs, jobsDone=smr.jobsDone
 					, tasksRootFailed=smr.tasksRootFailed, tasksRoot=smr.tasksRoot
 					, tasksFailed=smr.tasksFailed, tasks=smr.tasks
 				, tasksInfo=cmd.data.get('tasksInfo'), tasksInfoWide=cmd.data.get('tasksInfoWide')

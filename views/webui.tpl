@@ -169,8 +169,8 @@
 	<div class="col2">
 		<table class="noframe">
 			<tr>
-				<td class="ta-right">Failed | Remained Jobs:</td>
-				<td>{{jobsFailed}} | {{jobs}}</td>
+				<td class="ta-right">Failed | Remained | Completed Jobs:</td>
+				<td>{{jobsFailed}} | {{jobs}} | {{jobsDone}}</td>
 			</tr>
 			<tr>
 				<td class="ta-right">Failed Root Tasks:</td>
