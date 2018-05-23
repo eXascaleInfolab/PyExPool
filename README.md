@@ -75,12 +75,13 @@ Include the following modules:
 - [mpepool](mpepool.py)  - execution pool with load balancer, the only mandatory module,
 - [mpewui](mpewui.py)  - optional WebUI for the interactive profiling of the scheduled Jobs and Tasks.
 
-or just install everything from the [pypi repository](https://pypi.org/project/pyexpool/):
+These modules can be install either manually from [GitHub](https://github.com/eXascaleInfolab/PyExPool) or from the [pypi repository](https://pypi.org/project/pyexpool/):
 ```sh
 $ pip install pyexpool
 ```
+> WebUI(`mpewui` module) renders interface from the bottle html templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `views/*` should be copied from the `pyexpool` repository to the target project.
 
-> Additionally, [hwloc / lstopo](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) should be installed if customized CPU affinity masking and cach control are required, see [Requirements](#requirements) section.
+Additionally, [hwloc / lstopo](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) should be installed if customized CPU affinity masking and cach control are required, see [Requirements](#requirements) section.
 
 
 ## Requirements
@@ -100,6 +101,8 @@ The external modules / apps are required only for the extended functionality:
 	```sh
 	$ sudo pip install bottle
 	```
+	> WebUI renders interface from the bottle html templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `pyexpool/views/*` should be copied to the target project.
+	
 - [mock](https://pypi.python.org/pypi/mock) is required exclusively for the unit testing under Python2, `mock` is included in the standard lib of Python3.
 	```sh
 	$ sudo pip install mock
@@ -422,8 +425,9 @@ UiCmdId = IntEnum('UiCmdId', 'FAILURES LIST_JOBS LIST_TASKS API_MANUAL')
 """UI Command Identifier associated with the REST URL"""
 ```
 
-See [WebUI queries tutorial](views/restapi.htm) for details.
+See [WebUI queries tutorial](views/restapi.htm) for details. An example of the WebUI usage is shown in the `mpetests.TestWebUI.test_failures` of the [mpetests.py](mpetests.py).
 <!-- webui.md#webui-queries -->
+
 
 ### Accessory Routines
 ```python
@@ -440,7 +444,7 @@ def ramfracs(fracsize):
 def cpucorethreads():
 	"""The number of hardware treads per a CPU core
 
-	Used to specify CPU afinity dedicating the maximal amount of CPU cache L1/2.
+	Used to specify CPU affinity dedicating the maximal amount of CPU cache L1/2.
 	"""
 
 def cpunodes():
@@ -492,6 +496,7 @@ See [unit tests](mpetests.py) (`TestExecPool`, `TestProcMemTree`, `TestTasks` cl
 ```python
 from multiprocessing import cpu_count
 from sys import executable as PYEXEC  # Full path to the current Python interpreter
+from mpepool import AffinityMask, ExecPool, Job, Task  # Import all required classes
 
 # 1. Create Multi-process execution pool with the optimal affinity step to maximize the dedicated CPU cache size
 execpool = ExecPool(max(cpu_count() - 1, 1), cpucorethreads())

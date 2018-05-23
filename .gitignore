@@ -63,4 +63,5 @@ target/
 # Custom Files
 *.old
 *.bck
+*.tmp
 design/*.pdf
