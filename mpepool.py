@@ -637,7 +637,9 @@ class Task(object):
 		numterm: uint  - the number of terminated direct subtasks (i.e. jobs)
 		"""
 		assert isinstance(name, str) and (latency is None or latency >= 0) and (
-			task is None or (isinstance(task, Task) and task != self)), 'Arguments are invalid'
+			task is None or (isinstance(task, Task) and task != self)), (
+			'Task arguments are invalid, name: {}, latency: {}, task type: {} (valid: {})'
+			.format(name, latency, type(task).__name__, task != self))
 		self._lock = Lock()  # Lock for the included jobs
 		# dict(subtask: Task | Job, accterms: uint)
 		self._items = dict()  # Dictionary of non-finished subtasks with the direct termination counter
@@ -907,7 +909,9 @@ class Job(object):
 			requires _CHAINED_CONSTRAINTS
 		"""
 		assert isinstance(name, str) and timeout >= 0 and (task is None or isinstance(task, Task)
-			) and size >= 0 and slowdown > 0 and memkind in (0, 1, 2), 'Arguments are invalid'
+			) and size >= 0 and slowdown > 0 and memkind in (0, 1, 2), ('Job arguments are invalid'
+			', name: {}, timeout: {}, task type: {}, size: {}, slowdown: {}, memkind: {}'.format(
+			name, timeout, type(task).__name__, size, slowdown, memkind))
 		#if not args:
 		#	args = ("false")  # Create an empty process to schedule it's execution
 
@@ -1094,7 +1098,7 @@ class Job(object):
 			, '-' if self.proc is None else str(self.proc.returncode)
 			, *secondsToHms(self.tstop - self.tstart))
 			, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-		# Note: the callstack is shown on the termination
+		# Note: the call stack is shown on the termination
 		#traceback.print_stack(limit=5, file=sys.stderr)
 
 
@@ -1805,7 +1809,7 @@ class ExecPool(object):
 			return
 		tcur = time.perf_counter()  # Current time
 		print('WARNING{}, terminating the execution pool with {} non-started jobs and {} workers'
-			', executed {} h {} m {:.4f} s, callstack fragment:'
+			', executed {} h {} m {:.4f} s, call stack:'
 			.format('' if not self.name else ' ' + self.name, len(self._jobs), len(self._workers)
 			, *secondsToHms(0 if self._tstart is None else tcur - self._tstart)), file=sys.stderr)
 		traceback.print_stack(limit=5, file=sys.stderr)
