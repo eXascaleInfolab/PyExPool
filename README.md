@@ -68,6 +68,11 @@ Demo of the WebUI for the Jobs and Tasks tracing and profiling:
 ![WebUI, Falures page (root)](images/webui.png)
 Exactly the same fully funcitonal interface is accessible from the console using [w3m](http://w3m.sourceforge.net/) or other terminal browsers:
 ![WebUI Console, Falures page (root)](images/webui_console.png)
+To explore the WebUI demo execute the following testcase
+```sh
+$ MANUAL=1 python -m unittest mpetests.TestWebUI.test_failures
+```
+and open http://localhost:8080 in the browser.
 
 ## Installation
 
