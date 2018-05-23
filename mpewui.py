@@ -294,8 +294,8 @@ class WebUiApp(threading.Thread):
 		ATTENTION: Once constructed, the WebUI App lives in the dedicated thread until the main program exit.
 
 		Args:
-			uihost: str  - Web UI host
-			uiport: uint16  - Web UI port
+			host: str  - Web UI host
+			port: uint16  - Web UI port
 			name: str  - The thread name. By default, a unique name
 				is constructed of the form “Thread-N” where N is a small decimal number.
 			daemon: bool  - Start the thread in the daemon mode to
