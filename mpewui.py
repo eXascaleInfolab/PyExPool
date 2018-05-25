@@ -321,7 +321,7 @@ class WebUiApp(threading.Thread):
 		# webuiapp.route('/job/<name>', callback=mroot, name=UiCmdId.JOB_INFO.name)
 		# webuiapp.route('/task/<name>', callback=mroot, name=UiCmdId.TASK_INFO.name)
 		kwargs.update({'host': host, 'port': port})
-		super(WebUiApp, self).__init__(group=group, target=bottle.run, name=name, args=args, kwargs=kwargs)
+		super(WebUiApp, self).__init__(group=group, target=webuiapp.run, name=name, args=args, kwargs=kwargs)
 		self.daemon = daemon
 
 
