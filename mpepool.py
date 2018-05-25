@@ -1510,6 +1510,8 @@ class ExecPool(object):
 			if not webuiapp.is_alive():
 				try:
 					webuiapp.start()
+					if _DEBUG_TRACE:
+						print('WebUI app started')
 				except RuntimeError as err:
 					print('WARNING, webuiapp can not be started. Disabled: {}. {}'.format(
 						err, traceback.format_exc(5)), file=sys.stderr)
