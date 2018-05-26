@@ -87,7 +87,7 @@ $ pip install pyexpool
 ```
 > WebUI(`mpewui` module) renders interface from the bottle html templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `views/` should be copied from the `pyexpool` repository to the target project.
 
-Additionally, [hwloc / lstopo](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) should be installed if customized CPU affinity masking and cach control are required, see [Requirements](#requirements) section.
+Additionally, [hwloc / lstopo](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) should be installed if customized CPU affinity masking and cache control are required, see [Requirements](#requirements) section.
 
 
 ## Requirements
