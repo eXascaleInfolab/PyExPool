@@ -32,7 +32,7 @@ setup(
 	' Typically, PyExPool is used as an application framework for benchmarking,'
 	' load testing or other heavy-loaded multi-process execution activities on'
 	' constrained computational resources.'
-	'> WebUI(`mpewui` module) renders interface from the bottle html templates located'
+	'\n> WebUI(`mpewui` module) renders interface from the bottle html templates located'
 	' in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `views/`'
 	' should be copied from the `pyexpool` repository to the target project.'
 	'\n\n'
