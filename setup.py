@@ -170,7 +170,9 @@ setup(
 		# Note: images are relatively heavy, wildcards/regexp are not supported out of the box
 		# '': ['views/restapi.md'],  # Add README.md to the root and views list to the 'views'
 		'': ['README.md'],  # Add README.md to the root and views list to the 'views'
-		'views': views,  # Include views (bottle WebUI html templates)
+		# 'views': views,  # Include views (bottle WebUI html templates)
+		# 'views': views,  # Include views (bottle WebUI html templates)
+		# 'views': glob('views/*'),  # Include views (bottle WebUI html templates)
 		# 'views': ['webui.tpl'],  # Include views (bottle WebUI html templates)
 		# 'images': images,  # Include images to the 'images'
 	},
@@ -182,11 +184,11 @@ setup(
 	#
 	# In this case, 'data_file' will be installed into '<sys.prefix>/my_data'
 	# data_files specifies a sequence of (directory, files) pairs in the following way
-	# data_files=[
+	data_files=[
 	# 	# ('', ['README.md']),
 	# 	# ('images', glob("images/*.png")),
-	# 	('views2', views),
-	# ],  # Optional
+	 	('views', views),
+	],  # Optional
 
 	# To provide executable scripts, use entry points in preference to the
 	# "scripts" keyword. Entry points provide cross-platform support and allow
