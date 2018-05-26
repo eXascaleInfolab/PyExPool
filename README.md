@@ -85,7 +85,7 @@ These modules can be install either manually from [GitHub](https://github.com/eX
 ```sh
 $ pip install pyexpool
 ```
-> WebUI(`mpewui` module) renders interface from the bottle html templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `views/*` should be copied from the `pyexpool` repository to the target project.
+> WebUI(`mpewui` module) renders interface from the bottle html templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `views/` should be copied from the `pyexpool` repository to the target project.
 
 Additionally, [hwloc / lstopo](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) should be installed if customized CPU affinity masking and cach control are required, see [Requirements](#requirements) section.
 
@@ -107,7 +107,7 @@ The external modules / apps are required only for the extended functionality:
 	```sh
 	$ sudo pip install bottle
 	```
-	> WebUI renders interface from the bottle html templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `pyexpool/views/*` should be copied to the target project.
+	> WebUI renders interface from the bottle html templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `pyexpool/views/` should be copied to the target project.
 	
 - [mock](https://pypi.python.org/pypi/mock) is required exclusively for the unit testing under Python2, `mock` is included in the standard lib of Python3.
 	```sh
@@ -403,6 +403,8 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 ### Optional WebUi
 
 A simple Web UI is designed to profile Jobs and Tasks, interactively trace their failures and resource consumption. It is implemented in the optional module [mpewui](mpewui.py) and can be spawned by instantiating the `WebUiApp` class. A dedicated `WebUiApp` instance can be created per each `ExecPool`, serving the interfaces on the dedicated addresses (host:port). However, typically, a *single global instance of `WebUiApp` is created and supplied to all employed `ExecPool` instances*.  
+Web UI module requires html templates located in the [views](./views/) directory. Either `./views/` should be copied to the directory of the calling module or path to the `views` should be specified in the `bottle.TEMPLATE_PATH` list.
+
 See [WebUI queries manual](views/restapi.md) for API details. An example of the WebUI usage is shown in the `mpetests.TestWebUI.test_failures` of the [mpetests](mpetests.py).
 <!-- webui.md#webui-queries -->
 > `WebUiApp` instance works in the *dedicated thread* of the load balancer application and designed for the internal profiling with relatively small number of queries but not as a public web interface for the huge number of clients.  

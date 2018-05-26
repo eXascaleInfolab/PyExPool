@@ -17,7 +17,7 @@ views = glob('views/*')
 setup(
 	name='pyexpool',  # This is the name of your PyPI-package.
 	# version='2.2.0',  # Update the version number for new releases
-	version='3.0.0',  # Update the version number for new releases
+	version='3.0.1',  # Update the version number for new releases
 	description=('A lightweight multi-process Execution Pool with load balancing'
 	' and customizable resource consumption constraints.'),  # Required, "Summary" metadata field
 	long_description=(
@@ -28,10 +28,13 @@ setup(
 	' included into your project and customized as a part of your distribution '
 	'(like in [PyCaBeM](https://github.com/eXascaleInfolab/PyCABeM)), not as a'
 	' separate library. Additionally, an optional minimalistic Web interface is'
-	' provided in the separate file to inspect the load balancer and execution pool.'
+	' provided in the separate module to inspect the load balancer and execution pool.'
 	' Typically, PyExPool is used as an application framework for benchmarking,'
 	' load testing or other heavy-loaded multi-process execution activities on'
 	' constrained computational resources.'
+	'> WebUI(`mpewui` module) renders interface from the bottle html templates located'
+	' in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `views/`'
+	' should be copied from the `pyexpool` repository to the target project.'
 	'\n\n'
 	'See details on the [PyExPool page](https://github.com/eXascaleInfolab/PyExPool)'
 	' and star the project if you like it! For any further assistance you can drop me'
