@@ -5,7 +5,8 @@ A Lightweight Multi-Process Execution Pool with load balancing and customizable 
 \author: (c) Artem Lutov <artem@exascale.info>  
 \license:  [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0)  
 \organizations: [eXascale Infolab](http://exascale.info/), [Lumais](http://www.lumais.com/), [ScienceWise](http://sciencewise.info/)  
-\date: 2015-07 v1, 2017-06 v2, 2018-05 v3
+\date: 2015-07 v1, 2017-06 v2, 2018-05 v3  
+\grants: Swiss National Science Foundation grant number `CRSII2_147609`, European Commission grant `Graphint 683253`
 
 BibTeX:
 ```bibtex
@@ -94,31 +95,33 @@ Additionally, [hwloc / lstopo](http://www.admin-magazine.com/HPC/Articles/hwloc-
 
 Multi-Process Execution Pool *can be run without any external modules* with automatically disabled load balancing.  
 The external modules / apps are required only for the extended functionality:
-- [psutil](https://pypi.python.org/pypi/psutil) is required for the dynamic jobs balancing to perform the in-RAM computations (`_LIMIT_WORKERS_RAM = True`) and limit memory consumption of the workers.
-	```sh
-	$ sudo pip install psutil
-	```
-	> To perform in-memory computations dedicating almost all available RAM (specifying *memlimit ~= physical memory*), it is recommended to set swappiness to 1 .. 10: `$ sudo sysctl -w vm.swappiness=5` or set it permanently in `/etc/sysctl.conf`: `vm.swappiness = 5`.
-- [hwloc](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) (includes `lstopo`) is required to identify enumeration type of logical CPUs to perform correct CPU affinity masking. Required only for the automatic affinity masking with cache usage optimization and only if the CPU enumeration type is not specified manually.
+- Platform-specific requireements:
+  - [hwloc](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) (includes `lstopo`) is required to identify enumeration type of logical CPUs to perform correct CPU affinity masking. Required only for the automatic affinity masking with cache usage optimization and only if the CPU enumeration type is not specified manually.
 	```sh
 	$ sudo apt-get install -y hwloc
 	```
-- [bottle](http://bottlepy.org) is required for the minimalistic optional WebUI to monitor executing jobs.
-	```sh
-	$ sudo pip install bottle
-	```
-	> WebUI renders interface from the bottle html templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `pyexpool/views/` should be copied to the target project.
-	
-- [mock](https://pypi.python.org/pypi/mock) is required exclusively for the unit testing under Python2, `mock` is included in the standard lib of Python3.
-	```sh
-	$ sudo pip install mock
-	```
+- Cross-platform Python requireements:
+	- [psutil](https://pypi.python.org/pypi/psutil) is required for the dynamic jobs balancing to perform the in-RAM computations (`_LIMIT_WORKERS_RAM = True`) and limit memory consumption of the workers.
+		```sh
+		$ sudo pip install psutil
+		```
+		> To perform in-memory computations dedicating almost all available RAM (specifying *memlimit ~= physical memory*), it is recommended to set swappiness to 1 .. 10: `$ sudo sysctl -w vm.swappiness=5` or set it permanently in `/etc/sysctl.conf`: `vm.swappiness = 5`.
+	- [bottle](http://bottlepy.org) is required for the minimalistic optional WebUI to monitor executing jobs.
+		```sh
+		$ sudo pip install bottle
+		```
+		> WebUI renders interface from the bottle html templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `pyexpool/views/` should be copied to the target project.
+		
+	- [mock](https://pypi.python.org/pypi/mock) is required exclusively for the unit testing under Python2, `mock` is included in the standard lib of Python3.
+		```sh
+		$ sudo pip install mock
+		```
 
-All Python requirements are optional and can be installed from the `pyreqsopt.txt` file:
+All Python requirements are optional and installed automatically from the `pip` distribution (`$ pip install pyexpool`) or  can be installed manually from the `pyreqsopt.txt` file:
 ```sh
 $ sudo pip install -r pyreqsopt.txt
 ```
-> `hwloc` is a system requirement and can't be installed from the `pyreqsopt.txt`
+> `lstopo` app of `hwloc` package is a system requirement and should be installed manually from the system-specific package repository or built from the [sources](https://www.open-mpi.org/projects/hwloc/).
 
 
 ## API
