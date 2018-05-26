@@ -326,15 +326,17 @@ class WebUiApp(threading.Thread):
 		self.daemon = daemon
 
 
-	@bottle.get('/favicon.ico')
+	# ATTENTION: a bottle decorator works only when it's the first decorator of the function
 	@staticmethod
+	@bottle.get('/favicon.ico')
 	def favicon():
 		"""Favicon for browsers"""
-		return bottle.static_file('favicon.ico', root='/images')
+		return bottle.static_file('favicon.ico', root='images')
 
 
-	@bottle.error(404)
+	# ATTENTION: a bottle decorator works only when it's the first decorator of the function
 	@staticmethod
+	@bottle.error(404)
 	def error404(err, msg=''):
 		"""Custom page not found"""
 		if msg:
