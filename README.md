@@ -11,7 +11,7 @@ BibTeX:
 ```bibtex
 @misc{pyexpool,
 	author = {Artem Lutov and Philippe Cudré-Mauroux},
-	title = {{PyExPool-v.3: A Lightweight Execution Pool with Constraint-aware Load-Balancer.}},
+	title = {PyExPool-v.3: A Lightweight Execution Pool with Constraint-aware Load-Balancer.},
 	year = {2018},
 	url = {https://github.com/eXascaleInfolab/PyExPool}
 }
