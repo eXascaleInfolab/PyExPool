@@ -26,7 +26,7 @@ BibTeX:
 	- [Task](#task)
 	- [AffinityMask](#affinitymask)
 	- [ExecPool](#execpool)
-	- [Optional Extensions](#optional-extensions)
+	- [Optional WebUi](#optional-webui)
 		- [WebUiApp](#webuiapp)
 		- [UiCmd](#uicmd)
 	- [Accessory Routines](#accessory-routines)
@@ -37,6 +37,7 @@ BibTeX:
 
 
 ## Overview
+
 A Lightweight Multi-Process Execution Pool with load balancing to schedule Jobs execution with *per-job timeout*, optionally grouping them into Tasks and specifying optional execution parameters considering NUMA architecture peculiarities:
 - automatic rescheduling and *load balancing* (reduction) of the worker processes and on low memory condition for the *in-RAM computations* (requires [psutil](https://pypi.python.org/pypi/psutil), can be disabled)
 - *chained termination* of the related worker processes (started jobs) and non-started jobs rescheduling to satisfy *timeout* and *memory limit* constraints
@@ -123,7 +124,7 @@ $ sudo pip install -r pyreqsopt.txt
 ## API
 
 Flexible API provides *automatic CPU affinity management, maximization of the dedicated CPU cache, limitation of the minimal dedicated RAM per worker process, balancing of the worker processes and rescheduling of chains of the related jobs on low memory condition for the in-RAM computations*, optional automatic restart of jobs on timeout, access to job's process, parent task, start and stop execution time and more...  
-`ExecPool` represents a pool of worker processes to execute `Job`s that can be grouped into `Tasks`s for more flexible management.
+`ExecPool` represents a pool of worker processes to execute `Job`s that can be grouped into the hierarchy of `Tasks`s for more flexible management.
 
 
 ### Job
@@ -399,8 +400,16 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 		"""Force termination of the pool"""
 ```
 
-### Optional Extensions
+### Optional WebUi
+
+A simple Web UI is designed to profile Jobs and Tasks, interactively trace their failures and resource consumption. It is implemented in the optional module [mpewui](mpewui.py) and can be spawned by instantiating the `WebUiApp` class. A dedicated `WebUiApp` instance can be created per each `ExecPool`, serving the interfaces on the dedicated addresses (host:port). However, typically, a *single global instance of `WebUiApp` is created and supplied to all employed `ExecPool` instances*.  
+See [WebUI queries manual](views/restapi.md) for API details. An example of the WebUI usage is shown in the `mpetests.TestWebUI.test_failures` of the [mpetests](mpetests.py).
+<!-- webui.md#webui-queries -->
+> `WebUiApp` instance works in the *dedicated thread* of the load balancer application and designed for the internal profiling with relatively small number of queries but not as a public web interface for the huge number of clients.  
+> *WARNING: high loading of the WebUI may increase latency of the load balancer.*
+
 #### WebUiApp
+
 ```python
 WebUiApp(host='localhost', port=8080, name=None, daemon=None, group=None, args=(), kwargs={})
 	"""WebUI App starting in the dedicated thread and providing remote interface to inspect ExecPool
@@ -429,9 +438,6 @@ WebUiApp(host='localhost', port=8080, name=None, daemon=None, group=None, args=(
 UiCmdId = IntEnum('UiCmdId', 'FAILURES LIST_JOBS LIST_TASKS API_MANUAL')
 """UI Command Identifier associated with the REST URL"""
 ```
-
-See [WebUI queries tutorial](views/restapi.htm) for details. An example of the WebUI usage is shown in the `mpetests.TestWebUI.test_failures` of the [mpetests.py](mpetests.py).
-<!-- webui.md#webui-queries -->
 
 
 ### Accessory Routines

@@ -2035,9 +2035,13 @@ class ExecPool(object):
 			# Note: retain previous value of mem for better scheduling, it is the valid value for the same job
 		# Update execution pool tasks, should be done before the job.onstart()
 		# Note: the lock is not required here because tasks are also created in the main thread
-		if job.task is not None:
-			self.tasks.add(job.task)
-			# Note: the task started when the first job has been added to it before its jobs started
+		# Consider all supertasks
+		jst = job.task
+		# Note: `jst not in self.tasks` whould prevent super-tasks extension after the jobs started
+		# because a task starts when it's first job starts.
+		while jst is not None:
+			self.tasks.add(jst)
+			jst = jst.task
 		job.tstart = time.perf_counter()
 		if job.onstart:
 			if _DEBUG_TRACE >= 2:

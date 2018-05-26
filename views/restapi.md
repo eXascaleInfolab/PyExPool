@@ -1,9 +1,11 @@
-<!-- <h2>Rest API</h2> -->
+<h2>Rest API Manual</h2>
+
 <p>The following <strong>endpoints</strong> are available:
 <ul>
   <li><kbd>/</kbd> - list failures (failed jobs and tasks having at least one failed job).</li>
   <li><kbd>/jobs</kbd>  - list non-finished jobs.</li>
-  <li><kbd>/tasks</kbd>  - list non-finished tasks.</li>
+  <li><kbd>/tasks</kbd>  - list non-finished tasks.<br />
+  <strong>Note</strong>: a task is registered in the <samp>ExecPool</samp> on start of the first descendant job, so only tasks related to the started jobs are shown.</li>
 </ul>
 </p>
 
@@ -37,15 +39,11 @@
       </li>
     </ul>
     Fully omitted range requires any non-None property value. <br />
-    For example, to show terminated jobs with return code <var>-15</var> and tasks
-    having these jobs (<samp>rcode*</samp> is optional since tasks do not have this property),
-    where the jobs have defined <samp>category*</samp> (optional since tasks do not have category)
-    and where each job executed from <var>1.5 sec</var> up to <var>1 hour</var> (3600 sec):
+    For example, to show terminated jobs with return code <var>-15</var> and tasks having these jobs (<samp>rcode*</samp> is optional since tasks do not have this property), where the jobs have defined <samp>category*</samp> (optional since tasks do not have category) and where each job executed from <var>1.5 sec</var> up to <var>1 hour</var> (3600 sec):
     <samp>?flt=rcode*:-15|duration:1.5..3600|category*</samp>
   </li>
   <li>
-    <kbd>jlim</kbd>  - limit the number of the showing items up to this number of jobs,
-    <var>100</var> by default.
+    <kbd>jlim</kbd>  - limit the number of the showing items up to this number of jobs, <var>100</var> by default.
   </li>
   <li>
     <kbd>refresh</kbd>  - page auto refresh time in seconds, >= 2, absent by default.

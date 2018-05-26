@@ -326,8 +326,10 @@
 
 <!-- API Manual page specific data ######################################### -->
 % if get('restApi'):
-<h2>REST API Manual</h2>
-% include('restapi.htm')
+<!-- Note: header is included into the embedding HTML template, which has .md
+	extension only to be rendered by GitHub -->
+<!-- <h2>REST API Manual</h2> -->
+% include('restapi.md')
 % end  # restApi
 <!-- ####################################################################### -->
 
