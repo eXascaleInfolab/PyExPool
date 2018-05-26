@@ -1625,9 +1625,8 @@ class ExecPool(object):
 					# Note: check for the termination in all cycles
 					if not self.alive:
 						return
-					task = fji.task
 					jdata = infodata(fji, propflt, objflt)
-					if task is None:
+					if fji.task is None:
 						if not jdata:
 							continue
 						if header:
@@ -1635,12 +1634,12 @@ class ExecPool(object):
 							header = False
 						jobsInfo.append(jdata)
 					else:
-						tie = tinfe0.get(task)
+						tie = tinfe0.get(fji.task)
 						if tie is None:
-							tdata = infodata(TaskInfo(task), propflt, objflt)
+							tdata = infodata(TaskInfo(fji.task), propflt, objflt)
 							if not tdata:
 								continue
-							tie = tinfe0.setdefault(task, TaskInfoExt(props=None if not tdata else
+							tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=None if not tdata else
 								(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
 								, jobs=None if not jdata else [JobInfo.iterprop()]))  #pylint: disable=E1101
 						if jdata:
@@ -1714,24 +1713,25 @@ class ExecPool(object):
 				# List the tasks with their jobs up to the specified limit of covered jobs
 				jnum = 0  # Counter of the showing jobs
 				tinfe0 = dict()  # dict(Task, TaskInfoExt)  - Task information extended, bottom level of the hierarchy
-				for job in self._jobs:
-					# Note: check for the termination in all cycles
-					if not self.alive:
-						return
-					if job.task is None:
-						continue
-					# print('>>> Non-zero task: {}'.format(job.task.name))
-					jdata = infodata(JobInfo(job), propflt, objflt)
-					tie = tinfe0.get(job.task)
-					if tie is None:
-						tdata = infodata(TaskInfo(task), propflt, objflt)
-						if not tdata:
+				for jobs in (self._workers, self._jobs):
+					for job in jobs:
+						# Note: check for the termination in all cycles
+						if not self.alive:
+							return
+						if job.task is None:
 							continue
-						tie = tinfe0.setdefault(task, TaskInfoExt(props=None if not tdata else
-							(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
-							, jobs=None if not jdata else [infoheader(JobInfo.iterprop(), propflt)]))  #pylint: disable=E1101
-					if jdata:
-						tie.jobs.append(jdata)
+						# print('>>> Non-zero task: {}'.format(job.task.name))
+						jdata = infodata(JobInfo(job), propflt, objflt)
+						tie = tinfe0.get(job.task)
+						if tie is None:
+							tdata = infodata(TaskInfo(job.task), propflt, objflt)
+							if not tdata:
+								continue
+							tie = tinfe0.setdefault(job.task, TaskInfoExt(props=None if not tdata else
+								(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
+								, jobs=None if not jdata else [infoheader(JobInfo.iterprop(), propflt)]))  #pylint: disable=E1101
+						if jdata:
+							tie.jobs.append(jdata)
 				if not tinfe0:
 					return
 				# Iteratively form the hierarchy of tasks from the bottom level

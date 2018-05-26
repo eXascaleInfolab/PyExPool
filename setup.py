@@ -165,7 +165,7 @@ setup(
 	# Include bottle template views and docs
 	package_data={  # Optional
 		# Note: images are relatively heavy, wildcards/regexp are not supported out of the box
-		# '': ['views/restapi.htm'],  # Add README.md to the root and views list to the 'views'
+		# '': ['views/restapi.md'],  # Add README.md to the root and views list to the 'views'
 		'': ['README.md'],  # Add README.md to the root and views list to the 'views'
 		'views': views,  # Include views (bottle WebUI html templates)
 		# 'views': ['webui.tpl'],  # Include views (bottle WebUI html templates)

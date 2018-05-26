@@ -292,7 +292,7 @@
 <h2>Remained Tasks with Jobs</h2>
 <!-- <hr /> -->
 <table class="noframe">
-	% tiw = get('tasksInfoWide')
+	% tiw = get('tasksInfoWide')  # Max width of the table
 	%	for tfi in get('tasksInfo'):
 	<tr>
 		% for idt in range(tfi.ident):  # Left align the output
