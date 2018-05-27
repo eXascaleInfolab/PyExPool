@@ -14,7 +14,7 @@ BibTeX:
 	author = {Artem Lutov and Philippe Cudré-Mauroux},
 	title = {PyExPool-v.3: A Lightweight Execution Pool with Constraint-aware Load-Balancer.},
 	year = {2018},
-	url = {https://github.com/eXascaleInfolab/PyExPool}
+	url = {https://github.com/eXascaleInfolab/PyExPool} 
 }
 ```
 
@@ -67,9 +67,9 @@ Demo of the *scheduling with cache L1 maximization* for single-threaded processe
 ![mpepool_cacheL1_2](images/mpepool_cacheL1_2.png)
 
 Demo of the WebUI for the Jobs and Tasks tracing and profiling:
-![WebUI, Falures page (root)](images/webui.png)
-Exactly the same fully funcitonal interface is accessible from the console using [w3m](http://w3m.sourceforge.net/) or other terminal browsers:
-![WebUI Console, Falures page (root)](images/webui_console.png)
+![WebUI, Failures page (root)](images/webui.png)
+Exactly the same fully functional interface is accessible from the console using [w3m](http://w3m.sourceforge.net/) or other terminal browsers:
+![WebUI Console, Failures page (root)](images/webui_console.png)
 To explore the WebUI demo execute the following testcase
 ```sh
 $ MANUAL=1 python -m unittest mpetests.TestWebUI.test_failures
@@ -95,12 +95,12 @@ Additionally, [hwloc / lstopo](http://www.admin-magazine.com/HPC/Articles/hwloc-
 
 Multi-Process Execution Pool *can be run without any external modules* with automatically disabled load balancing.  
 The external modules / apps are required only for the extended functionality:
-- Platform-specific requireements:
+- Platform-specific requirements:
   - [hwloc](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) (includes `lstopo`) is required to identify enumeration type of logical CPUs to perform correct CPU affinity masking. Required only for the automatic affinity masking with cache usage optimization and only if the CPU enumeration type is not specified manually.
 	```sh
 	$ sudo apt-get install -y hwloc
 	```
-- Cross-platform Python requireements:
+- Cross-platform Python requirements:
 	- [psutil](https://pypi.python.org/pypi/psutil) is required for the dynamic jobs balancing to perform the in-RAM computations (`_LIMIT_WORKERS_RAM = True`) and limit memory consumption of the workers.
 		```sh
 		$ sudo pip install psutil
@@ -110,7 +110,7 @@ The external modules / apps are required only for the extended functionality:
 		```sh
 		$ sudo pip install bottle
 		```
-		> WebUI renders interface from the bottle html templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `pyexpool/views/` should be copied to the target project.
+		> WebUI renders interface from the bottle HTML templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `pyexpool/views/` should be copied to the target project.
 		
 	- [mock](https://pypi.python.org/pypi/mock) is required exclusively for the unit testing under Python2, `mock` is included in the standard lib of Python3.
 		```sh
@@ -406,7 +406,7 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 ### Optional WebUi
 
 A simple Web UI is designed to profile Jobs and Tasks, interactively trace their failures and resource consumption. It is implemented in the optional module [mpewui](mpewui.py) and can be spawned by instantiating the `WebUiApp` class. A dedicated `WebUiApp` instance can be created per each `ExecPool`, serving the interfaces on the dedicated addresses (host:port). However, typically, a *single global instance of `WebUiApp` is created and supplied to all employed `ExecPool` instances*.  
-Web UI module requires html templates located in the [views](./views/) directory. Either `./views/` should be copied to the directory of the calling module or path to the `views` should be specified in the `bottle.TEMPLATE_PATH` list.
+Web UI module requires HTML templates located in the [views](./views/) directory. Either `./views/` should be copied to the directory of the calling module or path to the `views` should be specified in the `bottle.TEMPLATE_PATH` list.
 
 See [WebUI queries manual](views/restapi.md) for API details. An example of the WebUI usage is shown in the `mpetests.TestWebUI.test_failures` of the [mpetests](mpetests.py).
 <!-- webui.md#webui-queries -->
