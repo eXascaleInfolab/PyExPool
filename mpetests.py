@@ -788,7 +788,9 @@ except ImportError:
 
 _webuiapp = None  # Global WebUI application
 
-# @unittest.skip('Under development, currently used manually')
+
+# Execution:
+# $ MANUAL='1' python -m unittest mpetests.TestWebUI.test_failures
 @unittest.skipUnless(os.getenv('MANUAL'),
 	'Only the manual WebUI testing is supported now, MANUAL evn var should be set')
 class TestWebUI(unittest.TestCase):
@@ -869,7 +871,6 @@ class TestWebUI(unittest.TestCase):
 
 		# Verify successful completion of the execution pool
 		self.assertTrue(self._execpool.join(timeout*1.1))
-
 
 
 if __name__ == '__main__':
