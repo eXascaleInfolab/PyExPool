@@ -102,10 +102,12 @@ except ImportError:
 		pass  # xrange is not defined in Python3, which is fine
 # Optional Web User Interface
 _WEBUI = True
+__imperr = None  # Import error
 if _WEBUI:
 	try:
 		from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResCol, SummaryBrief
 	except ImportError as wuerr:
+		__imperr = wuerr  # Note: exceptions are local in Python 3
 		_WEBUI = False
 
 # Limit the amount of memory consumption by worker processes.
@@ -117,6 +119,7 @@ if _LIMIT_WORKERS_RAM:
 	try:
 		import psutil
 	except ImportError as lwerr:
+		__imperr = lwerr  # Note: exceptions are local in Python 3
 		_LIMIT_WORKERS_RAM = False
 
 
@@ -139,10 +142,11 @@ def timeheader(timestamp=time.gmtime()):
 if not (_WEBUI and _LIMIT_WORKERS_RAM):
 	print(timeheader(), file=sys.stderr)
 	if not _WEBUI:
-		print('WARNING, Web UI is disabled because the "bottle" module import failed: ', wuerr, file=sys.stderr)
+		print('WARNING, Web UI is disabled because the "bottle" module import failed: '
+			, __imperr, file=sys.stderr)
 	if not _LIMIT_WORKERS_RAM:
 		print('WARNING, RAM constraints are disabled because the "psutil" module import failed: '
-			, lwerr, file=sys.stderr)
+			, __imperr, file=sys.stderr)
 
 
 # Use chained constraints (timeout and memory limitation) in jobs to terminate
