@@ -255,8 +255,8 @@ def infodata(obj, propflt=None, objflt=None):
 				print('  WARNING, objflt item does not belong to the {}: {}'.format(
 					type(obj).__name__, prop), file=sys.stderr)
 			# Note: pcon is None requires non-None pval
-			if (not pcon.opt and prop not in obj) or (pcon is None and pval is None) or (
-			pcon is not None and ((pcon.end is None and pval != pcon.beg)
+			if (pcon is None and pval is None) or (pcon is not None and (
+			(not pcon.opt and prop not in obj) or (pcon.end is None and pval != pcon.beg)
 			or pcon.end is not None and (pval < pcon.beg or pval >= pcon.end))):
 				# print('>>> ret None, 1:', prop not in obj, '2:', pcon.end is None and pval != pcon.beg
 				# 	, '3:', pcon.end is not None, '4:', pval < pcon.beg or pval >= pcon.end)
@@ -419,7 +419,8 @@ class TaskInfo(object):
 	@property
 	def duration(self):
 		"""Execution duration"""
-		return None if self.tstop is None or self.tstart is None else self.tstop - self.tstart
+		return None if self.tstart is None else (self.tstop if self.tstop is not None
+			else time.perf_counter()) - self.tstart
 
 
 class TaskInfoExt(object):

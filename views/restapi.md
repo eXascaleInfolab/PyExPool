@@ -56,16 +56,17 @@
 </p>
 
 <p>Query <strong>examples</strong>:
-<p>
-  Show tasks with their jobs having <var>rcode=-15</var> if exists, <var>1.5 sec &le; duration &lt; 3600 sec</var> and <var>category</var> attribute might present with any value.
-  <pre>
-    http://localhost:8080/tasks?flt=rcode*:-15|duration:1.5..3600|category*
-  </pre>
-</p>
-<p>
-  Show jobs having <var>rcode &lt; 0</var> if exists, <var>1.5 sec &le; duration &lt; 10 days 2 hours 5.7 sec</var> and <var>task</var> attribute present with some defined value.
-  <pre>
-    http://localhost:8080/jobs?flt=rcode*:..0|duration:1.5..10d2h15.7|task
-  </pre>
-</p>
+<ul>
+  <li>
+    Show tasks with their jobs having <var>rcode=-15</var> if exists, <var>1.5 sec &le; duration &lt; 3600 sec</var> and <var>category</var> attribute might present with any value:
+    <pre>
+      http://localhost:8080/tasks?flt=rcode*:-15|duration:1.5..3600|category*
+    </pre>
+  </li>
+  <li>
+    Show jobs having <var>rcode &lt; 0</var> if exists, <var>1.5 sec &le; duration &lt; 10 days 2 hours 5.7 sec</var> and <var>task</var> attribute present with some defined value:
+    <pre>
+      http://localhost:8080/jobs?flt=rcode*:..0|duration:1.5..10d2h15.7|task
+    </pre>
+  </li>
 </p>
