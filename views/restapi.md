@@ -58,9 +58,9 @@
 <p>Query <strong>examples</strong>:
 <ul>
   <li>
-    Show tasks with their jobs having <var>rcode=-15</var> if exists, <var>1.5 sec &le; duration &lt; 3600 sec</var> and <var>category</var> attribute might present with any value:
+    Show tasks with their jobs having <var>rcode=-15</var> if exists, <var>1.5 sec &le; duration &lt; 3600 sec</var> and <var>cat1 &le; category &lt; cat5 </var> if exists:
     <pre>
-      http://localhost:8080/tasks?flt=rcode*:-15|duration:1.5..3600|category*
+      http://localhost:8080/tasks?flt=rcode*:-15|duration:1.5..3600|category*=cat1..cat5
     </pre>
   </li>
   <li>

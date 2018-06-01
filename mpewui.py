@@ -272,6 +272,9 @@ class ResultOptions(object):
 					self.fltopts[k] = val
 				else:
 					# Filter meaning: the option should present with any (non-None) value
+					if k[-1] == '*':
+						assert False, 'Only defined attributes can be optional: ' + k
+						k = k[:-1]
 					self.fltopts[k] = None
 		# # Fetch the kind of items to be shown
 		# self.kind = qdict.get(UiResOpt.kind.name)  #pylint: disable=E1101
@@ -460,7 +463,7 @@ class WebUiApp(threading.Thread):
 		# Parse URL parameters and form the UI command parameters
 		try:
 			resopts = ResultOptions(bottle.request.query)
-		except (KeyError, ValueError) as err:
+		except (KeyError, ValueError, AssertionError) as err:
 			# 400  - Bad Request
 			# 415  - Unsupported Media Type
 			bottle.response.status = 400
