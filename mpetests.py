@@ -799,7 +799,7 @@ class TestWebUI(unittest.TestCase):
 	@classmethod
 	def setUpClass(cls):
 		cls.host = 'localhost'
-		cls.port = 8080
+		cls.port = 8081
 		global _webuiapp  #pylint: disable=W0603
 		if _webuiapp is None:
 			_webuiapp = WebUiApp(host=cls.host, port=cls.port, name='MpeWebUI', daemon=True)
@@ -870,7 +870,7 @@ class TestWebUI(unittest.TestCase):
 		# print(json)
 
 		# Verify successful completion of the execution pool
-		self.assertTrue(self._execpool.join(timeout*1.1))
+		self.assertTrue(self._execpool.join(timeout * 1.1 + _TEST_LATENCY * ExecPool._KILLDELAY))
 
 
 if __name__ == '__main__':
