@@ -195,7 +195,11 @@ class ResultOptions(object):
 					# Consider range values and infer the numeric type if possible
 					if v.find('..') != -1:
 						v, ve = v.split('..', 1)
-						ve = inferNumType(ve)
+						# Allow open range for inf continuation:  <n>..  ==  <n>..inf
+						if ve:
+							ve = inferNumType(ve)
+						else:
+							ve = float('inf')  # Or sys.maxsize, or math.inf
 					else:
 						ve = None
 					v = inferNumType(v)

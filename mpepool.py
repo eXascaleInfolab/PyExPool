@@ -123,7 +123,6 @@ if _LIMIT_WORKERS_RAM:
 		_LIMIT_WORKERS_RAM = False
 
 
-
 def timeheader(timestamp=time.gmtime()):
 	"""Timestamp header string
 
@@ -1645,8 +1644,11 @@ class ExecPool(object):
 								continue
 							tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=None if not tdata else
 								(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
-								, jobs=None if not jdata else [JobInfo.iterprop()]))  #pylint: disable=E1101
+								, jobs=None if not jdata else [infoheader(JobInfo.iterprop(), propflt)]))  #pylint: disable=E1101
 						if jdata:
+							# tie.jobs might be None if the task created before any of it's DIRECT jobs failed
+							if tie.jobs is None:
+								tie.jobs = [infoheader(JobInfo.iterprop(), propflt)]  #pylint: disable=E1101
 							tie.jobs.append(jdata)
 				# List jobs only if any payload exists besides the header
 				if jobsInfo:
@@ -1735,6 +1737,9 @@ class ExecPool(object):
 								(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
 								, jobs=None if not jdata else [infoheader(JobInfo.iterprop(), propflt)]))  #pylint: disable=E1101
 						if jdata:
+							# tie.jobs might be None if the task created before any of it's DIRECT jobs created
+							if tie.jobs is None:
+								tie.jobs = [infoheader(JobInfo.iterprop(), propflt)]  #pylint: disable=E1101
 							tie.jobs.append(jdata)
 				if not tinfe0:
 					return
