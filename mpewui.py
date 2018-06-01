@@ -83,6 +83,8 @@ except ImportError:
 
 RE_INT = re.compile(r'[-+]?\d+$')  # Match int
 RE_FLOAT = re.compile(r'[-+]?\d+(\.\d*)?([eE][-+]\d+)?$')  # Match float
+# Match duration in the format [<days>d][<hours>h][<minutes>m<seconds:float>]
+RE_DHMS = re.compile(r'(\d+d)?(\d+h)?(\d+m)\d+(\.\d+)?$')
 
 
 def inferNumType(val):
@@ -153,6 +155,55 @@ opt: bool  - target property of the filter is optional, i.e. omit the filter if 
 class ResultOptions(object):
 	"""Result options extractor from the URL GET query"""
 
+	@staticmethod
+	def dhmsSec(dhms):
+		"""Convert dhms string duration to seconds
+
+		dhms  - duration given as string in the format:
+			[<days:int>d][<hours:int>h][<minutes:int>m][<seconds:float>]
+
+		return  secs: uint  - seconds, unsigned int
+
+		>>> dhmsSec('10')
+		10
+		>>> dhmsSec('1m')
+		60
+		>>> dhmsSec('1m5.782')
+		65.782
+		>>> dhmsSec('1h2m5')
+		3725
+		>>> dhmsSec('2d2h')
+		180000
+		>>> dhmsSec('1d0h0m2')
+		86402
+		"""
+		sec = 0
+		# Parse days
+		isep = dhms.find('d')
+		ibeg = 0
+		if isep != -1:
+			sec += int(dhms[:isep]) * 24 * 3600
+			ibeg = isep + 1
+		# Parse hours
+		isep = dhms.find('h', ibeg)
+		if isep != -1:
+			sec += int(dhms[ibeg:isep]) * 3600
+			ibeg = isep + 1
+		# Parse mins
+		isep = dhms.find('m', ibeg)
+		if isep != -1:
+			sec += int(dhms[ibeg:isep]) * 60
+			ibeg = isep + 1
+		# Parse secs
+		dhms = dhms[ibeg:]
+		if dhms:
+			if dhms.find('.') == -1:
+				sec += int(dhms)
+			else:
+				sec += float(dhms)
+		return sec
+
+
 	def __init__(self, qdict):
 		"""Initialization of the result options
 
@@ -194,17 +245,28 @@ class ResultOptions(object):
 					v = pkv[1]
 					# Consider range values and infer the numeric type if possible
 					if v.find('..') != -1:
+						# Convert end value
 						v, ve = v.split('..', 1)
 						# Allow open range for inf continuation:  <n>..  ==  <n>..inf
 						if ve:
-							ve = inferNumType(ve)
+							if k != UiResCol.duration._name_ or not RE_DHMS.match(ve):
+								vend = inferNumType(ve)
+							else:
+								vend = self.dhmsSec(ve)
 						else:
-							ve = float('inf')  # Or sys.maxsize, or math.inf
+							vend = float('inf')  # Or sys.maxsize, or math.inf
 					else:
-						ve = None
-					v = inferNumType(v)
+						vend = None
+					# Conver begin value
+					if v:
+						if k != UiResCol.duration._name_ or not RE_DHMS.match(v):
+							vbeg = inferNumType(v)
+						else:
+							vbeg = self.dhmsSec(v)
+					else:
+						vbeg = float('-inf')
 					# Consider optional filtering fields
-					val = UiResFilterVal(beg=v, end=ve, opt=k[-1]=='*')  #pylint: disable=C0326
+					val = UiResFilterVal(beg=vbeg, end=vend, opt=k[-1]=='*')  #pylint: disable=C0326
 					if val.opt:
 						k = k[:-1]
 					self.fltopts[k] = val

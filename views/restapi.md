@@ -39,20 +39,33 @@
       </li>
     </ul>
     Fully omitted range requires any non-None property value. <br />
-    For example, to show terminated jobs with return code <var>-15</var> and tasks having these jobs (<samp>rcode*</samp> is optional since tasks do not have this property), where the jobs have defined <samp>category*</samp> (optional since tasks do not have category) and where each job executed from <var>1.5 sec</var> up to <var>1 hour</var> (3600 sec):
+    For example, to show terminated jobs with return code <var>-15</var> and tasks having these jobs (<samp>rcode*</samp> is optional since tasks do not have this property), where the jobs have defined <samp>category*</samp> (optional since tasks do not have category) and where each job executed from <var>1.5 sec</var> up to <var>1 hour</var> (3600 sec):<br />
     <samp>?flt=rcode*:-15|duration:1.5..3600|category*</samp>
+    <blockquote>
+      Omitted low/high bound of the range is substituted with -/+inf: <samp>rcode:..</samp> is the same as <samp>rcode:-inf..inf</samp>.<br />
+      Duration can be specified in the DHMS format: <samp>[&lt;days:int&gt;d][&lt;hours:int&gt;h][&lt;minutes:int&gt;m][&lt;seconds:float&gt;]</samp>, for example:  <samp>duration:2d5h12.8..</samp>.
+    </blockquote>
   </li>
   <li>
     <kbd>jlim</kbd>  - limit the number of the showing items up to this number of jobs, <var>100</var> by default.
   </li>
   <li>
-    <kbd>refresh</kbd>  - page auto refresh time in seconds, >= 2, absent by default.
+    <kbd>refresh</kbd>  - page auto refresh time in seconds, &ge; 2, absent by default.
   </li>
 </ul>
 </p>
 
-<p> An example of the query:
-<pre>
-http://localhost:8080/tasks?flt=rcode*:-15|duration:1.5..3600|category*
-</pre>
+<p>Query <strong>examples</strong>:
+<p>
+  Show tasks with their jobs having <var>rcode=-15</var> if exists, <var>1.5 sec &le; duration &lt; 3600 sec</var> and <var>category</var> attribute might present with any value.
+  <pre>
+    http://localhost:8080/tasks?flt=rcode*:-15|duration:1.5..3600|category*
+  </pre>
+</p>
+<p>
+  Show jobs having <var>rcode &lt; 0</var> if exists, <var>1.5 sec &le; duration &lt; 10 days 2 hours 5.7 sec</var> and <var>task</var> attribute present with some defined value.
+  <pre>
+    http://localhost:8080/jobs?flt=rcode*:..0|duration:1.5..10d2h15.7|task
+  </pre>
+</p>
 </p>
