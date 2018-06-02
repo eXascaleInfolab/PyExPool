@@ -1514,8 +1514,6 @@ class ExecPool(object):
 			if not webuiapp.is_alive():
 				try:
 					webuiapp.start()
-					if _DEBUG_TRACE:
-						print('WebUI app started')
 				except RuntimeError as err:
 					print('WARNING, webuiapp can not be started. Disabled: {}. {}'.format(
 						err, traceback.format_exc(5)), file=sys.stderr)
@@ -1962,8 +1960,8 @@ class ExecPool(object):
 		# restart via rsrtonto, which results the priority rescheduling)
 		# Note: job wkslim should be updated before adding to the _jobs to handle
 		# correctly the case when _jobs were empty
-		if _DEBUG_TRACE >= 2:
-			print('  Nonstarted initial jobs: ', ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs]))
+		# print('>  Nonstarted initial jobs: ', ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs]))
+		#
 		# Note: terminate time is reseted on job start in case of restarting
 		## Reset job.proc to remove it from the sub-processes table and avoid zombies for the postponed jobs
 		## - it does not impact on the existence of zombie procs
@@ -2015,8 +2013,7 @@ class ExecPool(object):
 							kend -= 1  # One more job is added before i
 							k -= 1  # Note: k is incremented below
 				k += 1
-		if _DEBUG_TRACE >= 2:
-			print('  Nonstarted updated jobs: ', ', '.join(['{} ({})'.format(pjob.name, pjob.wkslim) for pjob in self._jobs]))
+		# print('>  Nonstarted updated jobs: ', ', '.join(['{} ({})'.format(pjob.name, pjob.wkslim) for pjob in self._jobs]))
 
 
 	def __start(self, job, concur=True):
@@ -2054,8 +2051,7 @@ class ExecPool(object):
 			jst = jst.task
 		job.tstart = time.perf_counter()
 		if job.onstart:
-			if _DEBUG_TRACE >= 2:
-				print('  Starting onstart() for job "{}"'.format(job.name), file=sys.stderr)
+			# print('>  Starting onstart() for job "{}"'.format(job.name), file=sys.stderr)
 			try:
 				job.onstart()
 			except Exception as err:  #pylint: disable=W0703
@@ -2105,9 +2101,8 @@ class ExecPool(object):
 					else:
 						raise ValueError('Invalid output stream buffer: ' + str(joutp))
 
-			if _DEBUG_TRACE >= 2 and (fstdout or fstderr):
-				print('"{}" output channels:\n\tstdout: {}\n\tstderr: {}'.format(job.name
-					, job.stdout, job.stderr))  # Note: write to log, not to the stderr
+			# print('> "{}" output channels:\n\tstdout: {}\n\tstderr: {}'.format(job.name
+			# 	, job.stdout, job.stderr))  # Note: write to log, not to the stderr
 			if job.args:
 				# Consider CPU affinity
 				# Note: the exception is raised by .index() if the _affinity table
@@ -2116,9 +2111,8 @@ class ExecPool(object):
 				iafn = -1 if not self._affinity or job._omitafn else self._affinity.index(None)  #pylint: disable=W0212
 				if iafn >= 0:
 					job.args = [_AFFINITYBIN, '-c', self._afnmask(iafn)] + list(job.args)
-				if _DEBUG_TRACE >= 2:
-					print('  Opening proc for "{}" with:\n\tjob.args: {},\n\tcwd: {}'.format(job.name
-						, ' '.join(job.args), job.workdir), file=sys.stderr)
+				# print('>  Opening proc for "{}" with:\n\tjob.args: {},\n\tcwd: {}'.format(job.name
+				# 	, ' '.join(job.args), job.workdir), file=sys.stderr)
 				acqlock = self.__termlock.acquire(False, 0.01)  # 10 ms
 				if not acqlock or not self.alive:
 					if acqlock:
@@ -2264,7 +2258,7 @@ class ExecPool(object):
 					if job.mem < self.memlimit:
 						memall += job.mem  # Consider mem consumption of past runs if any
 						#if _DEBUG_TRACE >= 3:
-						#	print('  "{}" consumes {:.4f} GB, memall: {:.4f} GB'.format(job.name, job.mem, memall), file=sys.stderr)
+						#	print('>  "{}" consumes {:.4f} GB, memall: {:.4f} GB'.format(job.name, job.mem, memall), file=sys.stderr)
 						continue
 					# The memory limits violating worker will be terminated
 				else:
@@ -2350,8 +2344,8 @@ class ExecPool(object):
 								memall -= job.mem  # Reduce total memory consumed by the active workers
 								break  # Switch to the following job
 			# Traverse over the non-started jobs with defined job category and size removing too heavy jobs
-			if _DEBUG_TRACE >= 2:
-				print('  Updating chained constraints in non-started jobs: ', ', '.join([job.name for job in self._jobs]))
+			# if _DEBUG_TRACE >= 2:
+			# 	print('>  Updating chained constraints in non-started jobs: ', ', '.join([job.name for job in self._jobs]))
 			jrot = 0  # Accumulated rotation
 			ij = 0  # Job index
 			while ij < len(self._jobs) - jrot:  # Note: len(jobs) catches external jobs termination / modification
@@ -2438,7 +2432,7 @@ class ExecPool(object):
 					job = hws.pop()
 					pjobs.add(job)
 					memov -= job.mem
-				if _DEBUG_TRACE >= 2:
+				if _DEBUG_TRACE:
 					print('  Group mem limit violation removing jobs: {}, remained: {} (from the end)'
 						.format(', '.join([j.name for j in pjobs]), ', '.join([j.name for j in hws])))
 			# Terminate and remove worker processes of the postponing jobs
@@ -2518,8 +2512,8 @@ class ExecPool(object):
 		#	active_children()
 
 		# Start subsequent job or postpone it further
-		if _DEBUG_TRACE >= 2:
-			print('  Nonstarted jobs: ', ', '.join(['{} ({})'.format(job.name, job.wkslim) for job in self._jobs]))
+		# if _DEBUG_TRACE >= 2:
+		# 	print('  Nonstarted jobs: ', ', '.join(['{} ({})'.format(job.name, job.wkslim) for job in self._jobs]))
 		if not terminating:  # Start only after the terminated jobs terminated and released the memory
 			while self._jobs and len(self._workers) < self._wkslim and self.alive:
 				#if _DEBUG_TRACE >= 3:
@@ -2591,8 +2585,8 @@ class ExecPool(object):
 			'  workers: {}, wkslim: {}, alive: {}'
 			.format(len(self._workers), self._wkslim, self.alive))
 
-		if _DEBUG_TRACE:
-			print('Scheduling the job "{}" with timeout {}'.format(job.name, job.timeout))
+		# if _DEBUG_TRACE >= 2:
+		# 	print('Scheduling the job "{}" with timeout {}'.format(job.name, job.timeout))
 		errcode = 0
 		# Start the execution timer
 		if self._tstart is None:
@@ -2615,12 +2609,12 @@ class ExecPool(object):
 			self.memlimit and ((memall and memall + jmemx >= self.memlimit
 			# Note: omit the low memory condition for a single worker, otherwise the pool can't be executed
 			) or (memfree - jmemx <= self._MEMLOW and self._workers))):
-				if _DEBUG_TRACE >= 2:
-					print('  Postponing "{}", {} jobs, {} workers, {} wkslim'
-						', group memlim violation: {}, lowmem: {}'.format(job.name, len(self._jobs)
-						, len(self._workers), self._wkslim, self.memlimit and (memall and memall + (job.mem if job.mem else
-						memall / (1 + len(self._workers))) * self._JMEMTRR >= self.memlimit)
-						, self.memlimit and (memfree - jmemx <= self._MEMLOW and self._workers)))
+				# if _DEBUG_TRACE >= 2:
+				# 	print('  Postponing "{}", {} jobs, {} workers, {} wkslim'
+				# 		', group memlim violation: {}, lowmem: {}'.format(job.name, len(self._jobs)
+				# 		, len(self._workers), self._wkslim, self.memlimit and (memall and memall + (job.mem if job.mem else
+				# 		memall / (1 + len(self._workers))) * self._JMEMTRR >= self.memlimit)
+				# 		, self.memlimit and (memfree - jmemx <= self._MEMLOW and self._workers)))
 				if not self.memlimit or not self._jobs or self._jobs[-1].wkslim >= job.wkslim:
 					self._jobs.append(job)
 				else:
