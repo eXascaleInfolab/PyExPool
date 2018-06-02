@@ -297,7 +297,7 @@ class UiCmd(object):
 
 		Args:
 			cid: UiCmdId  - Command identifier
-			data: dict  - request (parameters) to the ExecPool on it's call and
+			data: dict  - request (parameters) to the ExecPool on its call and
 				resulting (response) data (or empty dict) afterwards
 
 		Internal attributes:
@@ -393,7 +393,7 @@ class WebUiApp(threading.Thread):
 		self.daemon = daemon
 
 
-	# ATTENTION: a bottle decorator works only when it's the first decorator of the function
+	# ATTENTION: a bottle decorator works only when it is the first decorator of the function
 	@staticmethod
 	@bottle.get('/favicon.ico')
 	def favicon():
@@ -401,7 +401,7 @@ class WebUiApp(threading.Thread):
 		return bottle.static_file('favicon.ico', root='images')
 
 
-	# ATTENTION: a bottle decorator works only when it's the first decorator of the function
+	# ATTENTION: a bottle decorator works only when it is the first decorator of the function
 	@staticmethod
 	@bottle.error(404)
 	def error404(err, msg=''):

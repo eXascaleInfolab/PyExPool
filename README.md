@@ -204,7 +204,7 @@ Job(name, workdir=None, args=(), timeout=0, rsrtonto=False, task=None
 	tstart  - start time, filled automatically on the execution start (before onstart). Default: None
 	tstop  - termination / completion time after ondone
 		NOTE: onstart() and ondone() callbacks execution is included in the job execution time
-	proc  - process of the job, can be used in the ondone() to read it's PIPE
+	proc  - process of the job, can be used in the ondone() to read its PIPE
 	mem  - consuming memory (smooth max of average of VMS and RSS, not just the current value)
 		or the least expected value inherited from the jobs of the same category having non-smaller size;
 		requires _LIMIT_WORKERS_RAM
@@ -292,7 +292,7 @@ AffinityMask(afnstep, first=True, sequential=cpusequential())
 		Used to bind worker processes to the logical CPUs to have warm cache and,
 		optionally, maximize cache size per a worker process.
 		Groups of logical CPUs are selected in a way to maximize the cache locality:
-		the single physical CPU is used taking all it's hardware threads in each core
+		the single physical CPU is used taking all its hardware threads in each core
 		before allocating another core.
 
 		Typical Values:

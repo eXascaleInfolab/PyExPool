@@ -898,7 +898,7 @@ class Job(object):
 		tstart  - start time, filled automatically on the execution start (before onstart). Default: None
 		tstop  - termination / completion time after ondone
 			NOTE: onstart() and ondone() callbacks execution is included in the job execution time
-		proc  - process of the job, can be used in the ondone() to read it's PIPE
+		proc  - process of the job, can be used in the ondone() to read its PIPE
 		mem  - consuming memory (smooth max of average of VMS and RSS, not just the current value)
 			or the least expected value inherited from the jobs of the same category having non-smaller size;
 			requires _LIMIT_WORKERS_RAM
@@ -917,7 +917,7 @@ class Job(object):
 			', name: {}, timeout: {}, task type: {}, size: {}, slowdown: {}, memkind: {}'.format(
 			name, timeout, type(task).__name__, size, slowdown, memkind))
 		#if not args:
-		#	args = ("false")  # Create an empty process to schedule it's execution
+		#	args = ("false")  # Create an empty process to schedule its execution
 
 		# Properties specified by the input parameters -------------------------
 		self.name = name
@@ -939,7 +939,7 @@ class Job(object):
 		self.tstart = None  # start time is filled automatically on the execution start, before onstart. Default: None
 		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
 		# Internal attributes
-		self.proc = None  # Process of the job, can be used in the ondone() to read it's PIPE
+		self.proc = None  # Process of the job, can be used in the ondone() to read its PIPE
 		self.terminates = 0  # Accumulated number of the received termination requests caused by the constraints violation
 		# Process-related file descriptors to be closed
 		self._fstdout = None
@@ -948,7 +948,7 @@ class Job(object):
 		self._omitafn = omitafn
 		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
 			self.memkind = memkind
-			self.size = size  # Expected memory complexity of the job, typically it's size of the processing data
+			self.size = size  # Expected memory complexity of the job, typically its size of the processing data
 			# Consumed implementation-defined type of memory on execution in gigabytes or the least expected
 			# (inherited from the related jobs having the same category and non-smaller size)
 			self.mem = 0.
@@ -1271,7 +1271,7 @@ class AffinityMask(object):
 			Used to bind worker processes to the logical CPUs to have warm cache and,
 			optionally, maximize cache size per a worker process.
 			Groups of logical CPUs are selected in a way to maximize the cache locality:
-			the single physical CPU is used taking all it's hardware threads in each core
+			the single physical CPU is used taking all its hardware threads in each core
 			before allocating another core.
 
 			Typical Values:
@@ -1501,7 +1501,7 @@ class ExecPool(object):
 			#uiapp = WebUiApp(host='localhost', port=8080, name='MpepoolWebUI', daemon=True)
 			self._uicmd = webuiapp.cmd
 			if WebUiApp.RAM is None:
-				# Note: it's more reasonable to display the specified RAM limit than available memory
+				# Note: it is more reasonable to display the specified RAM limit than available memory
 				WebUiApp.RAM = _RAM_LIMIT  # _RAM_SIZE
 			if WebUiApp.LCPUS is None:
 				WebUiApp.LCPUS = AffinityMask.CPUS
@@ -1551,7 +1551,7 @@ class ExecPool(object):
 				propflt = data.get(UiResOpt.cols)  # Properties (colons header)
 				# Be sure that the job/task name column is always included
 				# Note: at least on Python2 if enum has 'name' member then
-				# it's .name attribute changes semantic => _name_ should be used
+				# its .name attribute changes semantic => _name_ should be used
 				# print('>>> name:', UiResCol.name._name_, file=sys.stderr)
 				if propflt and UiResCol.name._name_ not in propflt:  # Note: .name attribute of the name col
 					# Add name column as the first one
@@ -1647,7 +1647,7 @@ class ExecPool(object):
 								(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
 								, jobs=None if not jdata else [infoheader(JobInfo.iterprop(), propflt)]))  #pylint: disable=E1101
 						if jdata:
-							# tie.jobs might be None if the task created before any of it's DIRECT jobs failed
+							# tie.jobs might be None if the task created before any of its DIRECT jobs failed
 							if tie.jobs is None:
 								tie.jobs = [infoheader(JobInfo.iterprop(), propflt)]  #pylint: disable=E1101
 							tie.jobs.append(jdata)
@@ -1738,7 +1738,7 @@ class ExecPool(object):
 								(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
 								, jobs=None if not jdata else [infoheader(JobInfo.iterprop(), propflt)]))  #pylint: disable=E1101
 						if jdata:
-							# tie.jobs might be None if the task created before any of it's DIRECT jobs created
+							# tie.jobs might be None if the task created before any of its DIRECT jobs created
 							if tie.jobs is None:
 								tie.jobs = [infoheader(JobInfo.iterprop(), propflt)]  #pylint: disable=E1101
 							tie.jobs.append(jdata)
@@ -2048,7 +2048,7 @@ class ExecPool(object):
 		# Consider all supertasks
 		jst = job.task
 		# Note: `jst not in self.tasks` whould prevent super-tasks extension after the jobs started
-		# because a task starts when it's first job starts.
+		# because a task starts when its first job starts.
 		while jst is not None:
 			self.tasks.add(jst)
 			jst = jst.task
@@ -2145,7 +2145,7 @@ class ExecPool(object):
 					except IndexError as err:
 						# Note: BaseException is used to terminate whole execution pool
 						raise BaseException('Affinity table is inconsistent: {}'.format(err))
-				# Wait a little bit to start the process besides it's scheduling
+				# Wait a little bit to start the process besides its scheduling
 				if job.startdelay > 0:
 					time.sleep(job.startdelay)
 		except BaseException as err:  # Should not occur: subprocess.CalledProcessError
@@ -2537,7 +2537,7 @@ class ExecPool(object):
 				# Note: omit the low memory condition for a single worker, otherwise the pool can't be executed
 				) or (memfree - jmemx <= self._MEMLOW and self._workers)):
 					# Note: only restarted jobs have defined mem
-					# Postpone the job updating it's workers limit
+					# Postpone the job updating its workers limit
 					assert job.mem < self.memlimit, 'The workers exceeding memory constraints were already filtered out'
 					self.__postpone(job)
 					break
