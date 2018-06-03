@@ -1501,7 +1501,12 @@ class ExecPool(object):
 		self._uicmd = None
 		global _WEBUI  #pylint: disable=W0603
 		if _WEBUI and webuiapp is not None:
-			assert isinstance(webuiapp, WebUiApp), 'Unexpected type of webuiapp: ' + type(webuiapp).__name__
+			# ATTENTION: Python3 includes the path to the instance type check, which
+			# affects the relative imports (importing mpepool as a subpackage):
+			# <class 'utils.mpewui.WebUiApp'> != <class 'mpewui.WebUiApp'>...
+			if _DEBUG_TRACE:
+				assert isinstance(webuiapp, WebUiApp) or type(webuiapp).__name__ == WebUiApp.__name__, (
+					'Unexpected type of webuiapp: ' + type(webuiapp).__name__)
 			#uiapp = WebUiApp(host='localhost', port=8080, name='MpepoolWebUI', daemon=True)
 			self._uicmd = webuiapp.cmd
 			if WebUiApp.RAM is None:
