@@ -105,10 +105,14 @@ _WEBUI = True
 __imperr = None  # Import error
 if _WEBUI:
 	try:
+		# Note: Python3 in some cases might cause import error here unlike Python2
 		from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResCol, SummaryBrief
 	except ImportError as wuerr:
-		__imperr = wuerr  # Note: exceptions are local in Python 3
-		_WEBUI = False
+		try:
+			from .mpewui import WebUiApp, UiCmdId, UiResOpt, UiResCol, SummaryBrief
+		except ImportError as wuerr:
+			__imperr = wuerr  # Note: exceptions are local in Python 3
+			_WEBUI = False
 
 # Limit the amount of memory consumption by worker processes.
 # NOTE:
