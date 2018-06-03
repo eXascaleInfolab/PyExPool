@@ -105,10 +105,12 @@ _WEBUI = True
 __imperr = None  # Import error
 if _WEBUI:
 	try:
-		# Note: Python3 in some cases might cause import error here unlike Python2
+		# ATTENTION: Python3 newer treats imports as realtive and results in error here if mpewui is a local module
 		from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResCol, SummaryBrief
 	except ImportError as wuerr:
 		try:
+			# Note: this case should be the second because explicit relative imports cause various errors
+			# under Python2 and Python3, which complicates thier handling
 			from .mpewui import WebUiApp, UiCmdId, UiResOpt, UiResCol, SummaryBrief
 		except ImportError as wuerr:
 			__imperr = wuerr  # Note: exceptions are local in Python 3
