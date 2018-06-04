@@ -1054,12 +1054,18 @@ class Job(object):
 		self._fstdout = None
 		self._fstderr = None
 
-		#if self.proc is not None:
-		#	if self.proc.poll() is None:  # poll() None means the process has not been terminated / completed
-		#		self.proc.kill()
-		#		self.proc.wait()  # Join the completed process to remove the entry from the children table and avoid zombie
-		#		print('WARNING, completion of the non-finished process is called for "{}", killed'
-		#			.format(self.name), file=sys.stderr)
+		if self.proc is not None:
+			ecode = self.proc.poll()
+			# if ecode is None:
+			# 	self.proc.kill()
+			#	print('WARNING, completion of the non-finished process is called for "{}", killed'
+			#		.format(self.name), file=sys.stderr)
+			# Note: ecode < 0 typically means forced termination by the signal
+			if ecode is not None and ecode < 0:  # poll() None means the process has not been terminated / completed
+				# Explicitly join the completed process to remove the entry from the children table and avoid zombie
+				# in case signal.signal(signal.SIGCHLD, signal.SIG_DFL) has not been set.
+				# Note that SIG_IGN unlike SIG_DFL affects the return code of the former zombies, resetting it to 0
+				self.proc.wait()
 
 		# Note: files should be closed before any assertions or exceptions
 		assert self.tstop is None and self.tstart is not None, (  # and self.proc.poll() is not None
@@ -1551,7 +1557,7 @@ class ExecPool(object):
 		# Process on the next iteration if the client request is not ready
 		if self._uicmd.id is None or not self._uicmd.cond.acquire(blocking=False):
 			return
-		JOBS_LIMIT = 100  # Default max number of jobs (including task members) to be listed
+		WUIJOBS_LIMIT = 50  # Default max number of jobs (including task members) to be listed in the WebUI
 		try:
 			# self.summary()  # TODO: implement each command in the dedicated function
 			# Read command parameters from the .data
@@ -1572,11 +1578,11 @@ class ExecPool(object):
 							' filter values (not a list): ' + type(propflt).__name__)
 						raise
 				objflt = data.get(UiResOpt.flt)
-				jlim = data.get(UiResOpt.jlim, JOBS_LIMIT)
+				jlim = data.get(UiResOpt.jlim, WUIJOBS_LIMIT)
 			else:
 				propflt = None
 				objflt = None
-				jlim = JOBS_LIMIT
+				jlim = WUIJOBS_LIMIT
 			print("> uicmd.id: {}, propflt: {}, objflt: {}".format(
 				self._uicmd.id, propflt, objflt), file=sys.stderr)
 			# Prepare .data for the response results
@@ -1862,6 +1868,7 @@ class ExecPool(object):
 					job.terminates += 1
 					job.proc.terminate()
 					active = True
+
 		# Kill non-terminated processes
 		if active:
 			for job in self._workers:

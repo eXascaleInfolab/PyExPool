@@ -616,6 +616,11 @@ signal.signal(signal.SIGINT, terminationHandler)
 signal.signal(signal.SIGQUIT, terminationHandler)
 signal.signal(signal.SIGABRT, terminationHandler)
 
+# Ignore terminated children procs to avoid zombies
+# ATTENTION: signal.SIG_IGN affects the return code of the former zombie resetting it to 0,
+# where signal.SIG_DFL works fine and without any the side effects.
+signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+
 # Define execpool to schedule some jobs
 execpool = ExecPool(max(cpu_count() - 1, 1))
 

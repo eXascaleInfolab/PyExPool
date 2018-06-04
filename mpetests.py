@@ -14,7 +14,7 @@ from __future__ import print_function, division  # Required for stderr output, m
 import time, subprocess, unittest
 import sys
 from sys import executable as PYEXEC  # Full path to the current Python interpreter
-# import signal  # Intercept kill signals
+import signal  # Intercept kill signals
 # import atexit  # At exit termination handling
 # from functools import partial  # Partially predefined functions (callbacks)
 try:
@@ -115,6 +115,11 @@ class TestExecPool(unittest.TestCase):
 		# signal.signal(signal.SIGINT, termHandler)
 		# signal.signal(signal.SIGQUIT, termHandler)
 		# signal.signal(signal.SIGABRT, termHandler)
+
+		# Ignore terminated children procs to avoid zombies
+		# ATTENTION: signal.SIG_IGN affects the return code of the former zombie resetting it to 0,
+		# where signal.SIG_DFL works fine and without any the side effects.
+		signal.signal(signal.SIGCHLD, signal.SIG_DFL)
 
 		# # Set termination handler for the internal termination
 		# atexit.register(termHandler, terminate=False)
