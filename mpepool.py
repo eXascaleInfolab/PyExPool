@@ -665,12 +665,15 @@ class Task(object):
 		self.task = task
 		self.stdout = stdout
 		self.stderr = stderr
-
+		# Automatically initialized attributes
 		self.tstart = None
 		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
 		self.numadded = 0  # The number of added direct subtasks, the same subtask/job can be re-added several times
 		self.numdone = 0  # The number of completed direct subtasks
 		self.numterm = 0  # Total number of terminated direct subtasks
+		# Update the task if any with this subtask
+		if self.task:
+			self.task.add(self)
 		# Consider subtasks termination by timeout
 		# if self.timeout:
 		# 	if not _tasks:
