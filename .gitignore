@@ -62,6 +62,7 @@ target/
 
 # Custom Files
 *.old
+*-old.png
 *.bck
 *.tmp
 design/*.pdf

@@ -1586,8 +1586,9 @@ class ExecPool(object):
 				propflt = None
 				objflt = None
 				jlim = WUIJOBS_LIMIT
-			print("> uicmd.id: {}, propflt: {}, objflt: {}".format(
-				self._uicmd.id, propflt, objflt), file=sys.stderr)
+			if _DEBUG_TRACE:
+				print("> uicmd.id: {}, propflt: {}, objflt: {}".format(
+					self._uicmd.id, propflt, objflt), file=sys.stderr)
 			# Prepare .data for the response results
 			data.clear()
 			# Set CPU and RAM consuption statistics
@@ -1682,7 +1683,10 @@ class ExecPool(object):
 				if ties:
 					tasksInfo = []
 					tixwide = 0  # tasksInfo max wide
-					for tie in viewvalues(ties):
+					for task, tie in viewitems(ties):
+						# Omit repetative listing of subhierarchies (they are listed from the root task)
+						if task.task is not None:
+							continue
 						tls, twide = unfoldDepthFirst(tie, indent=0)
 						tasksInfo.extend(tls)
 						if twide > tixwide:
@@ -1770,7 +1774,10 @@ class ExecPool(object):
 					# print('>>> ties size: {}'.format(len(ties)))
 					tasksInfo = []
 					tixwide = 0  # tasksInfo max wide
-					for tie in viewvalues(ties):
+					for task, tie in viewitems(ties):
+						# Omit repetative listing of subhierarchies (they are listed from the root task)
+						if task.task is not None:
+							continue
 						tls, twide = unfoldDepthFirst(tie, indent=0)
 						tasksInfo.extend(tls)
 						if twide > tixwide:
@@ -1937,8 +1944,10 @@ class ExecPool(object):
 		print(' '.join([tk.name for tk in ties]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		# Print hierarchy of the failed tasks from the root (top) level
 		print('\nFAILED tasks with their jobs:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
-		for tie in viewvalues(ties):
-			printDepthFirst(tie, cindent='', indstep=indent, colsep=colsep)
+		for task, tie in viewitems(ties):
+			# Omit repetative listing of subhierarchies (they are listed from the root task)
+			if task.task is None:
+				printDepthFirst(tie, cindent='', indstep=indent, colsep=colsep)
 
 
 	def __postpone(self, job, priority=False):
