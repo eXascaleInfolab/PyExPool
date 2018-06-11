@@ -59,7 +59,7 @@ import subprocess
 import errno
 # # Async Tasks management
 # import threading  # Used only for the concurrent Tasks termination by timeout
-# import signal  # Required for the correct handling of KeyboardInterrupt: https://docs.python.org/2/library/thread.html
+import signal  # Required for the correct handling of KeyboardInterrupt: https://docs.python.org/2/library/thread.html
 import itertools  # chain
 
 from multiprocessing import cpu_count, Lock  #, Queue  #, active_children, Value, Process
@@ -2243,11 +2243,13 @@ class ExecPool(object):
 		if graceful is None:
 			graceful = not job.terminates and job.proc is not None and not job.proc.returncode
 		job.complete(graceful)
-		# Update failures list skipping the tasks restarting on timeout
+		# Update failures list skipping automatically tasks restarting on timeout
+		# or because of the GROUP memory limit violation (where the job itself does not violate any constraints)
 		if graceful:
 			self.jobsdone += 1
-		elif (not job.rsrtonto or job.tstart is None or job.tstop is None
-		or job.tstop - job.tstart < job.timeout):
+		elif not (job.proc.returncode == -signal.SIGTERM and ((self.memlimit and job.mem >= self.memlimit)
+		or (not job.rsrtonto and job.timeout and job.tstart is not None or job.tstop is not None
+		and job.tstop - job.tstart >= job.timeout))):
 			self.failures.append(JobInfo(job))  # Note: job.tstop should be defined here
 
 
