@@ -75,21 +75,21 @@ class TestExecPool(unittest.TestCase):
 	#_DEBUG_TRACE = True
 
 	@classmethod
-	def terminationHandler(cls, signal=None, frame=None, terminate=True):  #pylint: disable=W0613
+	def terminationHandler(cls, sig=None, frame=None, terminate=True):  #pylint: disable=W0613
 		"""Signal termination handler
 
-		signal  - raised signal
+		sig  - raised signal
 		frame  - origin stack frame
 		terminate  - whether to terminate the application
 		"""
-		#if signal == signal.SIGABRT:
-		#	os.killpg(os.getpgrp(), signal)
-		#	os.kill(os.getpid(), signal)
+		#if sig == signal.SIGABRT:
+		#	os.killpg(os.getpgrp(), sig)
+		#	os.kill(os.getpid(), sig)
 
 		if cls._execpool:
 			# print('WARNING{}, execpool is terminating by the signal {} ({})'
-			# 	.format('' if not cls._execpool.name else ' ' + cls._execpool.name, signal
-			# 	, cls._signals.get(signal, '-')))  # Note: this is a trace log record
+			# 	.format('' if not cls._execpool.name else ' ' + cls._execpool.name, sig
+			# 	, cls._signals.get(sig, '-')))  # Note: this is a trace log record
 			del cls._execpool  # Destructors are called later
 			# Define _execpool to avoid unnecessary trash in the error log, which might
 			# be caused by the attempt of subsequent deletion on destruction

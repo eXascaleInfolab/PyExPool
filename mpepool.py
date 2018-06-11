@@ -2444,13 +2444,15 @@ class ExecPool(object):
 				# Reinitialize the heaviest remained jobs and continue
 				for job in self._workers:
 					if not self.alive or (not job.terminates and job not in pjobs):
-						hws.append(job)
+						hws.append(job)  # Take the first appropriate executing job as a heavy one
 						break
-				assert self._workers and hws, 'Non-terminated worker processes must exist here'
+				assert hws, 'Non-terminated heavy worker processes must exist here: {} / {}'.format(
+					len(hws), len(self._workers))
 				for job in self._workers:
 					# Note: check for the termination in all cycles
 					if not self.alive:
 						return
+					# Extend the heavy jobs list with more heavy items than the already present there
 					# Note: use some threshold for mem evaluation and consider starting time on scheduling
 					# to terminate first the least worked processes (for approximately the same memory consumption)
 					dr = 0.1  # Threshold parameter ratio, recommended value: 0.05 - 0.15; 0.1 means delta of 10%
