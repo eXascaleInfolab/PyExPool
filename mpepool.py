@@ -1581,7 +1581,7 @@ class ExecPool(object):
 							' filter values (not a list): ' + type(propflt).__name__)
 						raise
 				objflt = data.get(UiResOpt.flt)
-				jlim = data.get(UiResOpt.jlim, WUIJOBS_LIMIT)
+				jlim = int(data.get(UiResOpt.jlim, WUIJOBS_LIMIT))
 			else:
 				propflt = None
 				objflt = None
@@ -1639,6 +1639,8 @@ class ExecPool(object):
 			data['summary'] = smr
 
 			# Form command-specific data
+			jnum = 0  # The number of showing jobs without the tasks, to be <= jlim
+			tjnum = 0  # The number of showing jobs having tasks and showing tasks, to be <= jlim
 			if self._uicmd.id == UiCmdId.FAILURES:
 				# Fetch info about the failed jobs considering the filtering
 				jobsInfo = None  # Information about the failed jobs not assigned to any tasks
@@ -1650,13 +1652,14 @@ class ExecPool(object):
 						return
 					jdata = infodata(fji, propflt, objflt)
 					if fji.task is None:
-						if not jdata:
+						if not jdata or (jlim and jnum >= jlim):
 							continue
 						if header:
 							jobsInfo = [infoheader(JobInfo.iterprop(), propflt)]  #pylint: disable=E1101
 							header = False
 						jobsInfo.append(jdata)
-					else:
+						jnum += 1
+					elif not jlim or tjnum < jlim:
 						tie = tinfe0.get(fji.task)
 						if tie is None:
 							tdata = infodata(TaskInfo(fji.task), propflt, objflt)
@@ -1665,11 +1668,15 @@ class ExecPool(object):
 							tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=None if not tdata else
 								(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
 								, jobs=None if not jdata else [infoheader(JobInfo.iterprop(), propflt)]))  #pylint: disable=E1101
+							tjnum += 1
 						if jdata:
 							# tie.jobs might be None if the task created before any of its DIRECT jobs failed
 							if tie.jobs is None:
 								tie.jobs = [infoheader(JobInfo.iterprop(), propflt)]  #pylint: disable=E1101
 							tie.jobs.append(jdata)
+							tjnum += 1
+					if jlim and jnum >= jlim and tjnum >= jlim:
+						break
 				# List jobs only if any payload exists besides the header
 				if jobsInfo:
 					# Note: jobsInfo should include at least a header and one job if not empty
@@ -1740,8 +1747,8 @@ class ExecPool(object):
 				if (not self._workers and not self._jobs) or not self.alive:
 					return
 				# List the tasks with their jobs up to the specified limit of covered jobs
-				jnum = 0  # Counter of the showing jobs
 				tinfe0 = dict()  # dict(Task, TaskInfoExt)  - Task information extended, bottom level of the hierarchy
+				tjnum = 0  # The number of showing jobs having tasks and showing tasks, to be <= jlim
 				for jobs in (self._workers, self._jobs):
 					for job in jobs:
 						# Note: check for the termination in all cycles
@@ -1759,11 +1766,15 @@ class ExecPool(object):
 							tie = tinfe0.setdefault(job.task, TaskInfoExt(props=None if not tdata else
 								(infoheader(TaskInfo.iterprop(), propflt), tdata)  #pylint: disable=E1101
 								, jobs=None if not jdata else [infoheader(JobInfo.iterprop(), propflt)]))  #pylint: disable=E1101
+							tjnum += 1
 						if jdata:
 							# tie.jobs might be None if the task created before any of its DIRECT jobs created
 							if tie.jobs is None:
 								tie.jobs = [infoheader(JobInfo.iterprop(), propflt)]  #pylint: disable=E1101
 							tie.jobs.append(jdata)
+							tjnum += 1
+						if jlim and tjnum >= jlim:
+							break
 				if not tinfe0:
 					return
 				# Iteratively form the hierarchy of tasks from the bottom level
