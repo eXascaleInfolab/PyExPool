@@ -59,7 +59,7 @@ import subprocess
 import errno
 # # Async Tasks management
 # import threading  # Used only for the concurrent Tasks termination by timeout
-import signal  # Required for the correct handling of KeyboardInterrupt: https://docs.python.org/2/library/thread.html
+# import signal  # Required for the correct handling of KeyboardInterrupt: https://docs.python.org/2/library/thread.html
 import itertools  # chain
 
 from multiprocessing import cpu_count, Lock  #, Queue  #, active_children, Value, Process
@@ -213,7 +213,7 @@ def applyCallback(callback, owner):
 
 	Args:
 		callback: function  - callback (self.onXXX)
-		owner: str  -owner name of the callback (self.name), required only for tracing
+		owner: str  - owner name of the callback (self.name), required only for tracing
 	"""
 	#assert callable(callback) and isinstance(owner, str), 'A valid callback and owner name are expected'
 	try:
@@ -644,7 +644,8 @@ class Task(object):
 		numadded: uint  - the number of direct added subtasks
 		numdone: uint  - the number of completed DIRECT subtasks
 			(each subtask may contain multiple jobs or sub-sub-tasks)
-		numterm: uint  - the number of terminated direct subtasks (i.e. jobs)
+		numterm: uint  - the number of terminated direct subtasks (including jobs) that are not restarting
+			numdone + numterm <= numadded
 		"""
 		assert isinstance(name, str) and (latency is None or latency >= 0) and (
 			task is None or (isinstance(task, Task) and task != self)), (
@@ -652,7 +653,10 @@ class Task(object):
 			.format(name, latency, type(task).__name__, task != self))
 		self._lock = Lock()  # Lock for the included jobs
 		# dict(subtask: Task | Job, accterms: uint)
-		self._items = dict()  # Dictionary of non-finished subtasks with the direct termination counter
+		# # Dictionary of non-completed (but can be terminated) subtasks with the direct termination counter
+		# self._items = dict()
+		# Set of non-finished (and possibly restarting) subtasks
+		self._items = set()
 		self.name = name
 		# Add member handlers if required
 		# types.MethodType binds the callback to the object
@@ -670,7 +674,7 @@ class Task(object):
 		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
 		self.numadded = 0  # The number of added direct subtasks, the same subtask/job can be re-added several times
 		self.numdone = 0  # The number of completed direct subtasks
-		self.numterm = 0  # Total number of terminated direct subtasks
+		self.numterm = 0  # Total number of terminated direct subtasks that are not restarting
 		# Update the task if any with this subtask
 		if self.task:
 			self.task.add(self)
@@ -705,12 +709,12 @@ class Task(object):
 			# Consider super-task
 			if self.task:
 				self.task.add(self)
-		elif subtask in self._items:
+		elif subtask in self._items:  # Omit calls from the non-first subsubtask of the subtask
 			return
 		if self._lock.acquire(timeout=self._latency):
-			self._items.setdefault(subtask, 0)
-			self._lock.release()
+			self._items.add(subtask)
 			self.numadded += 1
+			self._lock.release()
 		else:
 			raise RuntimeError('Lock acquisition failed on add() in "{}"'.format(self.name))
 
@@ -726,35 +730,30 @@ class Task(object):
 			RuntimeError  - lock acquisition failed
 		"""
 		if not self._lock.acquire(timeout=self._latency):
-			raise RuntimeError('Lock acquisition failed on task finished() in "{}"'.format(self.name))
+			raise RuntimeError('Lock acquisition failed in the task "{}" finished'.format(self.name))
 		try:
+			self._items.remove(subtask)
 			if succeed:
-				del self._items[subtask]
 				self.numdone += 1
 			else:
-				self._items[subtask] += 1
 				self.numterm += 1
 		except KeyError as err:
-			print('ERROR in "{}" succeed: {}, the finishing subtask "{}" should be among the active subtasks: {}. {}'
+			print('ERROR in "{}" succeed: {}, the finishing "{}" should be among the active subtasks: {}. {}'
 				.format(self.name, succeed, subtask, err, traceback.format_exc(5), file=sys.stderr))
 		finally:
 			self._lock.release()
 		# Consider onfinish callback
-		if self.numterm + self.numdone == self.numadded:
-			if succeed and self.ondone and not self._items:
-				#assert not self._items, 'All subtasks should be already finished;  remained {} items: {}'.format(
-				#	len(self._items), ', '.join([st.name for st in self._items]))
-				applyCallback(self.ondone, self.name)
+		if self.numdone + self.numterm == self.numadded:
+			assert not self._items, 'All subtasks should be already finished;  remained {} items: {}'.format(
+				len(self._items), ', '.join([st.name for st in self._items]))
 			self.tstop = time.perf_counter()
+			if self.numdone == self.numadded and self.ondone:
+				applyCallback(self.ondone, self.name)
 			if self.onfinish:
 				applyCallback(self.onfinish, self.name)
 			# Consider super-task
 			if self.task:
-				self.task.finished(self, not self._items)
-		else:
-			assert self.numterm + self.numdone < self.numadded and self._items, (
-				'Uncompleted subtasks should be remained; numterm: {}, numdone: {}, numadded: {}'
-				.format(self.numterm, self.numdone, self.numadded))
+				self.task.finished(self, self.numdone == self.numadded)
 
 
 	def uncompleted(self, recursive=False, header=False, pid=False, tstart=False
@@ -955,6 +954,10 @@ class Job(object):
 		self._fstderr = None
 		# Omit scheduler affinity policy (actual when some process is computed on all treads, etc.)
 		self._omitafn = omitafn
+		# Whether the job is restarting (in process) on timeout or because of the
+		# GROUP memory limit violation (where the job itself does not violate any constraints);
+		# required to be aware whether to complete the ower task
+		self._restarting = False
 		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
 			self.memkind = memkind
 			self.size = size  # Expected memory complexity of the job, typically its size of the processing data
@@ -1107,8 +1110,8 @@ class Job(object):
 					pass  # The dir is not empty, just skip it
 		# Updated execution status
 		self.tstop = time.perf_counter()
-		# Check whether the job is associated with any task
-		if self.task:
+		# Call owner task finalization for the non-restarting jobs
+		if (graceful or not self._restarting) and self.task:
 			self.task.finished(self, graceful)
 		#if _DEBUG_TRACE:  # Note: terminated jobs are traced in __reviseWorkers()
 		print('Completed {} "{}" #{} with errcode {}, executed {} h {} m {:.4f} s'
@@ -1864,6 +1867,8 @@ class ExecPool(object):
 
 		# Shut down all [non-started] jobs
 		for job in self._jobs:
+			# Note: the restarting jobs are also terminated here without the owner task notification
+			# since there is no time to execute the task handlers
 			# Add terminating deferred job to the list of failures
 			self.failures.append(JobInfo(job, tstop=tcur))
 			# Note: only executing jobs, i.e. workers might have activated affinity
@@ -2080,6 +2085,7 @@ class ExecPool(object):
 			job.terminates = 0  # Reset termination requests counter
 			job.proc = None  # Reset old job process if any
 			job.tstop = None  # Reset the completion / termination time
+			job._restarting = False
 			# Note: retain previous value of mem for better scheduling, it is the valid value for the same job
 		# Update execution pool tasks, should be done before the job.onstart()
 		# Note: the lock is not required here because tasks are also created in the main thread
@@ -2253,14 +2259,11 @@ class ExecPool(object):
 				# Do nothing if the affinity is not set for this process
 		if graceful is None:
 			graceful = not job.terminates and job.proc is not None and not job.proc.returncode
-		job.complete(graceful)
-		# Update failures list skipping automatically tasks restarting on timeout
-		# or because of the GROUP memory limit violation (where the job itself does not violate any constraints)
+		job.complete(graceful)  # Note: it also calls finalization of the owner task
+		# Update failures list skipping automatically restarting tasks
 		if graceful:
 			self.jobsdone += 1
-		elif not (job.proc.returncode == -signal.SIGTERM and ((self.memlimit and job.mem >= self.memlimit)
-		or (not job.rsrtonto and job.timeout and job.tstart is not None or job.tstop is not None
-		and job.tstop - job.tstart >= job.timeout))):
+		elif not job._restarting:
 			self.failures.append(JobInfo(job))  # Note: job.tstop should be defined here
 
 
@@ -2391,6 +2394,7 @@ class ExecPool(object):
 			# 	print('>  Updating chained constraints in non-started jobs: ', ', '.join([job.name for job in self._jobs]))
 			jrot = 0  # Accumulated rotation
 			ij = 0  # Job index
+			ijf = len(self.failures)
 			while ij < len(self._jobs) - jrot:  # Note: len(jobs) catches external jobs termination / modification
 				job = self._jobs[ij]
 				if job.category is not None and job.size:
@@ -2402,7 +2406,11 @@ class ExecPool(object):
 							# Remove the item adding it to the list of failed jobs
 							self._jobs.rotate(-ij)
 							jrot += ij
-							self.failures.append(JobInfo(self._jobs.popleft(), tcur))  # == job
+							# Notify owner task of the failed restarting jobs
+							jrm = self._jobs.popleft()
+							if jrm._restarting and jrm.task:
+								jrm.task.finished(self, False)
+							self.failures.append(JobInfo(jrm, tcur))
 							ij = -1  # Later +1 is added, so the index will be 0
 							print('WARNING, non-started "{}" with weight {} is canceled by timeout chain from "{}" with weight {}'.format(
 								job.name, job.size * job.slowdown, jorg.name, jorg.size * jorg.slowdown), file=sys.stderr)
@@ -2415,7 +2423,11 @@ class ExecPool(object):
 								# Remove the item adding it to the list of failed jobs
 								self._jobs.rotate(-ij)
 								jrot += ij
-								self.failures.append(JobInfo(self._jobs.popleft(), tcur))  # == job
+								# Notify owner task of the failed restarting jobs
+								jrm = self._jobs.popleft()
+								if jrm._restarting and jrm.task:
+									jrm.task.finished(self, False)
+								self.failures.append(JobInfo(jrm, tcur))
 								ij = -1  # Later +1 is added, so the index will be 0
 								print('WARNING, non-started "{}" with size {} is canceled by memory limit chain from "{}" with size {}'
 									' and mem {:.4f}'.format(job.name, job.size, jorg.name, jorg.size, jorg.mem), file=sys.stderr)
@@ -2488,8 +2500,9 @@ class ExecPool(object):
 				terminating = True
 				while pjobs:
 					job = pjobs.pop()
-					# Terminate the worker
+					# Terminate the worker (postponing the job on the next iteration)
 					job.terminates += 1
+					job._restarting = True
 					# Schedule the worker completion (including removal from the workers) to the next revise
 					job.proc.terminate()
 					# Update wkslim

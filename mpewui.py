@@ -21,12 +21,11 @@ from collections import namedtuple  # UiResFilterVal
 # Internal format serialization to JSON/HTM/TXT
 import re
 import json
-try:
-	from html import escape
-except ImportError:
-	from cgi import escape  # Consider both both Python2/3
+# try:
+# 	from html import escape
+# except ImportError:
+# 	from cgi import escape  # Consider both both Python2/3
 import bottle  # Web service
-# from bottle import run as websrvrun
 
 # Constants Definitions
 try:
@@ -122,7 +121,7 @@ jlim: uint  - limit of the listed number of the active jobs / tasks having this 
 	NOTE: jlim omission results in the ExecPool default value for the jlim, failures are always fully shown.
 refresh: uint  - page refresh time, seconds >= 2
 """
-# TODO:
+# TODO features:
 # - add inverse notation the the item filter: ! - invert condition
 # - add human-readable Duration type with inferType support: NdNhNmF, where N: uint, F: ufloat, for example:
 # 	duration:5m1.15..2d3h

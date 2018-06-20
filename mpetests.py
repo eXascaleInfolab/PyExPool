@@ -781,15 +781,15 @@ class TestTasks(unittest.TestCase):
 # WebUI related tests
 # import threading  # To request URL in parallel with execpool joining
 import os
-from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResFmt  #pylint: disable=C0413;  UiResCol
-try:
-	# from urllib.parse import urlparse, urlencode
-	from urllib.request import urlopen #, Request
-	from urllib.error import HTTPError
-except ImportError:
-	# from urlparse import urlparse
-	# from urllib import urlencode
-	from urllib2 import urlopen, HTTPError  # , Request
+from mpewui import WebUiApp  #, UiCmdId, UiResOpt, UiResFmt  #pylint: disable=C0413;  UiResCol
+# try:
+# 	# from urllib.parse import urlparse, urlencode
+# 	from urllib.request import urlopen #, Request
+# 	from urllib.error import HTTPError
+# except ImportError:
+# 	# from urlparse import urlparse
+# 	# from urllib import urlencode
+# 	from urllib2 import urlopen, HTTPError  # , Request
 
 _webuiapp = None  # Global WebUI application
 
