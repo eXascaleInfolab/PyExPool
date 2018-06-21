@@ -74,7 +74,7 @@ To explore the WebUI demo execute the following testcase
 ```sh
 $ MANUAL=1 python -m unittest mpetests.TestWebUI.test_failures
 ```
-and open http://localhost:8080 in the browser.
+and open http://localhost:8081 (or :8080) in the browser.
 
 ## Installation
 

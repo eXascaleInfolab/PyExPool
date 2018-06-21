@@ -346,9 +346,15 @@ class SummaryBrief(object):
 		self.tasksRoot = tasksRoot
 		self.tasksRootFailed = tasksRootFailed
 
+
 	# @property
 	# def __dict__(self):
 	# 	return dict({p: self.__getattribute__(p) for p in self.__slots__})
+
+
+	def json(self):
+		"""Serialize self to the JSON representation"""
+		return {p: self.__getattribute__(p) for p in self.__slots__}
 
 
 class WebUiApp(threading.Thread):
@@ -510,8 +516,7 @@ class WebUiApp(threading.Thread):
 
 			# Expected format of data is a table: header, rows
 			if resopts.fmt == UiResFmt.json:
-				# TODO: implements JSON serializer
-				return json.dumps(cmd.data)
+				return json.dumps(cmd.data, default=lambda obj: obj.json())
 			elif resopts.fmt == UiResFmt.txt:
 				# 501  - Not Implemented
 				bottle.response.status = 501
@@ -582,8 +587,7 @@ class WebUiApp(threading.Thread):
 				return cmderr
 
 			if resopts.fmt == UiResFmt.json:
-				# TOFIX: implements JSON serializer
-				return json.dumps(cmd.data)
+				return json.dumps(cmd.data, default=lambda obj: obj.json())
 			elif resopts.fmt == UiResFmt.txt:
 				# 501  - Not Implemented
 				bottle.response.status = 501
@@ -647,8 +651,7 @@ class WebUiApp(threading.Thread):
 				return cmderr
 
 			if resopts.fmt == UiResFmt.json:
-				# TOFIX: implements JSON serializer
-				return json.dumps(cmd.data)
+				return json.dumps(cmd.data, default=lambda obj: obj.json())
 			elif resopts.fmt == UiResFmt.txt:
 				# 501  - Not Implemented
 				bottle.response.status = 501

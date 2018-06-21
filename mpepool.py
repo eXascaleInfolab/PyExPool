@@ -296,6 +296,7 @@ def propslist(cls):
 	- _props: set  - all public attributes of the class
 		and all __slots__ members even if the latter are underscored
 	- `in` operator support added to test membership in the _props
+	- json  - dict representation for the JSON serialization
 	- iterprop() method to iterate over the properties present in _props starting
 		from __slots__ in the order of declaration and then over the computed properties
 		in the alphabetical order
@@ -304,6 +305,12 @@ def propslist(cls):
 		"""Whether the specified property is present"""
 		assert len(self._props) >= 2, 'At least 2 properties are expected'
 		return self._props.endswith(' ' + prop) or self._props.find(prop + ' ') != -1  #pylint: disable=W0212
+
+
+	def json(self):
+		"""Serialize self to the JSON representation"""
+		return {p: self.__getattribute__(p) if p != 'task' else self.__getattribute__(p).name for p in self.iterprop()}
+
 
 	def iterprop(cls):
 		"""Properties generator/iterator"""
@@ -327,6 +334,7 @@ def propslist(cls):
 	# ATTENTION: the methods are bound automatically to self (but not to the cls in Python2)
 	# since they are defined before the class is created.
 	cls.__contains__ = contains
+	cls.json = json
 	cls.iterprop = types.MethodType(iterprop, cls)  # Note: required only in Python2 for the static methods
 	return cls
 
@@ -551,6 +559,11 @@ class TaskInfoPrefmt(object):
 		self.compound = compound
 		self.ident = ident
 		self.data = data
+
+
+	def json(self):
+		"""Serialize self to the JSON representation"""
+		return {p: self.__getattribute__(p) for p in self.__slots__}
 
 
 def unfoldDepthFirst(tinfext, indent=0):
