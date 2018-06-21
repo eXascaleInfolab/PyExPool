@@ -2394,7 +2394,6 @@ class ExecPool(object):
 			# 	print('>  Updating chained constraints in non-started jobs: ', ', '.join([job.name for job in self._jobs]))
 			jrot = 0  # Accumulated rotation
 			ij = 0  # Job index
-			ijf = len(self.failures)
 			while ij < len(self._jobs) - jrot:  # Note: len(jobs) catches external jobs termination / modification
 				job = self._jobs[ij]
 				if job.category is not None and job.size:

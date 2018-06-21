@@ -25,7 +25,12 @@ import json
 # 	from html import escape
 # except ImportError:
 # 	from cgi import escape  # Consider both both Python2/3
+import sys
 import bottle  # Web service
+
+# Add default views for pyexpool if installed from the pip
+# Note: files in the current folder and in the './views' have priority
+bottle.TEMPLATE_PATH.append('/'.join((sys.prefix, 'share', 'pyexpool', 'views')))
 
 # Constants Definitions
 try:
@@ -685,7 +690,6 @@ class WebUiApp(threading.Thread):
 if __name__ == '__main__':
 	# Doc tests execution
 	import doctest
-	import sys
 	#doctest.testmod()  # Detailed tests output
 	flags = doctest.REPORT_NDIFF | doctest.REPORT_ONLY_FIRST_FAILURE | doctest.IGNORE_EXCEPTION_DETAIL
 	failed, total = doctest.testmod(optionflags=flags)

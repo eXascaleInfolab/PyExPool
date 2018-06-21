@@ -51,7 +51,7 @@ A Lightweight Multi-Process Execution Pool with load balancing to schedule Jobs 
 > Automatic rescheduling of the workers on low memory condition for the in-RAM computations is an optional and the only feature that requires an external package, [psutil](https://pypi.python.org/pypi/psutil).  
 All scheduling jobs share the same CPU affinity policy, which is convenient for the benchmarking, but not so suitable for scheduling both single and multi-threaded apps with distinct demands for the CPU cache.
 
-All main functionality is implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](https://github.com/eXascaleInfolab/PyCABeM)), not as a separate library. Additionally, an optional minimalistic Web interface is provided in the separate file to inspect and profile the load balancer and execution pool.  
+All main functionality is implemented as a *single-file module* to be *easily included into your project and customized as a part of your distribution* (like in [PyCaBeM](https://github.com/eXascaleInfolab/PyCABeM) to execute muliple apps in parralel on the dedicated CPU cores and avoiding their swapping from the main memory), also it can be installed as a library. An optional minimalistic Web interface is provided in the separate file to inspect and profile the load balancer and execution pool.  
 The main purpose of the main single-file module is the **concurrent execution of modules and external executables with custom resource consumption constraints, cache / parallelization tuning and automatic balancing of the worker processes for the in memory computations on the single server**. PyExPool is typically used as an application framework for benchmarking or heavy-loaded multi-process execution activities on constrained computational resources.  
 If the concurrent execution of *Python functions* is required, usage of external modules is not a problem and the automatic jobs scheduling for the in-RAM computations is not necessary, then a more handy and straightforward approach is to use [Pebble](https://pypi.python.org/pypi/Pebble) library. A pretty convenient transparent parallel computations are provided by the [Joblib](https://pythonhosted.org/joblib/). If a distributed task queue is required with advanced monitoring and reporting facilities then [Celery](http://www.celeryproject.org/) might be a good choice. For the comprehensive parallel computing [Dask](http://dask.pydata.org) is a good choice. For the parallel execution of only the shell scripts the [GNU parallel](https://en.wikipedia.org/wiki/GNU_parallel) might be a good option.
 
@@ -86,7 +86,7 @@ These modules can be install either manually from [GitHub](https://github.com/eX
 ```sh
 $ pip install pyexpool
 ```
-> WebUI(`mpewui` module) renders interface from the bottle html templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `views/` should be copied from the `pyexpool` repository to the target project.
+> WebUI(`mpewui` module) renders interface from the bottle html templates located in the `.`, `./views/` or any other folder from the `bottle.TEMPLATE_PATH` list, where custom views can be placed to overwrite the default pages.
 
 Additionally, [hwloc / lstopo](http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service) should be installed if customized CPU affinity masking and cache control are required, see [Requirements](#requirements) section.
 
@@ -110,7 +110,7 @@ The external modules / apps are required only for the extended functionality:
 		```sh
 		$ sudo pip install bottle
 		```
-		> WebUI renders interface from the bottle HTML templates located in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `pyexpool/views/` should be copied to the target project.
+		> WebUI(`mpewui` module) renders interface from the bottle html templates located in the `.`, `./views/` or any other folder from the `bottle.TEMPLATE_PATH` list, where custom views can be placed to overwrite the default pages.
 		
 	- [mock](https://pypi.python.org/pypi/mock) is required exclusively for the unit testing under Python2, `mock` is included in the standard lib of Python3.
 		```sh
@@ -406,7 +406,7 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 ### Optional WebUi
 
 A simple Web UI is designed to profile Jobs and Tasks, interactively trace their failures and resource consumption. It is implemented in the optional module [mpewui](mpewui.py) and can be spawned by instantiating the `WebUiApp` class. A dedicated `WebUiApp` instance can be created per each `ExecPool`, serving the interfaces on the dedicated addresses (host:port). However, typically, a *single global instance of `WebUiApp` is created and supplied to all employed `ExecPool` instances*.  
-Web UI module requires HTML templates located in the [views](./views/) directory. Either `./views/` should be copied to the directory of the calling module or path to the `views` should be specified in the `bottle.TEMPLATE_PATH` list.
+Web UI module requires HTML templates installed by default from the `pip` distribution, which can be overwritten with the custom pages located in the [views](./views/) directory.
 
 See [WebUI queries manual](views/restapi.md) for API details. An example of the WebUI usage is shown in the `mpetests.TestWebUI.test_failures` of the [mpetests](mpetests.py).
 <!-- webui.md#webui-queries -->

@@ -5,19 +5,20 @@
 
 :Authors: (c) Artem Lutov <artem@exascale.info>
 :Organizations: eXascale Infolab <http://exascale.info/>, Lumais <http://www.lumais.com/>
-:Date: 2018-05
+:Date: 2018-07
 """
 from glob import glob  # Wildcards for files
 from setuptools import setup
 
+pkgname = 'pyexpool'
 views = glob('views/*')
 # print('>>> Views size:', str(len(views)), ', items:', views)
 # images = glob('images/*')
 
 setup(
-	name='pyexpool',  # This is the name of your PyPI-package.
+	name=pkgname,  # This is the name of your PyPI-package.
 	# version='2.2.0',  # Update the version number for new releases
-	version='3.0.2',  # Update the version number for new releases
+	version='3.1.0',  # Update the version number for new releases
 	description=('A lightweight multi-process Execution Pool with load balancing'
 	' and customizable resource consumption constraints.'),  # Required, "Summary" metadata field
 	long_description=(
@@ -26,18 +27,19 @@ setup(
     ' balancing of the external applications on NUMA architecture.  '
 	'All main functionality is implemented as a single-file module to be easily'
 	' included into your project and customized as a part of your distribution '
-	'(like in [PyCaBeM](https://github.com/eXascaleInfolab/PyCABeM)), not as a'
-	' separate library. Additionally, an optional minimalistic Web interface is'
-	' provided in the separate module to inspect the load balancer and execution pool.'
+	'(like in [PyCaBeM](https://github.com/eXascaleInfolab/PyCABeM) to execute'
+	' muliple apps in parralel on the dedicated CPU cores and avoiding their'
+	' swapping from the main memory), also it can be installed as a library.'
+	' An optional minimalistic Web interface is provided in the separate module'
+	' to inspect the load balancer and execution pool.'
 	' Typically, PyExPool is used as an application framework for benchmarking,'
 	' load testing or other heavy-loaded multi-process execution activities on'
-	' constrained computational resources.'
-	'\n> WebUI(`mpewui` module) renders interface from the bottle html templates located'
-	' in the `./views/` (or any folder in the `bottle.TEMPLATE_PATH` list). So, `views/`'
-	' should be copied from the sources to the target project.  '
-	'\nAdditionally, [hwloc / lstopo]'
+	' constrained computational resources. PyExPool is convenient for the fine-grained'
+	' resource control (including apps execution on the specific number of the'
+	' optionally dedicated logical CPUs) and for the failover execution.'
+	'\n> [hwloc / lstopo]'
 	'(http://www.admin-magazine.com/HPC/Articles/hwloc-Which-Processor-Is-Running-Your-Service)'
-	' should be installed if customized CPU affinity masking and cache control are'
+	' should be additionally installed if customized CPU affinity masking and cache control are'
 	' required, see [Requirements](#requirements) section.'
 	'\n\n'
 	'See details on the [PyExPool page](https://github.com/eXascaleInfolab/PyExPool)'
@@ -191,7 +193,7 @@ setup(
 	data_files=[
 	# 	# ('', ['README.md']),
 	# 	# ('images', glob("images/*.png")),
-	 	('views', views),
+	 	('/'.join(('share', pkgname, 'views')), views),
 	],  # Optional
 
 	# To provide executable scripts, use entry points in preference to the
