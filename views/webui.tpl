@@ -238,9 +238,9 @@
 	% end  # tfi
 </table>
 <hr />
-	% if get('jlim'):
-<!-- Show jobs limit, which restricts the number of shown failed tasks -->
-<p><span class="label">Jobs limit:</span> {{jlim}}</p>
+	% if get('lim'):
+<!-- Show tasks/jobs limit, which restricts the number of shown failed tasks -->
+<p><span class="label">Items limit:</span> {{lim}}</p>
 	% end
 % end  # tasksFailedInfo
 
@@ -282,8 +282,8 @@
 	% end
 </table>
 	<!-- Show jobs limit, which restricts the number of shown jobs -->
-	% if get('jlim'):
-<p><span class="label">Jobs limit:</span> {{jlim}}</p>
+	% if get('lim'):
+<p><span class="label">Jobs limit:</span> {{lim}}</p>
 	% end
 % end  # jobsInfo
 
@@ -318,9 +318,9 @@
 	% end  # tfi
 </table>
 <hr />
-	% if get('jlim'):
-<!-- Show jobs limit, which restricts the number of shown failed tasks -->
-<p><span class="label">Jobs limit:</span> {{jlim}}</p>
+	% if get('lim'):
+<!-- Show tasks/jobs limit, which restricts the number of shown failed tasks -->
+<p><span class="label">Items limit:</span> {{lim}}</p>
 	% end
 % end  # tasksInfo
 

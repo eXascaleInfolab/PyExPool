@@ -47,7 +47,7 @@
     </blockquote>
   </li>
   <li>
-    <kbd>jlim</kbd>  - limit the number of the showing items up to this number of jobs, <var>100</var> by default.
+    <kbd>lim</kbd>  - limit the number of the showing items up to this number of jobs / tasks, <var>50</var> by default.
   </li>
   <li>
     <kbd>refresh</kbd>  - page auto refresh time in seconds, &ge; 2, absent by default.

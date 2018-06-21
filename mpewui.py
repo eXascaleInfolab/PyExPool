@@ -106,7 +106,7 @@ def inferNumType(val):
 UiCmdId = IntEnum('UiCmdId', 'FAILURES LIST_JOBS LIST_TASKS API_MANUAL')  # JOB_INFO, TASK_INFO
 """UI Command Identifier associated with the REST URL"""
 
-UiResOpt = IntEnum('UiResOpt', 'fmt cols flt jlim refresh')  # fltStatus / kind
+UiResOpt = IntEnum('UiResOpt', 'fmt cols flt lim refresh')  # fltStatus / kind
 # Note: filter keys ending with '*' are optional (such columns allowed
 # to be absent in the target item)
 """UI Command parameters
@@ -117,8 +117,8 @@ cols: str(UiResCol)  - required columns in the result, all by default
 flt: str(UiResFilterVal)  - filter target items per each column, notations:
 * - optional column, absense of the value(:xxx) - the property should present with any non-None value:
 	?flt=rcode*:-15|duration:1.5..3600|category*|...
-jlim: uint  - limit of the listed number of the active jobs / tasks having this number of jobs, 0 means any;
-	NOTE: jlim omission results in the ExecPool default value for the jlim, failures are always fully shown.
+lim: uint  - limit of the listed number of the active jobs / tasks having this number of jobs, 0 means any;
+	NOTE: lim omission results in the ExecPool default value for the lim, failures are always fully shown.
 refresh: uint  - page refresh time, seconds >= 2
 """
 # TODO features:
@@ -282,7 +282,7 @@ class ResultOptions(object):
 		# 	for kind in self.kind:  #pylint: disable=W0104
 		# 		UiResKind[kind]  # Note: KeyError is thrown on invalid value
 		# Fetch the jobs limit value if any
-		self.jlim = qdict.get(UiResOpt.jlim.name)  #pylint: disable=E1101
+		self.lim = qdict.get(UiResOpt.lim.name)  #pylint: disable=E1101
 		# Fetch the refresh time if any
 		self.refresh = qdict.get(UiResOpt.refresh.name)
 		if self.refresh:
@@ -479,8 +479,8 @@ class WebUiApp(threading.Thread):
 			if resopts.flt:
 				cmd.data[UiResOpt.flt] = resopts.fltopts
 				# flt = None
-			if resopts.jlim is not None:
-				cmd.data[UiResOpt.jlim] = resopts.jlim
+			if resopts.lim is not None:
+				cmd.data[UiResOpt.lim] = resopts.lim
 			# fltStatus = qdict.get(UiResOpt.fltStatus.name)  #pylint: disable=E1101
 			# if fltStatus:
 			# 	cmd.data[UiResOpt.fltStatus] = fltStatus.split(',')
@@ -528,7 +528,7 @@ class WebUiApp(threading.Thread):
 						, tasksRootFailed=smr.tasksRootFailed, tasksRoot=smr.tasksRoot
 						, tasksFailed=smr.tasksFailed, tasks=smr.tasks
 					, jobsFailedInfo=cmd.data.get('jobsInfo'), tasksFailedInfo=cmd.data.get('tasksInfo')
-					, tasksFailedInfoWide=cmd.data.get('tasksInfoWide'), jlim=cmd.data.get(UiResOpt.jlim)
+					, tasksFailedInfoWide=cmd.data.get('tasksInfoWide'), lim=cmd.data.get(UiResOpt.lim)
 					)
 
 
@@ -558,8 +558,8 @@ class WebUiApp(threading.Thread):
 			if resopts.flt:
 				cmd.data[UiResOpt.flt] = resopts.fltopts
 				# flt = None
-			if resopts.jlim is not None:
-				cmd.data[UiResOpt.jlim] = resopts.jlim
+			if resopts.lim is not None:
+				cmd.data[UiResOpt.lim] = resopts.lim
 
 			cmd.cond.wait()
 			# Now .data contains the response results
@@ -599,7 +599,7 @@ class WebUiApp(threading.Thread):
 						, tasksRootFailed=smr.tasksRootFailed, tasksRoot=smr.tasksRoot
 						, tasksFailed=smr.tasksFailed, tasks=smr.tasks
 					, workersInfo=cmd.data.get('workersInfo'), jobsInfo=cmd.data.get('jobsInfo')
-					, jlim=cmd.data.get(UiResOpt.jlim)
+					, lim=cmd.data.get(UiResOpt.lim)
 					)
 
 
@@ -623,8 +623,8 @@ class WebUiApp(threading.Thread):
 				cmd.data[UiResOpt.cols] = resopts.cols.split(',')
 			if resopts.flt:
 				cmd.data[UiResOpt.flt] = resopts.fltopts
-			if resopts.jlim is not None:
-				cmd.data[UiResOpt.jlim] = resopts.jlim
+			if resopts.lim is not None:
+				cmd.data[UiResOpt.lim] = resopts.lim
 
 			cmd.cond.wait()
 			# Now .data contains the response results
@@ -664,7 +664,7 @@ class WebUiApp(threading.Thread):
 						, tasksRootFailed=smr.tasksRootFailed, tasksRoot=smr.tasksRoot
 						, tasksFailed=smr.tasksFailed, tasks=smr.tasks
 					, tasksInfo=cmd.data.get('tasksInfo'), tasksInfoWide=cmd.data.get('tasksInfoWide')
-					, jlim=cmd.data.get(UiResOpt.jlim)
+					, lim=cmd.data.get(UiResOpt.lim)
 					)
 
 
