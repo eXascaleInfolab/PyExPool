@@ -256,7 +256,8 @@ Task(name, timeout=0, onstart=None, ondone=None, onfinish=None, params=None
 	numadded: uint  - the number of direct added subtasks
 	numdone: uint  - the number of completed DIRECT subtasks
 		(each subtask may contain multiple jobs or sub-sub-tasks)
-	numterm: uint  - the number of terminated direct subtasks (i.e. jobs)
+	numterm: uint  - the number of terminated direct subtasks (including jobs) that are not restarting
+		numdone + numterm <= numadded
 	"""
 ```
 
@@ -367,6 +368,7 @@ ExecPool(wksnum=max(cpu_count()-1, 1), afnmask=None, memlimit=0., latency=0., na
 	failures: [JobInfo]  - failed (terminated or crashed) jobs with timestamps.
 		NOTE: failures contain both terminated, crashed jobs that jobs completed with non-zero return code
 		excluding the jobs terminated by timeout that have set .rsrtonto (will be restarted)
+	jobsdone: uint  - the number of successfully completed (non-terminated) jobs with zero code
 	tasks: set(Task)  - tasks associated with the scheduled jobs
 	"""
 
