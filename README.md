@@ -60,7 +60,6 @@ Large executing jobs can be postponed for the later execution with less number o
 
 Demo of the *scheduling with memory constraints* for the worker processes:
 ![mpepool_memory](images/mpepool_mem.png)
-> Zombie processes still may appear on abnormal termination of worker processes during rescheduling due to some bug in the Python interpreter. Anyway all resources are clearer up and the zombies disappear on the execution pool completion.
 
 Demo of the *scheduling with cache L1 maximization* for single-threaded processes on the server with cross-node CPUs enumeration. Whole physical CPU core consisting of two hardware threads assigned to each worker process, so the L1 cache is dedicated (not shared), but the maximal loading over all CPUs is 50%:
 ![mpepool_cacheL1_1](images/mpepool_cacheL1_1.png)

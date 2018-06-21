@@ -17,7 +17,6 @@ views = glob('views/*')
 
 setup(
 	name=pkgname,  # This is the name of your PyPI-package.
-	# version='2.2.0',  # Update the version number for new releases
 	version='3.1.0',  # Update the version number for new releases
 	description=('A lightweight multi-process Execution Pool with load balancing'
 	' and customizable resource consumption constraints.'),  # Required, "Summary" metadata field

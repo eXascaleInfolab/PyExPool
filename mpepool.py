@@ -2227,7 +2227,7 @@ class ExecPool(object):
 				# Kill non-terminated process
 				if active:
 					if job.proc.poll() is None:
-						print('  Killing ~zombie "{}" #{} ...'.format(job.name, job.proc.pid), file=sys.stderr)
+						print('  Killing ~hanged "{}" #{} ...'.format(job.name, job.proc.pid), file=sys.stderr)
 						job.proc.kill()
 			self.__complete(job, False)
 			# ATTENTION: re-raise exception for the BaseException but not Exception sub-classes
@@ -2523,7 +2523,6 @@ class ExecPool(object):
 			memall = self.memlimit + memov  # Note: memov is negative here
 
 		# Process completed (and terminated) jobs: execute callbacks and remove the workers
-		#cterminated = False  # Completed terminated procs processed
 		for job in completed:
 			# Note: check for the termination in all cycles
 			if not self.alive:
@@ -2533,7 +2532,6 @@ class ExecPool(object):
 			exectime = job.tstop - job.tstart
 			# Restart the job if it was terminated and should be restarted
 			if not job.terminates:
-				#cterminated = True
 				continue
 			print('WARNING, "{}" #{} is terminated because of the {} violation'
 				', chtermtime: {}, consumes {:.4f} / {:.4f} GB, timeout {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
@@ -2575,7 +2573,8 @@ class ExecPool(object):
 				self.__postpone(job, True)
 		# Note: the number of workers is not reduced to less than 1
 
-		# Note: active_children() does not impact on the existence of zombie procs
+		# Note: active_children() does not impact on the existence of zombie procs,
+		# proc table clearup implemented in complete() using wait()
 		#if cterminated:
 		#	# Note: required to join terminated child procs and avoid zombies
 		#	# Return list of all live children of the current process,joining any processes which have already finished
