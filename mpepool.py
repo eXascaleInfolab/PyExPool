@@ -1075,16 +1075,24 @@ class Job(object):
 
 		if self.proc is not None:
 			ecode = self.proc.poll()
-			# if ecode is None:
-			# 	self.proc.kill()
+			# Note: the job killing is already performed if the termination has not helped
+			# but just in case do it again
+			if ecode is None:
+				self.proc.kill()
+				time.sleep(0)  # Switch the context to give a time for the job killing
 			#	print('WARNING, completion of the non-finished process is called for "{}", killed'
 			#		.format(self.name), file=sys.stderr)
+			# if ecode is not None and ecode < 0:  # poll() None means the process has not been terminated / completed
+			# Note: in theory ecode could still be None if the job is killed (not just terminated) but it is better to
+			# retain a zombie than to hang on completion
+			#if ecode is None or ecode < 0:  # poll() None means the process has not been terminated / completed
 			# Note: ecode < 0 typically means forced termination by the signal
 			if ecode is not None and ecode < 0:  # poll() None means the process has not been terminated / completed
 				# Explicitly join the completed process to remove the entry from the children table and avoid zombie
 				# in case signal.signal(signal.SIGCHLD, signal.SIG_DFL) has not been set.
 				# Note that SIG_IGN unlike SIG_DFL affects the return code of the former zombies, resetting it to 0
-				self.proc.wait()
+				ecw = self.proc.wait()
+				print('{} finished on termination: {} (initial: {})'.format(self.name, ecw, ecode))
 
 		# Note: files should be closed before any assertions or exceptions
 		assert self.tstop is None and self.tstart is not None, (  # and self.proc.poll() is not None
