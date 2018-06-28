@@ -2015,7 +2015,7 @@ class ExecPool(object):
 			or (True if job.tstart is None else job.tstop - job.tstart < job.timeout)
 			) and (not self._jobs or self._jobs[0].wkslim >= self._jobs[-1].wkslim)), (
 			'A terminated non-rescheduled job is expected that doest not violate constraints.'
-			' "{}" terminates: {}, started: {} jwkslim: {} vs {} pwkslim, priority: {}, {} workers, {} jobs: {};'
+			' "{}" terminates: {}, started: {}, jwkslim: {} vs {} pwkslim, priority: {}, {} workers, {} jobs: {};'
 			'\nmem: {:.4f} / {:.4f} GB, exectime: {:.4f} ({} .. {}) / {:.4f} sec'.format(
 			job.name, job.terminates, job.tstart is not None, job.wkslim, self._wkslim
 			, priority, wksnum, len(self._jobs)
@@ -2472,7 +2472,7 @@ class ExecPool(object):
 			# Amount of free RAM (RSS) in GB; skip it if memlimit is not requested
 			memfree = inGigabytes(psutil.virtual_memory().available)
 		# Jobs should use less memory than the limit
-		if self.memlimit and (memall >= self.memlimit or memfree <= self._MEMLOW):
+		if self._workers and self.memlimit and (memall >= self.memlimit or memfree <= self._MEMLOW):
 			# Terminate the largest workers and reschedule jobs or reduce the workers number
 			wksnum = len(self._workers)
 			# Overused memory with some gap (to reschedule less) to be released by worker(s) termination
@@ -2516,10 +2516,12 @@ class ExecPool(object):
 			# New workers limit for the postponing job  # max(self._wkslim, len(self._workers))
 			wkslim = self._wkslim - len(pjobs)
 			assert wkslim >= 1, 'The number of workers should not be less than 1'
+			memov = 0  # Evaluate releasing memory
 			if pjobs and self.alive:
 				terminating = True
 				while pjobs:
 					job = pjobs.pop()
+					memov += job.mem
 					# Terminate the worker (postponing the job on the next iteration)
 					job.terminates += 1
 					job._restarting = True
@@ -2528,11 +2530,15 @@ class ExecPool(object):
 					# Update wkslim
 					job.wkslim = wkslim
 			# Update amount of estimated memall
-			memall = self.memlimit + memov  # Note: memov is negative here
+			memall -= memov
+		elif not self._workers:
+			wkslim = self._wkslim
+			memall = 0
 
 		# Process completed (and terminated) jobs: execute callbacks and remove the workers
 		for job in completed:
-			# Note: check for the termination in all cycles
+			# Note: check for the termination in all cycles, gracefull jobs completion is not mandatory here
+			# since the completed app cleans them
 			if not self.alive:
 				return
 			# The completion is graceful only if the termination requests were not received
@@ -2604,7 +2610,7 @@ class ExecPool(object):
 				if self.memlimit:
 					# Extended estimated job mem
 					jmemx = (job.mem if job.mem else memall / (1 + len(self._workers))) * self._JMEMTRR
-				if self.memlimit and ((memall and memall + jmemx >= self.memlimit
+				if self._workers and self.memlimit and ((memall and memall + jmemx >= self.memlimit
 				# Note: omit the low memory condition for a single worker, otherwise the pool can't be executed
 				) or (memfree - jmemx <= self._MEMLOW and self._workers)):
 					# Note: only restarted jobs have defined mem

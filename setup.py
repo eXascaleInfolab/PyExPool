@@ -67,7 +67,7 @@ setup(
 		#   4 - Beta
 		#   5 - Production/Stable
 		#   6 - Mature
-		'Development Status :: 5 - Production/Stable',
+		'Development Status :: 4 - Beta',
 
 		'Environment :: Plugins',
 		'Environment :: Console',
