@@ -16,7 +16,7 @@
 	<style>
 		body {
 			background: #EEE;
-			font-family: Garamond, Helvetica, Times, serif;
+			font-family: Trebuchet MS, Palatino, Garamond, Times, serif;
 		}
 
 		h1, h2, h3, h4, h5, h6 {
