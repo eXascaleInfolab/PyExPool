@@ -103,9 +103,7 @@
 		/* Color even rows; .frame */
 		.frame tr:nth-child(even) { background: #DDD }
 
-		tr:hover {
-			background: lightyellow;
-		}
+		tr:hover, .frame tr:nth-child(even):hover { background: lightyellow }
 	</style>
 </head>
 <body>
