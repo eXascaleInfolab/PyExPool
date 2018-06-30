@@ -979,13 +979,14 @@ class Job(object):
 			# Consumed implementation-defined type of memory on execution in gigabytes or the least expected
 			# (inherited from the related jobs having the same category and non-smaller size)
 			self.mem = 0.
-			#if _LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS:
-			# Note: it makes sence to compare jobs by size only in the same category
-			self.size = size  # Expected memory complexity of the job, typically its size of the processing data
 		if _CHAINED_CONSTRAINTS:
 			self.category = category  # Job name
 			self.slowdown = slowdown  # Execution slowdown ratio, >= 0, where (0, 1) - speedup, > 1 - slowdown
 			self.chtermtime = None  # Chained termination by time: None, False - by memory, True - by time
+		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
+			# Note: it makes sence to compare jobs by size only in the same category,
+			# used for both timeout and memory constraints
+			self.size = size  # Expected memory complexity of the job, typically its size of the processing data
 		# Update the task if any with this Job
 		if self.task:
 			self.task.add(self)
