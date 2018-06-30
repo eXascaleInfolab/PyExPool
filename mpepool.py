@@ -382,7 +382,7 @@ class JobInfo(object):
 		# ATTENTION; JobInfo definitions should be synchronized with Job
 		# Note: non-initialized slots are still listed among the attributes but yield `AttributeError` on access,
 		# so they always should be initialized at least with None to sync headers with the content
-		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
+		if _LIMIT_WORKERS_RAM:
 			self.memsize = job.mem
 			self.memkind = job.memkind
 		else:
@@ -971,20 +971,21 @@ class Job(object):
 		# GROUP memory limit violation (where the job itself does not violate any constraints);
 		# required to be aware whether to complete the ower task
 		self._restarting = False
-		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
-			self.memkind = memkind
-			self.size = size  # Expected memory complexity of the job, typically its size of the processing data
-			# Consumed implementation-defined type of memory on execution in gigabytes or the least expected
-			# (inherited from the related jobs having the same category and non-smaller size)
-			self.mem = 0.
-		if _CHAINED_CONSTRAINTS:
-			self.category = category  # Job name
-			self.slowdown = slowdown  # Execution slowdown ratio, >= 0, where (0, 1) - speedup, > 1 - slowdown
-			self.chtermtime = None  # Chained termination by time: None, False - by memory, True - by time
 		if _LIMIT_WORKERS_RAM:
 			# Note: wkslim is used only internally for the cross-category ordering
 			# of the jobs queue by reducing resource consumption
 			self.wkslim = None  # Worker processes limit (max number) on the job postponing if any
+			self.memkind = memkind
+			# Consumed implementation-defined type of memory on execution in gigabytes or the least expected
+			# (inherited from the related jobs having the same category and non-smaller size)
+			self.mem = 0.
+			#if _LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS:
+			# Note: it makes sence to compare jobs by size only in the same category
+			self.size = size  # Expected memory complexity of the job, typically its size of the processing data
+		if _CHAINED_CONSTRAINTS:
+			self.category = category  # Job name
+			self.slowdown = slowdown  # Execution slowdown ratio, >= 0, where (0, 1) - speedup, > 1 - slowdown
+			self.chtermtime = None  # Chained termination by time: None, False - by memory, True - by time
 		# Update the task if any with this Job
 		if self.task:
 			self.task.add(self)
@@ -1014,6 +1015,8 @@ class Job(object):
 
 		return  - smooth max of job mem
 		"""
+		if not _LIMIT_WORKERS_RAM:
+			return 0
 		# Current consumption of memory by the job
 		curmem = 0  # Evaluating memory
 		try:
@@ -1049,7 +1052,7 @@ class Job(object):
 
 		return  - [estimated] mem is less
 		"""
-		assert self.category is not None and self.category == job.category, (
+		assert _LIMIT_WORKERS_RAM and self.category is not None and self.category == job.category, (
 			'Only jobs of the same initialized category can be compared')
 		return self.size < job.size if not self.mem or not job.mem else self.mem < job.mem
 
@@ -2006,20 +2009,21 @@ class ExecPool(object):
 		# Note:
 		# - postponing jobs are terminated jobs only, can be called for !_CHAINED_CONSTRAINTS;
 		# - wksnum < self._wkslim
-		wksnum = len(self._workers)  # The current number of worker processes
-		assert ((job.terminates or job.tstart is None) and (priority or self._workers)
+		# wksnum = len(self._workers)  # The current number of worker processes
+		assert self._workers and ((job.terminates or job.tstart is None)
 			# and _LIMIT_WORKERS_RAM and not job in self._workers and not job in self._jobs
 			# # Note: self._jobs scanning is time-consuming
 			and (not self.memlimit or job.mem < self.memlimit)  # and wksnum < self._wkslim
 			and (job.tstart is None) == (job.tstop is None) and (not job.timeout
 			or (True if job.tstart is None else job.tstop - job.tstart < job.timeout)
-			) and (not self._jobs or self._jobs[0].wkslim >= self._jobs[-1].wkslim)), (
+			) and (not self._jobs or not self.memlimit or self._jobs[0].wkslim >= self._jobs[-1].wkslim)), (
 			'A terminated non-rescheduled job is expected that doest not violate constraints.'
 			' "{}" terminates: {}, started: {}, jwkslim: {} vs {} pwkslim, priority: {}, {} workers, {} jobs: {};'
 			'\nmem: {:.4f} / {:.4f} GB, exectime: {:.4f} ({} .. {}) / {:.4f} sec'.format(
-			job.name, job.terminates, job.tstart is not None, job.wkslim, self._wkslim
-			, priority, wksnum, len(self._jobs)
-			, ', '.join(['#{} {}: {}'.format(ij, j.name, j.wkslim) for ij, j in enumerate(self._jobs)])
+			job.name, job.terminates, job.tstart is not None, '-' if not self.memlimit else job.wkslim, self._wkslim
+			, priority, len(self._workers), len(self._jobs)
+			, ', '.join(['#{} {}'.format(ij, j.name) for ij, j in enumerate(self._jobs)]) if self.memlimit else (
+			', '.join(['#{} {}: {}'.format(ij, j.name, j.wkslim) for ij, j in enumerate(self._jobs)]))
 			, 0 if not self.memlimit else job.mem, self.memlimit
 			, 0 if job.tstop is None else job.tstop - job.tstart, job.tstart, job.tstop, job.timeout))
 		# Postpone only the group-terminated jobs by memory limit, not a single worker
@@ -2034,24 +2038,30 @@ class ExecPool(object):
 		## - it does not impact on the existence of zombie procs
 		#if job.terminates:
 		#	job.proc = None  # Reset old job process if any
-		jobsnum = len(self._jobs)
-		i = 0
-		if priority:
-			# Add to the begin of jobs with the same wkslim
-			while i < jobsnum and self._jobs[i].wkslim > job.wkslim:
-				i += 1
+		i = len(self._jobs)  # ATTENTION: required for _CHAINED_CONSTRAINTS processing
+		if not self.memlimit or not self._jobs or self._jobs[-1].wkslim > job.wkslim or (
+		self._jobs[-1].wkslim == job.wkslim and not priority):
+			self._jobs.append(job)
 		else:
-			# Add to the end of jobs with the same wkslim
-			i = jobsnum - 1
-			while i >= 0 and self._jobs[i].wkslim < job.wkslim:
-				i -= 1
-			i += 1
-		if i != jobsnum:
+			jobsnum = i
+			i = 0
+			if priority:
+				# Add to the begin of jobs with the same wkslim
+				while i < jobsnum and self._jobs[i].wkslim > job.wkslim:
+					i += 1
+			else:
+				# Add to the end of jobs with the same wkslim
+				i = jobsnum - 1
+				while i >= 0 and self._jobs[i].wkslim < job.wkslim:
+					i -= 1
+				i += 1
+			# Note: i < jobsnum due to the top if branch
+			#if i != jobsnum:
 			self._jobs.rotate(-i)
 			self._jobs.appendleft(job)
 			self._jobs.rotate(i)
-		else:
-			self._jobs.append(job)
+			#else:
+			#	self._jobs.append(job)
 
 		# Update limit of the worker processes of the other larger non-started jobs
 		# of the same category as the added job has
@@ -2062,9 +2072,9 @@ class ExecPool(object):
 				pj = self._jobs[k]
 				if pj.category == job.category and pj.size >= job.size:
 					# Set mem in for the related non-started heavier jobs
-					if pj.mem < job.mem:
+					if self.memlimit and pj.mem < job.mem:
 						pj.mem = job.mem
-					if job.wkslim < pj.wkslim:
+					if job.wkslim < pj.wkslim:  # Note: normally this never happens
 						pj.wkslim = job.wkslim
 						# Update location of the jobs in the queue, move the updated
 						# job to the place before the origin
@@ -2361,12 +2371,11 @@ class ExecPool(object):
 						' consuming {:.4f} GB with timeout of {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 						.format(job.name, job.proc.pid
 						, 'timeout' if job.timeout and exectime >= job.timeout else (
-							('' if job.mem >= self.memlimit else 'group ') + 'memory limit')
+							('' if not self.memlimit or job.mem >= self.memlimit else 'group ') + 'memory limit')
 						, 0 if not self.memlimit else job.mem
 						, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			else:
 				job.proc.terminate()  # Schedule the worker completion to the next revise
-		#self.memall = memall
 
 		# Terminate chained related workers and jobs of the single jobs that violate timeout/memory constraints
 		if _CHAINED_CONSTRAINTS and (jtorigs or jmorigs):
@@ -2392,7 +2401,8 @@ class ExecPool(object):
 							# Terminate the worker
 							job.terminates += 1
 							job.proc.terminate()  # Schedule the worker completion to the next revise
-							memall -= job.mem  # Reduce total memory consumed by the active workers
+							if self.memlimit:
+								memall -= job.mem  # Reduce total memory consumed by the active workers
 							break  # Switch to the following job
 					else:
 						# Memory limit chains
@@ -2421,7 +2431,7 @@ class ExecPool(object):
 					# Travers over the chain origins and check matches skipping the origins themselves
 					# Time constraints
 					for jorg in viewvalues(jtorigs):
-						if (job.category == jorg.category  # Skip already terminating items
+						if (job.category == jorg.category
 						and job.size * job.slowdown >= jorg.size * jorg.slowdown):
 							# Remove the item adding it to the list of failed jobs
 							self._jobs.rotate(-ij)
@@ -2438,7 +2448,7 @@ class ExecPool(object):
 					else:
 						# Memory limit constraints
 						for jorg in viewvalues(jmorigs):
-							if (job.category == jorg.category  # Skip already terminating items
+							if (job.category == jorg.category
 							and not job.lessmem(jorg)):
 								# Remove the item adding it to the list of failed jobs
 								self._jobs.rotate(-ij)
@@ -2465,13 +2475,13 @@ class ExecPool(object):
 		# search is more suitable than full scan of the list
 		for job in completed:
 			self._workers.remove(job)
-		# self._workers = [w for w in self._workers if w not in completed]
 
-		# Check memory limitation fulfilling for all remained processes
+		# Check memory limitation fulfilling for all remained processes and resource consumption counters
 		if self.memlimit:
 			# Amount of free RAM (RSS) in GB; skip it if memlimit is not requested
 			memfree = inGigabytes(psutil.virtual_memory().available)
 		# Jobs should use less memory than the limit
+		# Consider terminatin of all executing workers by the constraints violation
 		if self._workers and self.memlimit and (memall >= self.memlimit or memfree <= self._MEMLOW):
 			# Terminate the largest workers and reschedule jobs or reduce the workers number
 			wksnum = len(self._workers)
@@ -2485,14 +2495,14 @@ class ExecPool(object):
 			# Note: at least one worker should be remained
 			# Note: memory overuse should be negative, i.e. underuse to start any another job,
 			# 0 in practice is insufficient of the subsequent execution
-			while memov >= 0 and len(self._workers) - len(pjobs) > 1:
+			while memov >= 0 and wksnum - len(pjobs) > 1:
 				# Reinitialize the heaviest remained jobs and continue
 				for job in self._workers:
 					if not self.alive or (not job.terminates and job not in pjobs):
 						hws.append(job)  # Take the first appropriate executing job as a heavy one
 						break
 				assert hws, 'Non-terminated heavy worker processes must exist here: {} / {}'.format(
-					len(hws), len(self._workers))
+					len(hws), wksnum)
 				for job in self._workers:
 					# Note: check for the termination in all cycles
 					if not self.alive:
@@ -2516,12 +2526,12 @@ class ExecPool(object):
 			# New workers limit for the postponing job  # max(self._wkslim, len(self._workers))
 			wkslim = self._wkslim - len(pjobs)
 			assert wkslim >= 1, 'The number of workers should not be less than 1'
-			memov = 0  # Evaluate releasing memory
 			if pjobs and self.alive:
 				terminating = True
 				while pjobs:
 					job = pjobs.pop()
-					memov += job.mem
+					# Update amount of the estimated memall
+					memall -= job.mem
 					# Terminate the worker (postponing the job on the next iteration)
 					job.terminates += 1
 					job._restarting = True
@@ -2529,11 +2539,10 @@ class ExecPool(object):
 					job.proc.terminate()
 					# Update wkslim
 					job.wkslim = wkslim
-			# Update amount of estimated memall
-			memall -= memov
+				assert memall > 0, 'The workers should remain and consume some memory'
 		elif not self._workers:
 			wkslim = self._wkslim
-			memall = 0
+			memall = 0.
 
 		# Process completed (and terminated) jobs: execute callbacks and remove the workers
 		for job in completed:
@@ -2551,23 +2560,25 @@ class ExecPool(object):
 				', chtermtime: {}, consumes {:.4f} / {:.4f} GB, timeout {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 				.format(job.name, job.proc.pid
 				, 'timeout' if job.timeout and exectime >= job.timeout else (
-					('' if job.mem >= self.memlimit else 'group ') + 'memory limit')
+					('' if not self.memlimit or job.mem >= self.memlimit else 'group ') + 'memory limit')
 				, None if not _CHAINED_CONSTRAINTS else job.chtermtime
 				, 0 if not self.memlimit else job.mem, self.memlimit
 				, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			# Skip memory limit and timeout violating jobs that do not require auto-restart (applicable only for the timeout)
-			if (exectime >= job.timeout and not job.rsrtonto) or (_CHAINED_CONSTRAINTS
+			if (job.timeout and exectime >= job.timeout and not job.rsrtonto) or (_CHAINED_CONSTRAINTS
 			and job.chtermtime is not None) or (self.memlimit and job.mem >= self.memlimit):
 				continue
 			# Reschedule job having the group violation of the memory limit
-			# if timeout is not violated or restart on timeout if requested
-			# Note: memall to not postpone the single existing job
-			if self.memlimit and ((memall and memall + job.mem * self._JMEMTRR >= self.memlimit)
+			# if timeout is not violated or restart on timeout is requested
+			# Note: self._workers to not postpone the single existing job
+			if self._workers and self.memlimit and (
+			memall + job.mem * self._JMEMTRR >= self.memlimit
 			or memfree - job.mem * self._JMEMTRR <= self._MEMLOW) and (
-			not job.timeout or exectime < job.timeout or job.rsrtonto):
+			# Note: use priority restart below for job.rsrtonto
+			not job.timeout or exectime < job.timeout):
 				self.__postpone(job)
-			# Restart the job on timeout if requested
-			elif exectime >= job.timeout and job.rsrtonto:  # ATTENTION: restart on timeout only and if required
+			# Restart the job if the workers are empty or on timeout by the REQUEST (rsrtonto)
+			elif not self._workers or (job.rsrtonto and exectime >= job.timeout):
 				# Note: if the job was terminated by timeout then memory limit was not met
 				# Note: earlier executed job might not fit into the RAM now because of
 				# the inreasing mem consumption by the workers
@@ -2577,11 +2588,12 @@ class ExecPool(object):
 				#		, file=sys.stderr)
 				#assert not self.memlimit or memall + job.mem * self._JMEMTRR < self.memlimit, (
 				#	'Group exceeding of the memory limit should be already processed')
-				if not self.__start(job) and self.memlimit:
+				if not self.__start(job) and self.memlimit:  # Note: sucessful start returns 0
 					memall += job.mem  # Reuse .mem from the previous run if exists
 				# Note: do not call complete() on failed restart
 			else:
-				assert exectime < job.timeout, 'Timeout violating jobs should be already skipped'
+				assert self._workers and (not job.timeout or exectime < job.timeout
+					), 'Timeout violating jobs should be already skipped and workers should exist'
 				# The job was terminated (by group violation of memory limit or timeout with restart),
 				# but now can be started successfully and will be satrted soon
 				self.__postpone(job, True)
@@ -2597,7 +2609,7 @@ class ExecPool(object):
 		# Start subsequent job or postpone it further
 		# if _DEBUG_TRACE >= 2:
 		# 	print('  Nonstarted jobs: ', ', '.join(['{} ({})'.format(job.name, job.wkslim) for job in self._jobs]))
-		if not terminating:  # Start only after the terminated jobs terminated and released the memory
+		if not terminating or not self._workers:  # Start only after the terminated jobs terminated and released the memory
 			while self._jobs and len(self._workers) < self._wkslim and self.alive:
 				#if _DEBUG_TRACE >= 3:
 				#	print('  "{}" (expected totmem: {:.4f} / {:.4f} GB) is being rescheduled, {} non-started jobs: {}'
@@ -2606,20 +2618,24 @@ class ExecPool(object):
 				job = self._jobs.popleft()
 				# Jobs should use less memory than the limit, a worker process violating
 				# (time/memory) constraints are already filtered out
-				# Note: memall to not postpone the single existing job
+				# Note: self._workers to not postpone the single existing job
 				if self.memlimit:
 					# Extended estimated job mem
 					jmemx = (job.mem if job.mem else memall / (1 + len(self._workers))) * self._JMEMTRR
-				if self._workers and self.memlimit and ((memall and memall + jmemx >= self.memlimit
+				if self._workers and self.memlimit and ((memall + jmemx >= self.memlimit
 				# Note: omit the low memory condition for a single worker, otherwise the pool can't be executed
-				) or (memfree - jmemx <= self._MEMLOW and self._workers)):
+				) or (memfree - jmemx <= self._MEMLOW)):  # (memfree - jmemx <= self._MEMLOW and self._workers)
 					# Note: only restarted jobs have defined mem
 					# Postpone the job updating its workers limit
 					assert job.mem < self.memlimit, 'The workers exceeding memory constraints were already filtered out'
 					self.__postpone(job)
 					break
-				elif not self.__start(job) and self.memlimit:
-					memall += job.mem  # Reuse .mem from the previous run if exists
+				elif not self.__start(job):  # Note: sucessful start returns 0
+					if self.memlimit:
+						memall += job.mem  # Reuse .mem from the previous run if exists
+					# If the jobs terminated and workers became empty then only a single worker should be created
+					if terminating:
+						break
 		assert (self._workers or not self._jobs) and self._wkslim and (
 			len(self._workers) <= self._wkslim), (
 			'Worker processes should always exist if non-started jobs are remained:'
@@ -2675,8 +2691,9 @@ class ExecPool(object):
 		if self._tstart is None:
 			self._tstart = time.perf_counter()
 		# Initialize the [latest] value of job workers limit
-		if self.memlimit:
-			job.wkslim = self._wkslim
+		if self.memlimit and not job.wkslim:
+			# Consider earlier executed jobs and updated execution pool
+			job.wkslim = self._wkslim if not job.wkslim else min(job.wkslim, self._wkslim)
 		if concur:
 			# Evaluate total memory consumed by the worker processes
 			if self.memlimit:
@@ -2688,10 +2705,10 @@ class ExecPool(object):
 				# Extended estimated job mem
 				jmemx = (job.mem if job.mem else memall / (1 + len(self._workers))) * self._JMEMTRR
 			# Schedule the job, postpone it if already non-started jobs exist or there are no any free workers
-			if self._jobs or len(self._workers) >= self._wkslim or (
-			self.memlimit and ((memall and memall + jmemx >= self.memlimit
+			if self._workers and (self._jobs or len(self._workers) >= self._wkslim or (
+			self.memlimit and ((memall + jmemx >= self.memlimit
 			# Note: omit the low memory condition for a single worker, otherwise the pool can't be executed
-			) or (memfree - jmemx <= self._MEMLOW and self._workers))):
+			) or (memfree - jmemx <= self._MEMLOW)))):  # (memfree - jmemx <= self._MEMLOW and self._workers)
 				# if _DEBUG_TRACE >= 2:
 				# 	print('  Postponing "{}", {} jobs, {} workers, {} wkslim'
 				# 		', group memlim violation: {}, lowmem: {}'.format(job.name, len(self._jobs)
@@ -2701,10 +2718,13 @@ class ExecPool(object):
 				if not self.memlimit or not self._jobs or self._jobs[-1].wkslim >= job.wkslim:
 					self._jobs.append(job)
 				else:
-					jnum = len(self._jobs)
-					i = 0
-					while i < jnum and self._jobs[i].wkslim >= job.wkslim:
-						i += 1
+					jobsnum = len(self._jobs)
+					# Add to the end of jobs with the same wkslim
+					i = jobsnum - 1
+					while i >= 0 and self._jobs[i].wkslim < job.wkslim:
+						i -= 1
+					i += 1
+					# Note: i < jobsnum in the else branch
 					self._jobs.rotate(-i)
 					self._jobs.appendleft(job)
 					self._jobs.rotate(i)
