@@ -2557,7 +2557,8 @@ class ExecPool(object):
 					# Update wkslim
 					job.wkslim = wkslim
 				assert memall > 0, ('The workers should remain and consume some memory'
-					', memall: {:.4f}, jmem: {:.4f} ({}), {} pjobs'.format(memall, job.mem, job.name, len(pjobs)))
+					', memall: {:.4f}, jmem: {:.4f} ({}), {} pjobs, {} workers, self._wkslim: {} / {}'
+					.format(memall, job.mem, job.name, len(pjobs), len(wksnum), wkslim, self._wkslim))
 		elif not self._workers:
 			wkslim = self._wkslim
 			memall = 0.
