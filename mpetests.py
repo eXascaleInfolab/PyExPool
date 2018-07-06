@@ -445,7 +445,7 @@ class TestExecPool(unittest.TestCase):
 			tjms2 = worktime/3
 			jgms2 = Job('jcgroup_mem_small_2s', args=(PYEXEC, '-c', allocDelayProg(msmall, tjms2))
 				, size=5, timeout=timeout, onstart=mock.MagicMock())
-			jgms3 = Job('jcgroup_mem_small_3g', args=(PYEXEC, '-c', allocDelayProg(msmall*1.5, worktime))
+			jgms3 = Job('jcgroup_mem_small_3g', args=(PYEXEC, '-c', allocDelayProg(msmall*1.7, worktime))
 				, category="cat_sa", size=5, timeout=timeout, onstart=mock.MagicMock(), ondone=mock.MagicMock())
 			jgmsp1 = Job('jcgroup_mem_small_postponed_1m', args=(PYEXEC, '-c', allocDelayProg(msmall*1.2, worktime*1.25))
 				, category="cat_toch", size=6, timeout=timeout, onstart=mock.MagicMock())

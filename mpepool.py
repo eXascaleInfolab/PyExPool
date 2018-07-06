@@ -1025,7 +1025,8 @@ class Job(object):
 			up = psutil.Process(self.proc.pid)
 			pmem = up.memory_info()
 			# Note: take average of mem and rss to not over reserve RAM especially for Java apps
-			curmem = (pmem.vms + pmem.rss) / 2
+			wrss = 0.85  # Weight of the rss: 0.5 .. 0.95
+			curmem = pmem.vms * (1 - wrss) + pmem.rss * wrss
 			if self.memkind:
 				amem = curmem  # Memory consumption of the whole process tree
 				xmem = curmem  # Memory consumption of the heaviest process in the tree
@@ -2555,7 +2556,8 @@ class ExecPool(object):
 					job.proc.terminate()
 					# Update wkslim
 					job.wkslim = wkslim
-				assert memall > 0, 'The workers should remain and consume some memory'
+				assert memall > 0, ('The workers should remain and consume some memory'
+					', memall: {:.4f}, jmem: {:.4f} ({}), {} pjobs'.format(memall, job.mem, job.name, len(pjobs)))
 		elif not self._workers:
 			wkslim = self._wkslim
 			memall = 0.
@@ -2631,7 +2633,7 @@ class ExecPool(object):
 				#	print('  "{}" (expected totmem: {:.4f} / {:.4f} GB) is being rescheduled, {} non-started jobs: {}'
 				#		.format(self._jobs[0].name, 0 if not self.memlimit else memall + job.mem, self.memlimit
 				#		, len(self._jobs), ', '.join([j.name for j in self._jobs])), file=sys.stderr)
-				job = self._jobs.popleft()
+				job = self._jobs[0]
 				# Jobs should use less memory than the limit, a worker process violating
 				# (time/memory) constraints are already filtered out
 				# Note: self._workers to not postpone the single existing job
@@ -2644,9 +2646,10 @@ class ExecPool(object):
 					# Note: only restarted jobs have defined mem
 					# Postpone the job updating its workers limit
 					assert job.mem < self.memlimit, 'The workers exceeding memory constraints were already filtered out'
-					self.__postpone(job)
+					if job.mem:
+						self.__postpone(self._jobs.popleft())
 					break
-				elif not self.__start(job):  # Note: sucessful start returns 0
+				elif not self.__start(self._jobs.popleft()):  # Note: sucessful start returns 0
 					if self.memlimit:
 						memall += job.mem  # Reuse .mem from the previous run if exists
 					# If the jobs terminated and workers became empty then only a single worker should be created
