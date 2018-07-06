@@ -64,6 +64,7 @@ import itertools  # chain
 
 from multiprocessing import cpu_count, Lock  #, Queue  #, active_children, Value, Process
 from collections import deque
+from math import sqrt
 
 # Consider time interface compatibility with Python before v3.3
 if not hasattr(time, 'perf_counter'):
@@ -1051,11 +1052,16 @@ class Job(object):
 
 		job  - another job for the .mem or .size comparison
 
-		return  - [estimated] mem is less
+		return  - [estimated] mem is less or None (unknown)
 		"""
-		assert _LIMIT_WORKERS_RAM and self.category is not None and self.category == job.category, (
-			'Only jobs of the same initialized category can be compared')
-		return self.size < job.size if not self.mem or not job.mem else self.mem < job.mem
+		assert _LIMIT_WORKERS_RAM, 'lessmem() is sensible only for the defined _LIMIT_WORKERS_RAM'
+		# assert _LIMIT_WORKERS_RAM and self.category is not None and self.category == job.category, (
+		# 	'Only jobs of the same initialized category can be compared')
+		if self.mem and job.mem:
+			return self.mem < job.mem
+		elif self.size and job.size and self.category == job.category:
+			return self.size < job.size
+		return None
 
 
 	def complete(self, graceful=None):
@@ -1436,9 +1442,12 @@ class ExecPool(object):
 	_KILLDELAY = 3  # 3 cycles of self.latency, termination wait time
 	_MEMLOW = _RAM_SIZE - _RAM_LIMIT  # Low RAM(RSS) memory condition
 	assert _MEMLOW >= 0, '_RAM_SIZE should be >= _RAM_LIMIT'
+	_GOLDEN = (1 + 5 ** 0.5) * 0.5  # Golden section const: 1.618
+	_JMEMLIMH = _GOLDEN  # Hihg memory limit ratio for the jobs restart, recommended: 1.2 .. 2
+	_JMEMLIML = 1 / _GOLDEN  # Low memory limit ratio for the jobs restart
 	# Memory threshold ratio, multiplier for the job to have a gap and
 	# reduce the number of reschedulings, recommended value: 1.2 .. 1.6
-	_JMEMTRR = 1.5
+	_JMEMTRR = 3 - _GOLDEN  # 1.382; 1.5
 	assert _JMEMTRR >= 1, 'Memory threshold ratio should be >= 1'
 
 	def __init__(self, wksnum=max(_CPUS-1, 1), afnmask=None, memlimit=0., latency=0., name=None, webuiapp=None):
@@ -2411,7 +2420,7 @@ class ExecPool(object):
 							# Note: job !== jorg, because jorg terminates and job does not
 							if (job.category == jorg.category  # Skip already terminating items
 							and job is not jorg
-							and not job.lessmem(jorg)):
+							and job.lessmem(jorg) is False):
 								job.chtermtime = False  # Chained termination by memory
 								terminating = True
 								if job.terminates:
@@ -2450,7 +2459,7 @@ class ExecPool(object):
 						# Memory limit constraints
 						for jorg in viewvalues(jmorigs):
 							if (job.category == jorg.category
-							and not job.lessmem(jorg)):
+							and job.lessmem(jorg) is False):
 								# Remove the item adding it to the list of failed jobs
 								self._jobs.rotate(-ij)
 								jrot += ij
@@ -2504,6 +2513,8 @@ class ExecPool(object):
 						break
 				assert hws, 'Non-terminated heavy worker processes must exist here: {} / {}'.format(
 					len(hws), wksnum)
+				# Allow x times longer running jobs to use sqrt(x) more RAM
+				hwdur = sqrt(tcur - hws[-1].tstart)
 				for job in self._workers:
 					# Note: check for the termination in all cycles
 					if not self.alive:
@@ -2511,10 +2522,14 @@ class ExecPool(object):
 					# Extend the heavy jobs list with more heavy items than the already present there
 					# Note: use some threshold for mem evaluation and consider starting time on scheduling
 					# to terminate first the least worked processes (for approximately the same memory consumption)
-					dr = 0.1  # Threshold parameter ratio, recommended value: 0.05 - 0.15; 0.1 means delta of 10%
-					if not job.terminates and (job.mem * (1 - dr) >= hws[-1].mem or
-					(job.mem * (1 + dr/2) >= hws[-1].mem and job.tstart > hws[-1].tstart)) and job not in pjobs:
+					# dr = 0.1  # Threshold parameter ratio, recommended value: 0.05 - 0.15; 0.1 means delta of 10%
+					# if not job.terminates and ((job.mem * (1 - dr) >= hws[-1].mem and job.tstart > hws[-1].tstart)
+					# or job.mem * (1 + dr/2) >= hws[-1].mem) and job not in pjobs:
+					jdur = sqrt(tcur - job.tstart)
+					if not job.terminates and job.mem * min(max(hwdur / jdur, self._JMEMLIML), self._JMEMLIMH
+					) >= hws[-1].mem and job not in pjobs:
 						hws.append(job)
+						hwdur = jdur
 				# Move the largest jobs to postponed until memov is negative
 				while memov >= 0 and hws and wksnum - len(pjobs) > 1:  # Retain at least a single worker
 					job = hws.pop()
