@@ -1024,7 +1024,7 @@ class Job(object):
 		try:
 			up = psutil.Process(self.proc.pid)
 			pmem = up.memory_info()
-			# Note: take average of mem and rss to not over reserve RAM especially for Java apps
+			# Note: take weighted average of mem and rss to not over/under reserve RAM especially for Java apps
 			wrss = 0.85  # Weight of the rss: 0.5 .. 0.95
 			curmem = pmem.vms * (1 - wrss) + pmem.rss * wrss
 			if self.memkind:
@@ -1032,7 +1032,7 @@ class Job(object):
 				xmem = curmem  # Memory consumption of the heaviest process in the tree
 				for ucp in up.children(recursive=True):  # Note: fetches only children processes
 					pmem = ucp.memory_info()
-					mem = (pmem.vms + pmem.rss) / 2  # MB
+					mem = pmem.vms * (1 - wrss) + pmem.rss * wrss  # MB
 					amem += mem
 					if xmem < mem:
 						xmem = mem
