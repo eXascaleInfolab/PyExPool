@@ -1025,7 +1025,7 @@ class Job(object):
 			up = psutil.Process(self.proc.pid)
 			pmem = up.memory_info()
 			# Note: take weighted average of mem and rss to not over/under reserve RAM especially for Java apps
-			wrss = 0.85  # Weight of the rss: 0.5 .. 0.95
+			wrss = 0.9  # Weight of the rss: 0.5 .. 0.98
 			curmem = pmem.vms * (1 - wrss) + pmem.rss * wrss
 			if self.memkind:
 				amem = curmem  # Memory consumption of the whole process tree
