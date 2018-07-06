@@ -2072,7 +2072,7 @@ class ExecPool(object):
 			while k < kend:
 				pj = self._jobs[k]
 				if pj.category == job.category and pj.size >= job.size:
-					# Set mem in for the related non-started heavier jobs
+					# Set mem for the related non-started heavier jobs
 					if self.memlimit and pj.mem < job.mem:
 						pj.mem = job.mem
 					if job.wkslim < pj.wkslim:  # Note: normally this never happens
