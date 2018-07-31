@@ -865,7 +865,7 @@ class Job(object):
 	# NOTE: keyword-only arguments are specified after the *, supported only since Python 3
 	def __init__(self, name, workdir=None, args=(), timeout=0, rsrtonto=False, task=None #,*
 	, startdelay=0., onstart=None, ondone=None, params=None, category=None, size=0, slowdown=1.
-	, omitafn=False, memkind=1, stdout=sys.stdout, stderr=sys.stderr):
+	, omitafn=False, memkind=1, memlim=0., stdout=sys.stdout, stderr=sys.stderr):
 		"""Initialize job to be executed
 
 		Main parameters:
@@ -915,6 +915,7 @@ class Job(object):
 			1  - mem for the heaviest process of the process tree spawned by the original process
 				(including the origin itself)
 			2  - mem for the whole spawned process tree including the origin process
+		memlim: float  - max amount of memory in GB allowed for the job execution, 0 - unlimited
 
 		Execution parameters, initialized automatically on execution:
 		tstart  - start time, filled automatically on the execution start (before onstart). Default: None
@@ -935,9 +936,9 @@ class Job(object):
 			requires _CHAINED_CONSTRAINTS
 		"""
 		assert isinstance(name, str) and timeout >= 0 and (task is None or isinstance(task, Task)
-			) and size >= 0 and slowdown > 0 and memkind in (0, 1, 2), ('Job arguments are invalid'
-			', name: {}, timeout: {}, task type: {}, size: {}, slowdown: {}, memkind: {}'.format(
-			name, timeout, type(task).__name__, size, slowdown, memkind))
+			) and size >= 0 and slowdown > 0 and memkind in (0, 1, 2) and memlim >= 0, (
+			'Job arguments are invalid, name: {}, timeout: {}, task type: {}, size: {}, slowdown: {}, memkind: {}'
+			.format(name, timeout, type(task).__name__, size, slowdown, memkind, memlim))
 		#if not args:
 		#	args = ("false")  # Create an empty process to schedule its execution
 
@@ -977,6 +978,7 @@ class Job(object):
 			# of the jobs queue by reducing resource consumption
 			self.wkslim = None  # Worker processes limit (max number) on the job postponing if any
 			self.memkind = memkind
+			self.memlim = memlim
 			# Consumed implementation-defined type of memory on execution in gigabytes or the least expected
 			# (inherited from the related jobs having the same category and non-smaller size)
 			self.mem = 0.
@@ -2336,7 +2338,8 @@ class ExecPool(object):
 			exectime = tcur - job.tstart
 			# Update memory statistics (if required) and skip jobs that do not exceed the specified time/memory constraints
 			if not job.terminates and (not job.timeout or exectime < job.timeout
-			) and (not self.memlimit or job.mem < self.memlimit):
+			# Note: self.memlimit indicates that ExecPool tracs the memory consumption (sets job.mem)
+			) and (not self.memlimit or (job.mem < self.memlimit and (not job.memlim or job.mem < job.memlim))):
 				# Update memory consumption statistics if applicable
 				if self.memlimit:
 					# NOTE: Evaluate memory consumption for the heaviest process in the process tree
@@ -2365,7 +2368,8 @@ class ExecPool(object):
 					jorg = jtorigs.get(job.category, None)
 					if jorg is None or job.size * job.slowdown < jorg.size * jorg.slowdown:
 						jtorigs[job.category] = job
-				elif self.memlimit and job.mem >= self.memlimit:
+				# Note: self.memlimit indicates that ExecPool tracs the memory consumption (sets job.mem)
+				elif self.memlimit and (job.mem >= self.memlimit or (job.memlim and job.mem >= job.memlim)):
 					# Memory limit constraints
 					jorg = jmorigs.get(job.category, None)
 					if jorg is None or job.size < jorg.size:
@@ -2382,7 +2386,8 @@ class ExecPool(object):
 						' consuming {:.4f} GB with timeout of {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 						.format(job.name, job.proc.pid
 						, 'timeout' if job.timeout and exectime >= job.timeout else (
-							('' if not self.memlimit or job.mem >= self.memlimit else 'group ') + 'memory limit')
+							('' if not self.memlimit or job.mem >= self.memlimit
+								or (job.memlim and job.mem >= job.memlim) else 'group ') + 'memory limit')
 						, 0 if not self.memlimit else job.mem
 						, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			else:
@@ -2579,13 +2584,16 @@ class ExecPool(object):
 				', chtermtime: {}, consumes {:.4f} / {:.4f} GB, timeout {:.4f} sec, executed: {:.4f} sec ({} h {} m {:.4f} s)'
 				.format(job.name, job.proc.pid
 				, 'timeout' if job.timeout and exectime >= job.timeout else (
-					('' if not self.memlimit or job.mem >= self.memlimit else 'group ') + 'memory limit')
+					('' if not self.memlimit or job.mem >= self.memlimit
+						or (job.memlim and job.mem >= job.memlim) else 'group ') + 'memory limit')
 				, None if not _CHAINED_CONSTRAINTS else job.chtermtime
 				, 0 if not self.memlimit else job.mem, self.memlimit
 				, job.timeout, exectime, *secondsToHms(exectime)), file=sys.stderr)
 			# Skip memory limit and timeout violating jobs that do not require auto-restart (applicable only for the timeout)
 			if (job.timeout and exectime >= job.timeout and not job.rsrtonto) or (_CHAINED_CONSTRAINTS
-			and job.chtermtime is not None) or (self.memlimit and job.mem >= self.memlimit):
+			# Note: self.memlimit indicates that ExecPool tracs the memory consumption (sets job.mem)
+			and job.chtermtime is not None) or (self.memlimit and (job.mem >= self.memlimit
+			or (job.memlim and job.mem >= job.memlim))):
 				continue
 			# Reschedule job having the group violation of the memory limit
 			# if timeout is not violated or restart on timeout is requested
@@ -2646,7 +2654,8 @@ class ExecPool(object):
 				) or (memfree - jmemx <= self._MEMLOW)):  # (memfree - jmemx <= self._MEMLOW and self._workers)
 					# Note: only restarted jobs have defined mem
 					# Postpone the job updating its workers limit
-					assert job.mem < self.memlimit, 'The workers exceeding memory constraints were already filtered out'
+					assert job.mem < self.memlimit and (not job.memlim or job.mem < job.memlim
+						), 'The workers exceeding memory constraints were already filtered out'
 					if job.mem:
 						self.__postpone(self._jobs.popleft())
 					break

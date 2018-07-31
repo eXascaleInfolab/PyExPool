@@ -143,79 +143,80 @@ _LIMIT_WORKERS_RAM = True
  CHAINED_CONSTRAINTS = True
 
 
-Job(name, workdir=None, args=(), timeout=0, rsrtonto=False, task=None
-	, startdelay=0., onstart=None, ondone=None, params=None, category=None
-	, size=0, slowdown=1., omitafn=False, memkind=1, stdout=sys.stdout, stderr=sys.stderr):
+Job(name, workdir=None, args=(), timeout=0, rsrtonto=False, task=None #,*
+	, startdelay=0., onstart=None, ondone=None, params=None, category=None, size=0, slowdown=1.
+	, omitafn=False, memkind=1, memlim=0., stdout=sys.stdout, stderr=sys.stderr):
 	"""Initialize job to be executed
 
 	Job is executed in a separate process via Popen or Process object and is
 	managed by the Process Pool Executor
 
-	Main parameters:
-	name: str  - job name
-	workdir  - working directory for the corresponding process, None means the dir of the benchmarking
-	args  - execution arguments including the executable itself for the process
-		NOTE: can be None to make make a stub process and execute the callbacks
-	timeout  - execution timeout in seconds. Default: 0, means infinity
-	rsrtonto  - restart the job on timeout, Default: False. Can be used for
-		non-deterministic Jobs like generation of the synthetic networks to regenerate
-		the network on border cases overcoming getting stuck on specific values of the rand variables.
-	task: Task  - origin task if this job is a part of the task
-	startdelay  - delay after the job process starting to execute it for some time,
-		executed in the CONTEXT OF THE CALLER (main process).
-		ATTENTION: should be small (0.1 .. 1 sec)
-	onstart  - a callback, which is executed on the job starting (before the execution
-		started) in the CONTEXT OF THE CALLER (main process) with the single argument,
-		the job. Default: None
-		ATTENTION: must be lightweight
-		NOTE: can be executed a few times if the job is restarted on timeout
-	ondone  - a callback, which is executed on successful completion of the job in the
-		CONTEXT OF THE CALLER (main process) with the single argument, the job. Default: None
-		ATTENTION: must be lightweight
-	params  - additional parameters to be used in callbacks
-	stdout  - None or file name or PIPE for the buffered output to be APPENDED.
-		The path is interpreted in the CONTEXT of the CALLER
-	stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
-		ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited.
-		The path is interpreted in the CONTEXT of the CALLER
+		Main parameters:
+		name: str  - job name
+		workdir  - working directory for the corresponding process, None means the dir of the benchmarking
+		args  - execution arguments including the executable itself for the process
+			NOTE: can be None to make make a stub process and execute the callbacks
+		timeout  - execution timeout in seconds. Default: 0, means infinity
+		rsrtonto  - restart the job on timeout, Default: False. Can be used for
+			non-deterministic Jobs like generation of the synthetic networks to regenerate
+			the network on border cases overcoming getting stuck on specific values of the rand variables.
+		task: Task  - origin task if this job is a part of the task
+		startdelay  - delay after the job process starting to execute it for some time,
+			executed in the CONTEXT OF THE CALLER (main process).
+			ATTENTION: should be small (0.1 .. 1 sec)
+		onstart  - a callback, which is executed on the job starting (before the execution
+			started) in the CONTEXT OF THE CALLER (main process) with the single argument,
+			the job. Default: None
+			ATTENTION: must be lightweight
+			NOTE: can be executed a few times if the job is restarted on timeout
+		ondone  - a callback, which is executed on successful completion of the job in the
+			CONTEXT OF THE CALLER (main process) with the single argument, the job. Default: None
+			ATTENTION: must be lightweight
+		params  - additional parameters to be used in callbacks
+		stdout  - None or file name or PIPE for the buffered output to be APPENDED.
+			The path is interpreted in the CONTEXT of the CALLER
+		stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
+			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited.
+			The path is interpreted in the CONTEXT of the CALLER
 
-	Scheduling parameters:
-	omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled
-		and the process has multiple treads
-	category  - classification category, typically semantic context or part of the name,
-		used to identify related jobs;
-		requires _CHAINED_CONSTRAINTS
-	size  - expected relative memory complexity of the jobs of the same category,
-		typically it is size of the processing data, >= 0, 0 means undefined size
-		and prevents jobs chaining on constraints violation;
-		used on _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS
-	slowdown  - execution slowdown ratio, >= 0, where (0, 1) - speedup, > 1 - slowdown; 1 by default;
-		used for the accurate timeout estimation of the jobs having the same .category and .size.
-		requires _CHAINED_CONSTRAINTS
-	memkind  - kind of memory to be evaluated (average of virtual and resident memory
-		to not overestimate the instant potential consumption of RAM):
-		0  - mem for the process itself omitting the spawned sub-processes (if any)
-		1  - mem for the heaviest process of the process tree spawned by the original process
-			(including the origin itself)
-		2  - mem for the whole spawned process tree including the origin process
+		Scheduling parameters:
+		omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled
+			and the process has multiple treads
+		category  - classification category, typically semantic context or part of the name,
+			used to identify related jobs;
+			requires _CHAINED_CONSTRAINTS
+		size  - expected relative memory complexity of the jobs of the same category,
+			typically it is size of the processing data, >= 0, 0 means undefined size
+			and prevents jobs chaining on constraints violation;
+			used on _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS
+		slowdown  - execution slowdown ratio, >= 0, where (0, 1) - speedup, > 1 - slowdown; 1 by default;
+			used for the accurate timeout estimation of the jobs having the same .category and .size.
+			requires _CHAINED_CONSTRAINTS
+		memkind  - kind of memory to be evaluated (average of virtual and resident memory
+			to not overestimate the instant potential consumption of RAM):
+			0  - mem for the process itself omitting the spawned sub-processes (if any)
+			1  - mem for the heaviest process of the process tree spawned by the original process
+				(including the origin itself)
+			2  - mem for the whole spawned process tree including the origin process
+		memlim: float  - max amount of memory in GB allowed for the job execution, 0 - unlimited
 
-	Execution parameters, initialized automatically on execution:
-	tstart  - start time, filled automatically on the execution start (before onstart). Default: None
-	tstop  - termination / completion time after ondone
-		NOTE: onstart() and ondone() callbacks execution is included in the job execution time
-	proc  - process of the job, can be used in the ondone() to read its PIPE
-	mem  - consuming memory (smooth max of average of VMS and RSS, not just the current value)
-		or the least expected value inherited from the jobs of the same category having non-smaller size;
-		requires _LIMIT_WORKERS_RAM
-	terminates  - accumulated number of the received termination requests caused by the constraints violation
-		NOTE: > 0 (1 .. ExecPool._KILLDELAY) for the apps terminated by the execution pool
-			(resource constrains violation or ExecPool exception),
-			== 0 for the crashed apps
-	wkslim  - worker processes limit (max number) on the job postponing if any,
-		the job is postponed until at most this number of worker procs operate;
-		requires _LIMIT_WORKERS_RAM
-	chtermtime  - chained termination: None - disabled, False - by memory, True - by time;
-		requires _CHAINED_CONSTRAINTS
+		Execution parameters, initialized automatically on execution:
+		tstart  - start time, filled automatically on the execution start (before onstart). Default: None
+		tstop  - termination / completion time after ondone
+			NOTE: onstart() and ondone() callbacks execution is included in the job execution time
+		proc  - process of the job, can be used in the ondone() to read its PIPE
+		mem  - consuming memory (smooth max of average of VMS and RSS, not just the current value)
+			or the least expected value inherited from the jobs of the same category having non-smaller size;
+			requires _LIMIT_WORKERS_RAM
+		terminates  - accumulated number of the received termination requests caused by the constraints violation
+			NOTE: > 0 (1 .. ExecPool._KILLDELAY) for the apps terminated by the execution pool
+				(resource constrains violation or ExecPool exception),
+				== 0 for the crashed apps
+		wkslim  - worker processes limit (max number) on the job postponing if any,
+			the job is postponed until at most this number of worker processes operate;
+			requires _LIMIT_WORKERS_RAM
+		chtermtime  - chained termination: None - disabled, False - by memory, True - by time;
+			requires _CHAINED_CONSTRAINTS
 	"""
 ```
 

@@ -268,8 +268,8 @@ class TestExecPool(unittest.TestCase):
 	 		or had bad_alloc and termination of all related non-smaller jobs
 		"""
 		# Note: should be larger than 3*latency; 400 ms can be insufficient for the Python3
-		worktime = _TEST_LATENCY * 5
-		timeout = worktime * 2  # Note: should be larger than 3*latency
+		worktime = _TEST_LATENCY * 7
+		timeout = worktime * 3  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
 		# Execution pool timeout; Note: *ExecPool._KILLDELAY because non-started jobs exist here
 		etimeout = (max(1, _TEST_LATENCY) + timeout) * ExecPool._KILLDELAY
@@ -291,6 +291,9 @@ class TestExecPool(unittest.TestCase):
 			jmvsize = 5  # Size of the task violating memory constraints
 			jmv = Job('jmem_violate', args=(PYEXEC, '-c', allocDelayProg(inBytes(epoolMem * 2), worktime))
 				, category='cat2', size=jmvsize, timeout=timeout)
+			jmv2 = Job('jmem_violate2', args=(PYEXEC, '-c', allocDelayProg(inBytes(epoolMem), worktime))
+				# Note: jmvsize/2 to prevent chained termination
+				, category='cat2', size=jmvsize/2., memlim=epoolMem/2., timeout=timeout)
 			jmsDvs = Job('jmem_small_v1', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
 				, category='cat2', size=jmvsize-1, timeout=timeout)
 			jms1 = Job('jmem_small_1', args=(PYEXEC, '-c', allocDelayProg(None, worktime))
@@ -306,6 +309,7 @@ class TestExecPool(unittest.TestCase):
 			xpool.execute(jmb)
 
 			xpool.execute(jmv)
+			xpool.execute(jmv2)
 			xpool.execute(jmsDvs)
 			xpool.execute(jms1)
 			xpool.execute(jmsDvl1)
@@ -325,7 +329,10 @@ class TestExecPool(unittest.TestCase):
 			# Early termination cased by the bad_alloc (internal error in the external process)
 			self.assertLess(jmb.tstop - jmb.tstart, worktime)
 
-			self.assertLess(jmv.tstop - jmv.tstart, worktime)  # Early termination by the memory constraints violation
+			# Early termination by the ExecPool memory constraints violation
+			self.assertLess(jmv.tstop - jmv.tstart, worktime)
+			# Early termination by the job memory constraints violation
+			self.assertLess(jmv2.tstop - jmv2.tstart, worktime)
 			# Smaller size of the related chained job to the violated origin should not cause termination
 			self.assertGreaterEqual(jmsDvs.tstop - jmsDvs.tstart, worktime)
 			# Independent job should have graceful completion
