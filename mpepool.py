@@ -937,8 +937,9 @@ class Job(object):
 		"""
 		assert isinstance(name, str) and timeout >= 0 and (task is None or isinstance(task, Task)
 			) and size >= 0 and slowdown > 0 and memkind in (0, 1, 2) and memlim >= 0, (
-			'Job arguments are invalid, name: {}, timeout: {}, task type: {}, size: {}, slowdown: {}, memkind: {}'
-			.format(name, timeout, type(task).__name__, size, slowdown, memkind, memlim))
+			'Job arguments are invalid, name: {}, timeout: {}, task type: {}, size: {}'
+			', slowdown: {}, memkind: {}, memlim: {}'.format(name, timeout, type(task).__name__, size
+			, slowdown, memkind, memlim))
 		#if not args:
 		#	args = ("false")  # Create an empty process to schedule its execution
 
