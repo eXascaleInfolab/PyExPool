@@ -883,7 +883,9 @@ class Job(object):
 			ATTENTION: should be small (0.1 .. 1 sec)
 		onstart  - a callback, which is executed on the job starting (before the execution
 			started) in the CONTEXT OF THE CALLER (main process) with the single argument,
-			the job. Default: None
+			the job. Default: None.
+			If onstart() raises an exception then the job is completed before been started (.proc = None)
+			returning the error code (can be 0) and tracing the cause to the stderr.
 			ATTENTION: must be lightweight
 			NOTE: can be executed a few times if the job is restarted on timeout
 		ondone  - a callback, which is executed on successful completion of the job in the
@@ -2564,7 +2566,7 @@ class ExecPool(object):
 					job.wkslim = wkslim
 				assert memall > 0, ('The workers should remain and consume some memory'
 					', memall: {:.4f}, jmem: {:.4f} ({}), {} pjobs, {} workers, self._wkslim: {} / {}'
-					.format(memall, job.mem, job.name, len(pjobs), len(wksnum), wkslim, self._wkslim))
+					.format(memall, job.mem, job.name, len(pjobs), wksnum, wkslim, self._wkslim))
 		elif not self._workers:
 			wkslim = self._wkslim
 			memall = 0.

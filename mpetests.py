@@ -358,13 +358,17 @@ class TestExecPool(unittest.TestCase):
 			1) either no any non-started jobs
 			2) or the non-started jobs were already rescheduled by the related worker (absence of chained constraints)
 		"""
-		worktime = _TEST_LATENCY * 10  # Note: should be larger than 3*latency
+		worktime = _TEST_LATENCY * 10  # Note: should be larger than max(3, jobsnum)*latency
 		timeout = worktime * 2  # Note: should be larger than 3*latency
 		#etimeout = max(1, _TEST_LATENCY) + (worktime * 2) // 1  # Job work time
 		# Execution pool timeout; Note: * ExecPool._KILLDELAY because non-started jobs exist here and postponed twice
 		etimeout = (max(1, _TEST_LATENCY) + timeout) * ExecPool._KILLDELAY
 		assert _TEST_LATENCY * ExecPool._KILLDELAY < worktime < timeout and timeout < etimeout, (
 			'Testcase parameters validation failed')
+
+		def rteOnStart(job):
+			"""Run time Error in the onstart() callback"""
+			raise RuntimeError('Terminated on start')
 
 		# Note: we need another execution pool to set memlimit (10 MB) there
 		epoolMem = 0.15  # Execution pool mem limit, GB
@@ -382,13 +386,16 @@ class TestExecPool(unittest.TestCase):
 			jgmsp1 = Job('jgroup_mem_small_postponed_1', args=(PYEXEC, '-c', allocDelayProg(msmall*0.85, worktime))
 				, size=4, timeout=timeout, onstart=mock.MagicMock())
 			jgmsp2 = Job('jgroup_mem_small_postponed_2_to', args=(PYEXEC, '-c', allocDelayProg(msmall, worktime))
-				, timeout=worktime/2, ondone=mock.MagicMock())
+				, timeout=worktime/2., ondone=mock.MagicMock())
+			jgmtse = Job('jgroup_term_on_start_exc', args=(PYEXEC, '-c', allocDelayProg(msmall*2, worktime))
+				, timeout=timeout, onstart=rteOnStart, ondone=mock.MagicMock())
 
-			xpool.execute(jgms1)
+			self.assertFalse(xpool.execute(jgms1))
 			xpool.execute(jgms2)
 			xpool.execute(jgms3)
 			xpool.execute(jgmsp1)
 			xpool.execute(jgmsp2)
+			xpool.execute(jgmtse)
 
 			time.sleep(worktime / 3)  # Wait for the Job starting and memory allocation
 			# Verify exec pool completion before the timeout
@@ -398,17 +405,18 @@ class TestExecPool(unittest.TestCase):
 
 			# Verify timings, graceful completion of all jobs except the last one
 			self.assertLess(etime, etimeout)
-			self.assertGreaterEqual(jgms1.tstop - jgms1.tstart, worktime)
 			self.assertFalse(jgms1.proc.returncode)
-			self.assertGreaterEqual(jgms2.tstop - jgms2.tstart, worktime)
+			self.assertGreaterEqual(jgms1.tstop - jgms1.tstart, worktime)
 			self.assertFalse(jgms2.proc.returncode)
-			self.assertGreaterEqual(jgms3.tstop - jgms3.tstart, worktime)
+			self.assertGreaterEqual(jgms2.tstop - jgms2.tstart, worktime)
 			self.assertFalse(jgms3.proc.returncode)
-			self.assertGreaterEqual(jgmsp1.tstop - jgmsp1.tstart, worktime)
+			self.assertGreaterEqual(jgms3.tstop - jgms3.tstart, worktime)
 			self.assertFalse(jgmsp1.proc.returncode)
-			self.assertLess(jgmsp2.tstop - jgmsp2.tstart, worktime)
+			self.assertGreaterEqual(jgmsp1.tstop - jgmsp1.tstart, worktime)
 			self.assertTrue(jgmsp2.proc.returncode)
+			self.assertLess(jgmsp2.tstop - jgmsp2.tstart, worktime)
 			# Check the last completed job
+			self.assertEqual(jgmtse.proc, None)
 			self.assertTrue(jgms3.tstop <= tstart + etime)
 
 			# Verify handlers calls
@@ -418,6 +426,7 @@ class TestExecPool(unittest.TestCase):
 			jgmsp1.onstart.assert_called_with(jgmsp1)
 			self.assertTrue(1 <= jgmsp1.onstart.call_count <= 2)
 			jgmsp2.ondone.assert_not_called()
+			jgmtse.ondone.assert_not_called()
 
 
 	@unittest.skipUnless(_LIMIT_WORKERS_RAM and _CHAINED_CONSTRAINTS
