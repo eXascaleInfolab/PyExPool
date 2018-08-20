@@ -1138,16 +1138,17 @@ class Job(object):
 		for pout, plog in ((self.pipederr, self.perrlog), (self.pipedout, self.poutlog)):
 			if pout is None or plog is None:
 				continue
-			# Ensure existance of the parent directory
-			basedir = os.path.split(plog)[0]
-			if basedir and not os.path.exists(plog):
-				os.makedirs(plog)
+			# Ensure existence of the parent directory for the filename
+			if isinstance(plog, str):
+				basedir = os.path.split(plog)[0]
+				if basedir and not os.path.exists(plog):
+					os.makedirs(plog)
 			# Append to the file
 			flog = None
 			try:
 				# Add a timestamp if the file is not empty to distinguish logs
 				timestamp = None
-				flog = open(plog, 'a')
+				flog = plog if not isinstance(plog, str) else open(plog, 'a')
 				if os.fstat(flog.fileno()).st_size:
 					if timestamp is None:
 						timestamp = time.gmtime()
@@ -1160,7 +1161,7 @@ class Job(object):
 					flog = sys.stdout
 			try:
 				print(timeheader(timestamp), file=flog)  # Note: prints also newline unlike flog.write()
-				flog.write(plog)  # Write the piped output
+				flog.write(pout)  # Write the piped output
 			except IOError as err:
 				print('ERROR on logging piped data "{}" for "{}": {}'
 					.format(plog, self.name, err), file=sys.stderr)
