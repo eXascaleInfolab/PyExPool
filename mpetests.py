@@ -221,7 +221,8 @@ class TestExecPool(unittest.TestCase):
 			, category='cat1', size=2, timeout=timeout)
 		self._execpool.execute(jm)
 		jss = Job('jslave_smaller', args=('sleep', str(worktime))
-			, category='cat1', size=1, ondone=mock.MagicMock())  # ondone() should be called for the completed job
+			# ondone() should be called for the completed job
+			, category='cat1', size=1, ondone=mock.MagicMock(), onfinish=mock.MagicMock())
 		self._execpool.execute(jss)
 		jsl = Job('jslave_larger', args=('sleep', str(worktime))
 			, category='cat1', size=3, ondone=mock.MagicMock())  # ondone() should be skipped for the terminated job
@@ -230,7 +231,7 @@ class TestExecPool(unittest.TestCase):
 			, ondone=mock.MagicMock())  # ondone() should be called for the completed job
 		self._execpool.execute(jso)
 		jsf = Job('job_failed', args=('sleep'), category='cat_f'
-			, ondone=mock.MagicMock())  # ondone() should be called for the completed job
+			, ondone=mock.MagicMock(), onfinish=mock.MagicMock())  # ondone() should be called for the completed job
 		self._execpool.execute(jsf)
 
 		# Execution pool timeout
@@ -253,9 +254,11 @@ class TestExecPool(unittest.TestCase):
 		self.assertLess(jsf.tstop - jsl.tstart, worktime)
 		# Verify ondone() calls
 		jss.ondone.assert_called_once_with(jss)
+		jss.onfinish.assert_called_once_with(jss)
 		jsl.ondone.assert_not_called()
 		jso.ondone.assert_called_once_with(jso)
 		jsf.ondone.assert_not_called()
+		jsf.onfinish.assert_called_once_with(jsf)
 
 
 	@unittest.skipUnless(_LIMIT_WORKERS_RAM, 'Requires _LIMIT_WORKERS_RAM')

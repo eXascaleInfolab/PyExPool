@@ -106,12 +106,12 @@ _WEBUI = True
 __imperr = None  # Import error
 if _WEBUI:
 	try:
-		# ATTENTION: Python3 newer treats imports as realtive and results in error here if mpewui is a local module
+		# ATTENTION: Python3 newer treats imports as relative and results in error here if mpewui is a local module
 		from mpewui import WebUiApp, UiCmdId, UiResOpt, UiResCol, SummaryBrief
 	except ImportError as wuerr:
 		try:
 			# Note: this case should be the second because explicit relative imports cause various errors
-			# under Python2 and Python3, which complicates thier handling
+			# under Python2 and Python3, which complicates their handling
 			from .mpewui import WebUiApp, UiCmdId, UiResOpt, UiResCol, SummaryBrief
 		except ImportError as wuerr:
 			__imperr = wuerr  # Note: exceptions are local in Python 3
@@ -549,10 +549,10 @@ class TaskInfoPrefmt(object):
 	__slots__ = ('compound', 'ident', 'data')
 
 	def __init__(self, data, ident=0, compound=None):
-		"""Initialization of the preformated task info:
+		"""Initialization of the pre-formated task info:
 
 		data: list  - data to be displayed (property name/value)
-		ident: uint  - current identation
+		ident: uint  - current indentation
 		compound: bool  - whether the item is a header of the compound item (task),
 			None means that the item is not a header at all
 		"""
@@ -573,11 +573,11 @@ def unfoldDepthFirst(tinfext, indent=0):
 	Args:
 		tinfext: TaskInfoExt  - extended task info to be unfolded and printed
 		indent: int  - current indent for the output hierarchy formatting
-	return  - list(hdr, ident, list(vals)), maxident:
+	return  - list(hdr, indent, list(vals)), maxindent:
 		hdr: bool  - whether the row is a header
-		ident: uint  - current identation
+		indent: uint  - current indentation
 		vals  - outputting values
-		wide: uint  - [max] output wide in items/cols considering the identation
+		wide: uint  - [max] output wide in items/cols considering the indentation
 	"""
 	wide = indent
 	res = []
@@ -864,8 +864,8 @@ class Job(object):
 
 	# NOTE: keyword-only arguments are specified after the *, supported only since Python 3
 	def __init__(self, name, workdir=None, args=(), timeout=0, rsrtonto=False, task=None #,*
-	, startdelay=0., onstart=None, ondone=None, params=None, category=None, size=0, slowdown=1.
-	, omitafn=False, memkind=1, memlim=0., stdout=sys.stdout, stderr=sys.stderr):
+	, startdelay=0., onstart=None, ondone=None, onfinish=None, params=None, category=None, size=0, slowdown=1.
+	, omitafn=False, memkind=1, memlim=0., stdout=sys.stdout, stderr=sys.stderr, poutlog=None, perrlog=None):
 		"""Initialize job to be executed
 
 		Main parameters:
@@ -891,12 +891,17 @@ class Job(object):
 		ondone  - a callback, which is executed on successful completion of the job in the
 			CONTEXT OF THE CALLER (main process) with the single argument, the job. Default: None
 			ATTENTION: must be lightweight
+		onfinish  - a callback, which is executed on either completion or termination of the job in the
+			CONTEXT OF THE CALLER (main process) with the single argument, the job. Default: None
+			ATTENTION: must be lightweight
 		params  - additional parameters to be used in callbacks
-		stdout  - None or file name or PIPE for the buffered output to be APPENDED.
-			The path is interpreted in the CONTEXT of the CALLER
-		stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
+		stdout  - None, stdout, stderr, file name or PIPE for the buffered output to be APPENDED.
+			The path is interpreted in the CALLER CONTEXT
+		stderr  - None, stdout, stderr, file name or PIPE for the unbuffered error output to be APPENDED
 			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited.
-			The path is interpreted in the CONTEXT of the CALLER
+			The path is interpreted in the CALLER CONTEXT
+		poutlog: str  - file name to log piped stdout if required. Actual only if stdout is PIPE.
+		perrlog: str  - file name to log piped stderr if required. Actual only if stderr is PIPE.
 
 		Scheduling parameters:
 		omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled
@@ -924,6 +929,12 @@ class Job(object):
 		tstop  - termination / completion time after ondone
 			NOTE: onstart() and ondone() callbacks execution is included in the job execution time
 		proc  - process of the job, can be used in the ondone() to read its PIPE
+		pipedout  - contains output from the PIPE supplied to stdout if any, None otherwise
+			NOTE: pipedout is used to avoid a deadlock waiting on the process completion having a piped stdout
+			https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
+		pipederr  - contains output from the PIPE supplied to stderr if any, None otherwise
+			NOTE: pipederr is used to avoid a deadlock waiting on the process completion having a piped stderr
+			https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
 		mem  - consuming memory (smooth max of average of VMS and RSS, not just the current value)
 			or the least expected value inherited from the jobs of the same category having non-smaller size;
 			requires _LIMIT_WORKERS_RAM
@@ -938,10 +949,11 @@ class Job(object):
 			requires _CHAINED_CONSTRAINTS
 		"""
 		assert isinstance(name, str) and timeout >= 0 and (task is None or isinstance(task, Task)
-			) and size >= 0 and slowdown > 0 and memkind in (0, 1, 2) and memlim >= 0, (
-			'Job arguments are invalid, name: {}, timeout: {}, task type: {}, size: {}'
-			', slowdown: {}, memkind: {}, memlim: {}'.format(name, timeout, type(task).__name__, size
-			, slowdown, memkind, memlim))
+			) and size >= 0 and slowdown > 0 and memkind in (0, 1, 2) and memlim >= 0 and (
+			poutlog is None or isinstance(poutlog, str)) and (perrlog is None or isinstance(perrlog, str)
+			), ('Job arguments are invalid, name: {}, timeout: {}, task type: {}, size: {}'
+			', slowdown: {}, memkind: {}, memlim: {}, poutlog: {}, perrlog: {}'.format(
+			name, timeout, type(task).__name__, size, slowdown, memkind, memlim, poutlog, perrlog))
 		#if not args:
 		#	args = ("false")  # Create an empty process to schedule its execution
 
@@ -958,14 +970,19 @@ class Job(object):
 		# Callbacks ------------------------------------------------------------
 		self.onstart = None if not callable(onstart) else types.MethodType(onstart, self)
 		self.ondone = None if not callable(ondone) else types.MethodType(ondone, self)
+		self.onfinish = None if not callable(onfinish) else types.MethodType(onfinish, self)
 		# I/O redirection ------------------------------------------------------
 		self.stdout = stdout
 		self.stderr = stderr
+		self.poutlog = poutlog
+		self.perrlog = perrlog
 		# Internal properties --------------------------------------------------
 		self.tstart = None  # start time is filled automatically on the execution start, before onstart. Default: None
 		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
 		# Internal attributes
 		self.proc = None  # Process of the job, can be used in the ondone() to read its PIPE
+		self.pipedout = None
+		self.pipederr = None
 		self.terminates = 0  # Accumulated number of the received termination requests caused by the constraints violation
 		# Process-related file descriptors to be closed
 		self._fstdout = None
@@ -974,7 +991,7 @@ class Job(object):
 		self._omitafn = omitafn
 		# Whether the job is restarting (in process) on timeout or because of the
 		# GROUP memory limit violation (where the job itself does not violate any constraints);
-		# required to be aware whether to complete the ower task
+		# required to be aware whether to complete the owner task
 		self._restarting = False
 		if _LIMIT_WORKERS_RAM:
 			# Note: wkslim is used only internally for the cross-category ordering
@@ -990,7 +1007,7 @@ class Job(object):
 			self.slowdown = slowdown  # Execution slowdown ratio, >= 0, where (0, 1) - speedup, > 1 - slowdown
 			self.chtermtime = None  # Chained termination by time: None, False - by memory, True - by time
 		if _LIMIT_WORKERS_RAM or _CHAINED_CONSTRAINTS:
-			# Note: it makes sence to compare jobs by size only in the same category,
+			# Note: it makes sense to compare jobs by size only in the same category,
 			# used for both timeout and memory constraints
 			self.size = size  # Expected memory complexity of the job, typically its size of the processing data
 		# Update the task if any with this Job
@@ -1070,6 +1087,27 @@ class Job(object):
 		return None
 
 
+	def fetchPipedData(self, timeout=None):
+		"""Fetch PIPED data from the job if PIPEs are used
+
+		This function should be called before waiting on the process completion
+		otherwise .wait() it may cause a deadlock:
+		https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
+
+		timeout: float or None  - waiting timeout, None means infinity, 0 means immediately
+
+		return  fetched: bool - whether any data is fetched
+		"""
+		if (self.stdout is not subprocess.PIPE and self.stderr is not subprocess.PIPE
+		# Consider that the data can be already fetched and should not be rewritten with None
+		) or self.pipedout is not None or self.pipederr is not None:
+			return
+		# NOTE: .communicate() waits until the pipe is closed, which can be performed
+		# on the process completion but may be also performed earlier:
+		# https://docs.python.org/3/library/subprocess.html#subprocess.Popen.communicate
+		self.pipedout, self.pipederr = self.proc.communicate(timeout)
+
+
 	def complete(self, graceful=None):
 		"""Completion function
 		ATTENTION: This function is called after the destruction of the job-associated process
@@ -1080,14 +1118,53 @@ class Job(object):
 		"""
 		# Close process-related file descriptors
 		for fd in (self._fstdout, self._fstderr):
+			# Note: subprocess.PIPE, subprocess.STDOUT are just int descriptors, not objects.
+			# However in the proc they are represented but the system objects.
 			if fd and fd is not sys.stdout and fd is not sys.stderr:  #  and hasattr(fd, 'close')
 				try:
 					fd.close()
+				except AttributeError:  # .close() method does not exist in this object
+					pass
 				except IOError as err:
 					print('ERROR, job "{}" I/O channel closing failed: {}. {}'.format(
 						self.name, err, traceback.format_exc(5)), file=sys.stderr)
 		self._fstdout = None
 		self._fstderr = None
+
+		# Fetch piped data if any, required to be done before the proc.wait to avoid deadlocks:
+		# https://docs.python.org/3/library/subprocess.html#subprocess.Popen.waithttps://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
+		self.fetchPipedData(0)
+		# Persis the piped output if required
+		for pout, plog in ((self.pipederr, self.perrlog), (self.pipedout, self.poutlog)):
+			if pout is None or plog is None:
+				continue
+			# Ensure existance of the parent directory
+			basedir = os.path.split(plog)[0]
+			if basedir and not os.path.exists(plog):
+				os.makedirs(plog)
+			# Append to the file
+			flog = None
+			try:
+				# Add a timestamp if the file is not empty to distinguish logs
+				timestamp = None
+				flog = open(plog, 'a')
+				if os.fstat(flog.fileno()).st_size:
+					if timestamp is None:
+						timestamp = time.gmtime()
+			except IOError as err:
+				print('ERROR on opening the piped log "{}" for "{}": {}. Default output channel is used.'
+					.format(plog, self.name, err), file=sys.stderr)
+				if pout is self.pipederr:
+					flog = sys.stderr
+				if pout is self.pipedout:
+					flog = sys.stdout
+			try:
+				print(timeheader(timestamp), file=flog)  # Note: prints also newline unlike flog.write()
+				flog.write(plog)  # Write the piped output
+			except IOError as err:
+				print('ERROR on logging piped data "{}" for "{}": {}'
+					.format(plog, self.name, err), file=sys.stderr)
+
 
 		if self.proc is not None:
 			ecode = self.proc.poll()
@@ -1117,34 +1194,31 @@ class Job(object):
 		# Job-related post execution
 		if graceful is None:
 			graceful = self.proc is not None and not self.proc.returncode
-		if graceful:
-			if self.ondone:
-				try:
-					self.ondone()
-				except Exception as err:  #pylint: disable=W0703
-					print('ERROR in ondone callback of "{}": {}. {}'.format(
-						self.name, err, traceback.format_exc(5)), file=sys.stderr)
-			# Clean up empty logs (can be left for the terminating process to avoid delays)
-			# Remove empty logs skipping the system devnull
-			tpaths = []  # Base dir of the output
-			if (self.stdout and isinstance(self.stdout, str) and self.stdout != os.devnull
-			and os.path.exists(self.stdout) and os.path.getsize(self.stdout) == 0):
-				tpath = os.path.split(self.stdout)[0]
-				if tpath:
-					tpaths.append(tpath)
-				os.remove(self.stdout)
-			if (self.stderr and isinstance(self.stderr, str) and self.stderr != os.devnull
-			and os.path.exists(self.stderr) and os.path.getsize(self.stderr) == 0):
-				tpath = os.path.split(self.stderr)[0]
-				if tpath and (not tpaths or tpath not in tpaths):
-					tpaths.append(tpath)
-				os.remove(self.stderr)
-			# Also remove the directory if it is empty
-			for tpath in tpaths:
-				try:
-					os.rmdir(tpath)
-				except OSError:
-					pass  # The dir is not empty, just skip it
+		if graceful and self.ondone:
+			applyCallback(self.ondone, self.name)
+		if self.onfinish:
+			applyCallback(self.onfinish, self.name)
+		# Clean up empty logs (can be left for the terminating process to avoid delays)
+		# Remove empty logs skipping the system devnull
+		tpaths = []  # Base dir of the output
+		if (self.stdout and isinstance(self.stdout, str) and self.stdout != os.devnull
+		and os.path.exists(self.stdout) and os.path.getsize(self.stdout) == 0):
+			tpath = os.path.split(self.stdout)[0]
+			if tpath:
+				tpaths.append(tpath)
+			os.remove(self.stdout)
+		if (self.stderr and isinstance(self.stderr, str) and self.stderr != os.devnull
+		and os.path.exists(self.stderr) and os.path.getsize(self.stderr) == 0):
+			tpath = os.path.split(self.stderr)[0]
+			if tpath and (not tpaths or tpath not in tpaths):
+				tpaths.append(tpath)
+			os.remove(self.stderr)
+		# Also remove the directory if it is empty
+		for tpath in tpaths:
+			try:
+				os.rmdir(tpath)
+			except OSError:
+				pass  # The dir is not empty, just skip it
 		# Updated execution status
 		self.tstop = time.perf_counter()
 		# Call owner task finalization for the non-restarting jobs
@@ -1365,7 +1439,7 @@ class AffinityMask(object):
 
 
 	def __call__(self, i):
-		"""Evaluate CPUs affinity mask for the specified group indes of size afnstep
+		"""Evaluate CPUs affinity mask for the specified group index of the size afnstep
 
 		i  - index of the selecting group of logical CPUs
 		return  - mask of the first or all logical CPUs
@@ -1425,7 +1499,7 @@ class AffinityMask(object):
 				cpus = []
 				for hwt in range(self.CORE_THREADS):
 					# Index of the logical cpu:
-					# innode + ihwthread_shift
+					# inode + ihwthread_shift
 					i = indcpu + hwt * self.CORES
 					cpus.append(str(i) if ncores <= 1 else '{}-{}'.format(i, i + ncores-1))
 					if self.first:
@@ -1452,7 +1526,7 @@ class ExecPool(object):
 	_JMEMLIMH = _GOLDEN  # Hihg memory limit ratio for the jobs restart, recommended: 1.2 .. 2
 	_JMEMLIML = 1 / _GOLDEN  # Low memory limit ratio for the jobs restart
 	# Memory threshold ratio, multiplier for the job to have a gap and
-	# reduce the number of reschedulings, recommended value: 1.2 .. 1.6
+	# reduce the number of reschedules, recommended value: 1.2 .. 1.6
 	_JMEMTRR = 3 - _GOLDEN  # 1.382; 1.5
 	assert _JMEMTRR >= 1, 'Memory threshold ratio should be >= 1'
 
@@ -1543,7 +1617,7 @@ class ExecPool(object):
 		self.__termlock = Lock()
 		self.alive = True  # The execution pool is in the working state (has not been terminated)
 		self.failures = []  # Failed jobs (terminated or having non-zero return code)
-		self.jobsdone = 0  # The number of successfuly completed jobs (non-terminated and with zero return code)
+		self.jobsdone = 0  # The number of successfully completed jobs (non-terminated and with zero return code)
 		self.tasks = set()
 
 		if self.memlimit and self.memlimit != memlimit:
@@ -1556,7 +1630,7 @@ class ExecPool(object):
 		global _WEBUI  #pylint: disable=W0603
 		if _WEBUI and webuiapp is not None:
 			# ATTENTION: Python3 includes the path to the instance type check, which
-			# affects the relative imports (importing mpepool as a subpackage):
+			# affects the relative imports (importing mpepool as a sub-package):
 			# <class 'utils.mpewui.WebUiApp'> != <class 'mpewui.WebUiApp'>...
 			if _DEBUG_TRACE:
 				assert isinstance(webuiapp, WebUiApp) or type(webuiapp).__name__ == WebUiApp.__name__, (
@@ -1634,7 +1708,7 @@ class ExecPool(object):
 					self._uicmd.id, propflt, objflt), file=sys.stderr)
 			# Prepare .data for the response results
 			data.clear()
-			# Set CPU and RAM consuption statistics
+			# Set CPU and RAM consumption statistics
 			if _LIMIT_WORKERS_RAM:
 				data['cpuLoad'] = psutil.cpu_percent() / 100.  # float E[0, 1]
 				data['ramUsage'] = inGigabytes(psutil.virtual_memory().used)  # float E [0, 1]
@@ -1734,7 +1808,7 @@ class ExecPool(object):
 					tasksInfo = []
 					tixwide = 0  # tasksInfo max wide
 					for task, tie in viewitems(ties):
-						# Omit repetative listing of subhierarchies (they are listed from the root task)
+						# Omit repetitive listing of sub-hierarchies (they are listed from the root task)
 						if task.task is not None:
 							continue
 						tls, twide = unfoldDepthFirst(tie, indent=0)
@@ -2001,7 +2075,7 @@ class ExecPool(object):
 		# Print hierarchy of the failed tasks from the root (top) level
 		print('\nFAILED tasks with their jobs:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		for task, tie in viewitems(ties):
-			# Omit repetative listing of subhierarchies (they are listed from the root task)
+			# Omit repetitive listing of sub-hierarchies (they are listed from the root task)
 			if task.task is None:
 				printDepthFirst(tie, cindent='', indstep=indent, colsep=colsep)
 
@@ -2027,7 +2101,7 @@ class ExecPool(object):
 		# - wksnum < self._wkslim
 		# wksnum = len(self._workers)  # The current number of worker processes
 		assert self._workers and ((job.terminates or job.tstart is None)
-			# and _LIMIT_WORKERS_RAM and not job in self._workers and not job in self._jobs
+			# and _LIMIT_WORKERS_RAM and job not in self._workers and job not in self._jobs
 			# # Note: self._jobs scanning is time-consuming
 			and (not self.memlimit or job.mem < self.memlimit)  # and wksnum < self._wkslim
 			and (job.tstart is None) == (job.tstop is None) and (not job.timeout
@@ -2131,6 +2205,8 @@ class ExecPool(object):
 		if job.terminates:
 			job.terminates = 0  # Reset termination requests counter
 			job.proc = None  # Reset old job process if any
+			job.pipedout = None  # Reset piped stdout if any
+			job.pipederr = None  # Reset piped stderr if any
 			job.tstop = None  # Reset the completion / termination time
 			job._restarting = False
 			# Note: retain previous value of mem for better scheduling, it is the valid value for the same job
@@ -2167,12 +2243,12 @@ class ExecPool(object):
 						os.makedirs(basedir)
 					try:
 						fout = None
-						if joutp == job.stdout:
+						if joutp is job.stdout:
 							fout = open(joutp, 'a')
 							job._fstdout = fout  #pylint: disable=W0212
 							fstdout = fout
 							outcapt = 'stdout'
-						elif joutp == job.stderr:
+						elif joutp is job.stderr:
 							fout = open(joutp, 'a')
 							job._fstderr = fout  #pylint: disable=W0212
 							fstderr = fout
@@ -2187,10 +2263,14 @@ class ExecPool(object):
 					except IOError as err:
 						print('ERROR on opening custom {} "{}" for "{}": {}. Default is used.'
 							.format(outcapt, joutp, job.name, err), file=sys.stderr)
+						if joutp is job.stdout:
+							fout = sys.stdout
+						if joutp is job.stderr:
+							fout = sys.stderr
 				else:
-					if joutp == job.stdout:
+					if joutp is job.stdout:
 						fstdout = joutp
-					elif joutp == job.stderr:
+					elif joutp is job.stderr:
 						fstderr = joutp
 					else:
 						raise ValueError('Invalid output stream buffer: ' + str(joutp))
@@ -2274,6 +2354,13 @@ class ExecPool(object):
 			# Sequential non-concurrent job processing
 			err = None
 			try:
+				# Before waiting on the process its output should be fetched if PIPE is used
+				# otherwise it may cause a deadlock:
+				# https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
+				if job.stdout is subprocess.PIPE or job.stderr is subprocess.PIPE:
+					# Note: .fetchPipedData() waits by default until the pipe is closed, which
+					# happens on the process completion but also can be performed earlier
+					job.fetchPipedData()
 				job.proc.wait()
 			except BaseException as err:  # Should not occur: subprocess.CalledProcessError
 				print('ERROR on the sequential execution of "{}" occurred: {}, the job is discarded. {}'
@@ -2306,7 +2393,22 @@ class ExecPool(object):
 				# Do nothing if the affinity is not set for this process
 		if graceful is None:
 			graceful = not job.terminates and job.proc is not None and not job.proc.returncode
-		job.complete(graceful)  # Note: it also calls finalization of the owner task
+		# Note: job completion also calls finalization of the owner task and
+		# may communicate with the process to fetch the PIPE output
+		job.complete(graceful)
+		# Finalize the output channels for the PIPEs, which is essential if they are used as input channels
+		# to another processes since in such case it yields SIGPIPE:
+		# https://docs.python.org/3/library/subprocess.html#subprocess.Popen.stdout
+		# Note: proc.stdout and/or proc.stderr are not None only if the PIPEs are used
+		for pout in (job.proc.stdout, job.proc.stderr):
+			if pout is not None:
+				try:
+					pout.close()
+				except AttributeError:  # .close() method does not exist in this object
+					pass
+				except IOError as err:
+					print('ERROR, job "{}" PIPE closing failed: {}. {}'.format(
+						job.name, err, traceback.format_exc(5)), file=sys.stderr)
 		# Update failures list skipping automatically restarting tasks
 		if graceful:
 			self.jobsdone += 1
@@ -2611,21 +2713,21 @@ class ExecPool(object):
 			elif not self._workers or (job.rsrtonto and exectime >= job.timeout):
 				# Note: if the job was terminated by timeout then memory limit was not met
 				# Note: earlier executed job might not fit into the RAM now because of
-				# the inreasing mem consumption by the workers
+				# the increasing mem consumption by the workers
 				#if _DEBUG_TRACE >= 3:
 				#	print('  "{}" is being rescheduled, workers: {} / {}, estimated mem: {:.4f} / {:.4f} GB'
 				#		.format(job.name, len(self._workers), self._wkslim, memall + job.mem, self.memlimit)
 				#		, file=sys.stderr)
 				#assert not self.memlimit or memall + job.mem * self._JMEMTRR < self.memlimit, (
 				#	'Group exceeding of the memory limit should be already processed')
-				if not self.__start(job) and self.memlimit:  # Note: sucessful start returns 0
+				if not self.__start(job) and self.memlimit:  # Note: successful start returns 0
 					memall += job.mem  # Reuse .mem from the previous run if exists
 				# Note: do not call complete() on failed restart
 			else:
 				assert self._workers and (not job.timeout or exectime < job.timeout
 					), 'Timeout violating jobs should be already skipped and workers should exist'
 				# The job was terminated (by group violation of memory limit or timeout with restart),
-				# but now can be started successfully and will be satrted soon
+				# but now can be started successfully and will be started soon
 				self.__postpone(job, True)
 		# Note: the number of workers is not reduced to less than 1
 
@@ -2662,7 +2764,7 @@ class ExecPool(object):
 					if job.mem:
 						self.__postpone(self._jobs.popleft())
 					break
-				elif not self.__start(self._jobs.popleft()):  # Note: sucessful start returns 0
+				elif not self.__start(self._jobs.popleft()):  # Note: successful start returns 0
 					if self.memlimit:
 						memall += job.mem  # Reuse .mem from the previous run if exists
 					# If the jobs terminated and workers became empty then only a single worker should be created
