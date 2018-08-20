@@ -1145,11 +1145,11 @@ class Job(object):
 					os.makedirs(plog)
 			# Append to the file
 			flog = None
+			timestamp = None
 			try:
-				# Add a timestamp if the file is not empty to distinguish logs
-				timestamp = None
 				flog = plog if not isinstance(plog, str) else open(plog, 'a')
-				if os.fstat(flog.fileno()).st_size:
+				# Add a timestamp if the file is not empty to distinguish logs
+				if isinstance(plog, str) and os.fstat(flog.fileno()).st_size:
 					if timestamp is None:
 						timestamp = time.gmtime()
 			except IOError as err:
@@ -1160,7 +1160,8 @@ class Job(object):
 				if pout is self.pipedout:
 					flog = sys.stdout
 			try:
-				print(timeheader(timestamp), file=flog)  # Note: prints also newline unlike flog.write()
+				if timestamp is not None:
+					print(timeheader(timestamp), file=flog)  # Note: prints also newline unlike flog.write()
 				flog.write(pout)  # Write the piped output
 			except IOError as err:
 				print('ERROR on logging piped data "{}" for "{}": {}'
