@@ -144,8 +144,8 @@ _LIMIT_WORKERS_RAM = True
 
 
 Job(name, workdir=None, args=(), timeout=0, rsrtonto=False, task=None #,*
-	, startdelay=0., onstart=None, ondone=None, params=None, category=None, size=0, slowdown=1.
-	, omitafn=False, memkind=1, memlim=0., stdout=sys.stdout, stderr=sys.stderr):
+	, startdelay=0., onstart=None, ondone=None, onfinish=None, params=None, category=None, size=0, slowdown=1.
+	, omitafn=False, memkind=1, memlim=0., stdout=sys.stdout, stderr=sys.stderr, poutlog=None, perrlog=None):
 	"""Initialize job to be executed
 
 	Job is executed in a separate process via Popen or Process object and is
@@ -174,12 +174,17 @@ Job(name, workdir=None, args=(), timeout=0, rsrtonto=False, task=None #,*
 		ondone  - a callback, which is executed on successful completion of the job in the
 			CONTEXT OF THE CALLER (main process) with the single argument, the job. Default: None
 			ATTENTION: must be lightweight
+		onfinish  - a callback, which is executed on either completion or termination of the job in the
+			CONTEXT OF THE CALLER (main process) with the single argument, the job. Default: None
+			ATTENTION: must be lightweight
 		params  - additional parameters to be used in callbacks
 		stdout  - None or file name or PIPE for the buffered output to be APPENDED.
 			The path is interpreted in the CONTEXT of the CALLER
 		stderr  - None or file name or PIPE or STDOUT for the unbuffered error output to be APPENDED
 			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited.
 			The path is interpreted in the CONTEXT of the CALLER
+		poutlog: str  - file name to log piped stdout if required. Actual only if stdout is PIPE.
+		perrlog: str  - file name to log piped stderr if required. Actual only if stderr is PIPE.
 
 		Scheduling parameters:
 		omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled
@@ -207,6 +212,12 @@ Job(name, workdir=None, args=(), timeout=0, rsrtonto=False, task=None #,*
 		tstop  - termination / completion time after ondone
 			NOTE: onstart() and ondone() callbacks execution is included in the job execution time
 		proc  - process of the job, can be used in the ondone() to read its PIPE
+		pipedout  - contains output from the PIPE supplied to stdout if any, None otherwise
+			NOTE: pipedout is used to avoid a deadlock waiting on the process completion having a piped stdout
+			https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
+		pipederr  - contains output from the PIPE supplied to stderr if any, None otherwise
+			NOTE: pipederr is used to avoid a deadlock waiting on the process completion having a piped stderr
+			https://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
 		mem  - consuming memory (smooth max of average of VMS and RSS, not just the current value)
 			or the least expected value inherited from the jobs of the same category having non-smaller size;
 			requires _LIMIT_WORKERS_RAM
