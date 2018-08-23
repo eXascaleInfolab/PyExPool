@@ -887,7 +887,9 @@ class Job(object):
 			If onstart() raises an exception then the job is completed before been started (.proc = None)
 			returning the error code (can be 0) and tracing the cause to the stderr.
 			ATTENTION: must be lightweight
-			NOTE: can be executed a few times if the job is restarted on timeout
+			NOTE:
+				- It can be executed several times if the job is restarted on timeout
+				- Most of the runtime job attributes are not defined yet
 		ondone  - a callback, which is executed on successful completion of the job in the
 			CONTEXT OF THE CALLER (main process) with the single argument, the job. Default: None
 			ATTENTION: must be lightweight
@@ -900,10 +902,8 @@ class Job(object):
 		stderr  - None, stdout, stderr, file name or PIPE for the unbuffered error output to be APPENDED
 			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited.
 			The path is interpreted in the CALLER CONTEXT
-		poutlog: str  - file name to log piped stdout pre-pended with the timestamp
-			even in case the log body is empty highlight the logging event itself. Actual only if stdout is PIPE.
-		perrlog: str  - file name to log piped stderr pre-pended with the timestamp
-			even in case the log body is empty highlight the logging event itself. Actual only if stdout is PIPE.
+		poutlog: str  - file name to log non-empty piped stdout pre-pended with the timestamp. Actual only if stdout is PIPE.
+		perrlog: str  - file name to log non-empty piped stderr pre-pended with the timestamp. Actual only if stdout is PIPE.
 
 		Scheduling parameters:
 		omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled
@@ -986,9 +986,9 @@ class Job(object):
 		self.pipedout = None
 		self.pipederr = None
 		self.terminates = 0  # Accumulated number of the received termination requests caused by the constraints violation
-		# Process-related file descriptors to be closed
-		self._fstdout = None
-		self._fstderr = None
+		# Process-related unified logging descriptors of file / system output channel / PIPE related system object
+		self._stdout = None
+		self._stderr = None
 		# Omit scheduler affinity policy (actual when some process is computed on all treads, etc.)
 		self._omitafn = omitafn
 		# Whether the job is restarting (in process) on timeout or because of the
@@ -1118,27 +1118,12 @@ class Job(object):
 		graceful  - the job is successfully completed or it was terminated / crashed, bool.
 			None means use "not self.proc.returncode" (i.e. whether errcode is 0)
 		"""
-		# Close process-related file descriptors
-		for fd in (self._fstdout, self._fstderr):
-			# Note: subprocess.PIPE, subprocess.STDOUT are just int descriptors, not objects.
-			# However in the proc they are represented but the system objects.
-			if fd and fd is not sys.stdout and fd is not sys.stderr:  #  and hasattr(fd, 'close')
-				try:
-					fd.close()
-				except AttributeError:  # .close() method does not exist in this object
-					pass
-				except IOError as err:
-					print('ERROR, job "{}" I/O channel closing failed: {}. {}'.format(
-						self.name, err, traceback.format_exc(5)), file=sys.stderr)
-		self._fstdout = None
-		self._fstderr = None
-
 		# Fetch piped data if any, required to be done before the proc.wait to avoid deadlocks:
 		# https://docs.python.org/3/library/subprocess.html#subprocess.Popen.waithttps://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
 		self.fetchPipedData(0)
 		# Persis the piped output if required
 		for pout, plog in ((self.pipedout, self.poutlog), (self.pipederr, self.perrlog)):
-			if pout is None or plog is None:
+			if not pout or plog is None:  # Omit produciton of the empty logs
 				continue
 			# Ensure existence of the parent directory for the filename
 			if isinstance(plog, str):
@@ -1157,7 +1142,7 @@ class Job(object):
 						timestamp = time.gmtime()
 			except IOError as err:
 				print('ERROR on opening the piped log "{}" for "{}": {}. Default output channel is used.'
-					.format(plog, self.name, err), file=sys.stderr)
+					.format(plog, self.name, err), file=sys.stdout)
 				if plog is self.poutlog:
 					flog = sys.stdout
 				if plog is self.perrlog:
@@ -1169,8 +1154,7 @@ class Job(object):
 				flog.write(pout)  # Write the piped output
 			except IOError as err:
 				print('ERROR on logging piped data "{}" for "{}": {}'
-					.format(plog, self.name, err), file=sys.stderr)
-
+					.format(plog, self.name, err), file=sys.stdout)
 
 		if self.proc is not None:
 			ecode = self.proc.poll()
@@ -2236,11 +2220,11 @@ class ExecPool(object):
 				errinf = getattr(err, 'errno', None)
 				return -1 if errinf is None else errinf.errorcode
 		# Consider custom output channels for the job
-		fstdout = None
-		fstderr = None
+		job._stdout = None
+		job._stderr = None
 		acqlock = False  # The lock is acquired and should be released
 		try:
-			# Initialize fstdout, fstderr by the required output channel
+			# Initialize job._stdout/err by the required output channel
 			timestamp = None
 			for joutp in (job.stdout, job.stderr):
 				if joutp and isinstance(joutp, str):
@@ -2251,17 +2235,15 @@ class ExecPool(object):
 						fout = None
 						if joutp is job.stdout:
 							fout = open(joutp, 'a')
-							job._fstdout = fout  #pylint: disable=W0212
-							fstdout = fout
+							job._stdout = fout  #pylint: disable=W0212
 							outcapt = 'stdout'
 						elif joutp is job.stderr:
 							fout = open(joutp, 'a')
-							job._fstderr = fout  #pylint: disable=W0212
-							fstderr = fout
+							job._stderr = fout  #pylint: disable=W0212
 							outcapt = 'stderr'
 						else:
 							raise ValueError('Invalid output stream value: ' + str(joutp))
-						# Add a timestamp if the file is not empty to distinguish logs
+						# Add a timestamp if the FILE is not empty to distinguish logs
 						if fout is not None and os.fstat(fout.fileno()).st_size:
 							if timestamp is None:
 								timestamp = time.gmtime()
@@ -2270,16 +2252,16 @@ class ExecPool(object):
 						print('ERROR on opening custom {} "{}" for "{}": {}. Default is used.'
 							.format(outcapt, joutp, job.name, err), file=sys.stderr)
 						if joutp is job.stdout:
-							fout = sys.stdout
+							job._stdout = sys.stdout
 						if joutp is job.stderr:
-							fout = sys.stderr
+							job._stderr = sys.stderr
 				else:
 					if joutp is job.stdout:
-						fstdout = joutp
+						job._stdout = joutp
 					elif joutp is job.stderr:
-						fstderr = joutp
+						job._stderr = joutp
 					else:
-						raise ValueError('Invalid output stream buffer: ' + str(joutp))
+						raise ValueError('Invalid output stream channel: ' + str(joutp))
 
 			# print('> "{}" output channels:\n\tstdout: {}\n\tstderr: {}'.format(job.name
 			# 	, job.stdout, job.stderr))  # Note: write to log, not to the stderr
@@ -2302,7 +2284,12 @@ class ExecPool(object):
 					raise EnvironmentError((errno.EINTR,  # errno.ERESTART
 						'Jobs can not be started because the execution pool has been terminated'))
 				# bufsize=-1 - use system default IO buffer size
-				job.proc = subprocess.Popen(job.args, bufsize=-1, cwd=job.workdir, stdout=fstdout, stderr=fstderr)
+				job.proc = subprocess.Popen(job.args, bufsize=-1, cwd=job.workdir, stdout=job._stdout, stderr=job._stderr)
+				# Update job logging descriptors in case of PIPEs to the actual system objects
+				if job._stdout is subprocess.PIPE:
+					job._stdout = job.proc.stdout
+				if job._stderr is subprocess.PIPE:
+					job._stderr = job.proc.stderr
 				if concur:
 					self._workers.add(job)
 				# ATTENTION: the exception can be raised before the lock releasing on process creation
@@ -2402,19 +2389,30 @@ class ExecPool(object):
 		# Note: job completion also calls finalization of the owner task and
 		# may communicate with the process to fetch the PIPE output
 		job.complete(graceful)
+		# Close process-related file/object descriptors
+		# ATTENTION: PIPEd channels should be closed only AFTER the job.complete(),
+		# which redirects their output to the log files if required.
+		#
+		# I case of Pipes:
 		# Finalize the output channels for the PIPEs, which is essential if they are used as input channels
 		# to another processes since in such case it yields SIGPIPE:
 		# https://docs.python.org/3/library/subprocess.html#subprocess.Popen.stdout
 		# Note: proc.stdout and/or proc.stderr are not None only if the PIPEs are used
-		for pout in (job.proc.stdout, job.proc.stderr):
-			if pout is not None:
+		# for pout in (job.proc.stdout, job.proc.stderr):
+		#
+		# Note: here pout can be a file, system output object or system pipe related object
+		for pout in (job._stdout, job._stderr):
+			if pout not in (None, sys.stdout, sys.stderr):
 				try:
 					pout.close()
 				except AttributeError:  # .close() method does not exist in this object
 					pass
 				except IOError as err:
-					print('ERROR, job "{}" PIPE closing failed: {}. {}'.format(
+					print('ERROR, job "{}" I/O closing failed: {}. {}'.format(
 						job.name, err, traceback.format_exc(5)), file=sys.stderr)
+		job._stdout = None
+		job._stderr = None
+
 		# Update failures list skipping automatically restarting tasks
 		if graceful:
 			self.jobsdone += 1
