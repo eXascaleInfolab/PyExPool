@@ -1123,7 +1123,7 @@ class Job(object):
 		self.fetchPipedData(0)
 		# Persis the piped output if required
 		for pout, plog in ((self.pipedout, self.poutlog), (self.pipederr, self.perrlog)):
-			if not pout or plog is None:  # Omit produciton of the empty logs
+			if not pout or plog is None:  # Omit production of the empty logs
 				continue
 			# Ensure existence of the parent directory for the filename
 			if isinstance(plog, str):
@@ -2388,7 +2388,11 @@ class ExecPool(object):
 			graceful = not job.terminates and job.proc is not None and not job.proc.returncode
 		# Note: job completion also calls finalization of the owner task and
 		# may communicate with the process to fetch the PIPE output
-		job.complete(graceful)
+		try:
+			job.complete(graceful)
+		except Exception as err:  #pylint: disable=W0703
+			print('ERROR, job "{}" completion failed: {}. {}'.format(
+				job.name, err, traceback.format_exc(5)), file=sys.stderr)
 		# Close process-related file/object descriptors
 		# ATTENTION: PIPEd channels should be closed only AFTER the job.complete(),
 		# which redirects their output to the log files if required.
