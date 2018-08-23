@@ -900,8 +900,10 @@ class Job(object):
 		stderr  - None, stdout, stderr, file name or PIPE for the unbuffered error output to be APPENDED
 			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited.
 			The path is interpreted in the CALLER CONTEXT
-		poutlog: str  - file name to log piped stdout if required. Actual only if stdout is PIPE.
-		perrlog: str  - file name to log piped stderr if required. Actual only if stderr is PIPE.
+		poutlog: str  - file name to log piped stdout pre-pended with the timestamp
+			even in case the log body is empty highlight the logging event itself. Actual only if stdout is PIPE.
+		perrlog: str  - file name to log piped stderr pre-pended with the timestamp
+			even in case the log body is empty highlight the logging event itself. Actual only if stdout is PIPE.
 
 		Scheduling parameters:
 		omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled
@@ -1135,7 +1137,7 @@ class Job(object):
 		# https://docs.python.org/3/library/subprocess.html#subprocess.Popen.waithttps://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
 		self.fetchPipedData(0)
 		# Persis the piped output if required
-		for pout, plog in ((self.pipederr, self.perrlog), (self.pipedout, self.poutlog)):
+		for pout, plog in ((self.pipedout, self.poutlog), (self.pipederr, self.perrlog)):
 			if pout is None or plog is None:
 				continue
 			# Ensure existence of the parent directory for the filename
@@ -1145,6 +1147,7 @@ class Job(object):
 					os.makedirs(plog)
 			# Append to the file
 			flog = None
+			# First, add a timestamp even if the log body is empty to be aware about the logging fact
 			timestamp = None
 			try:
 				flog = plog if not isinstance(plog, str) else open(plog, 'a')
@@ -1155,13 +1158,14 @@ class Job(object):
 			except IOError as err:
 				print('ERROR on opening the piped log "{}" for "{}": {}. Default output channel is used.'
 					.format(plog, self.name, err), file=sys.stderr)
-				if pout is self.pipederr:
-					flog = sys.stderr
-				if pout is self.pipedout:
+				if plog is self.poutlog:
 					flog = sys.stdout
+				if plog is self.perrlog:
+					flog = sys.stderr
 			try:
 				if timestamp is not None:
 					print(timeheader(timestamp), file=flog)  # Note: prints also newline unlike flog.write()
+				# Append the log body itself if any
 				flog.write(pout)  # Write the piped output
 			except IOError as err:
 				print('ERROR on logging piped data "{}" for "{}": {}'
