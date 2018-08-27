@@ -1107,7 +1107,7 @@ class Job(object):
 		# NOTE: .communicate() waits until the pipe is closed, which can be performed
 		# on the process completion but may be also performed earlier:
 		# https://docs.python.org/3/library/subprocess.html#subprocess.Popen.communicate
-		self.pipedout, self.pipederr = self.proc.communicate(timeout)
+		self.pipedout, self.pipederr = (None if v is None else v.decode() for v in self.proc.communicate(timeout))
 
 
 	def complete(self, graceful=None):
