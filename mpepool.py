@@ -685,7 +685,7 @@ class Task(object):
 		self.stderr = stderr
 		# Automatically initialized attributes
 		self.tstart = None
-		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
+		self.tstop = None  # Termination / completion time after ondone
 		self.numadded = 0  # The number of added direct subtasks, the same subtask/job can be re-added several times
 		self.numdone = 0  # The number of completed direct subtasks
 		self.numterm = 0  # Total number of terminated direct subtasks that are not restarting
@@ -980,7 +980,7 @@ class Job(object):
 		self.perrlog = perrlog
 		# Internal properties --------------------------------------------------
 		self.tstart = None  # start time is filled automatically on the execution start, before onstart. Default: None
-		self.tstop = None  # SyncValue()  # Termination / completion time after ondone
+		self.tstop = None  # Termination / completion time after ondone
 		# Internal attributes
 		self.proc = None  # Process of the job, can be used in the ondone() to read its PIPE
 		self.pipedout = None
@@ -1128,8 +1128,8 @@ class Job(object):
 			# Ensure existence of the parent directory for the filename
 			if isinstance(plog, str):
 				basedir = os.path.split(plog)[0]
-				if basedir and not os.path.exists(plog):
-					os.makedirs(plog)
+				if basedir and not os.path.exists(basedir):
+					os.makedirs(basedir)
 			# Append to the file
 			flog = None
 			# First, add a timestamp even if the log body is empty to be aware about the logging fact
