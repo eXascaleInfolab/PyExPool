@@ -1121,25 +1121,22 @@ class Job(object):
 		# Fetch piped data if any, required to be done before the proc.wait to avoid deadlocks:
 		# https://docs.python.org/3/library/subprocess.html#subprocess.Popen.waithttps://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
 		self.fetchPipedData(0)
+		timestamp = None
 		# Persis the piped output if required
 		for pout, plog in ((self.pipedout, self.poutlog), (self.pipederr, self.perrlog)):
 			if not pout or plog is None:  # Omit production of the empty logs
 				continue
 			# Ensure existence of the parent directory for the filename
-			if isinstance(plog, str):
+			customfile = isinstance(plog, str)
+			if customfile:
 				basedir = os.path.split(plog)[0]
 				if basedir and not os.path.exists(basedir):
 					os.makedirs(basedir)
 			# Append to the file
 			flog = None
 			# First, add a timestamp even if the log body is empty to be aware about the logging fact
-			timestamp = None
 			try:
-				flog = plog if not isinstance(plog, str) else open(plog, 'a')
-				# Add a timestamp if the file is not empty to distinguish logs
-				if isinstance(plog, str) and os.fstat(flog.fileno()).st_size:
-					if timestamp is None:
-						timestamp = time.gmtime()
+				flog = plog if not customfile else open(plog, 'a')
 			except IOError as err:
 				print('ERROR on opening the piped log "{}" for "{}": {}. Default output channel is used.'
 					.format(plog, self.name, err), file=sys.stdout)
@@ -1148,10 +1145,18 @@ class Job(object):
 				if plog is self.perrlog:
 					flog = sys.stderr
 			try:
-				if timestamp is not None:
+				# Add a timestamp if the file is not empty to distinguish logs
+				## not customfile or
+				if customfile and os.fstat(flog.fileno()).st_size:  # Add timestamp only to the non-empty file
+					if timestamp is None:
+						timestamp = time.gmtime()
 					print(timeheader(timestamp), file=flog)  # Note: prints also newline unlike flog.write()
 				# Append the log body itself if any
 				flog.write(pout)  # Write the piped output
+				# Note: the file is automatically closed by the object destructor,
+				# moreover some system files like devnull should not be closed by the user
+				# if customfile:
+				# 	flog.close()
 			except IOError as err:
 				print('ERROR on logging piped data "{}" for "{}": {}'
 					.format(plog, self.name, err), file=sys.stdout)
@@ -2234,11 +2239,11 @@ class ExecPool(object):
 					try:
 						fout = None
 						if joutp is job.stdout:
-							fout = open(joutp, 'a')
+							fout = open(joutp, 'a')  # Note: the file is closed by the ExecPool on the job worker completion
 							job._stdout = fout  #pylint: disable=W0212
 							outcapt = 'stdout'
 						elif joutp is job.stderr:
-							fout = open(joutp, 'a')
+							fout = open(joutp, 'a')  # Note: the file is closed by the ExecPool on the job worker completion
 							job._stderr = fout  #pylint: disable=W0212
 							outcapt = 'stderr'
 						else:
