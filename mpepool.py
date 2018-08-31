@@ -903,7 +903,7 @@ class Job(object):
 			ATTENTION: PIPE is a buffer in RAM, so do not use it if the output data is huge or unlimited.
 			The path is interpreted in the CALLER CONTEXT
 		poutlog: str  - file name to log non-empty piped stdout pre-pended with the timestamp. Actual only if stdout is PIPE.
-		perrlog: str  - file name to log non-empty piped stderr pre-pended with the timestamp. Actual only if stdout is PIPE.
+		perrlog: str  - file name to log non-empty piped stderr pre-pended with the timestamp. Actual only if stderr is PIPE.
 
 		Scheduling parameters:
 		omitafn  - omit affinity policy of the scheduler, which is actual when the affinity is enabled

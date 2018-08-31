@@ -17,7 +17,7 @@ views = glob('views/*')
 
 setup(
 	name=pkgname,  # This is the name of your PyPI-package.
-	version='3.2.0',  # Update the version number for new releases
+	version='3.2.1',  # Update the version number for new releases
 	description=('A lightweight multi-process Execution Pool with load balancing'
 	' and customizable resource consumption constraints.'),  # Required, "Summary" metadata field
 	long_description=(
@@ -27,7 +27,7 @@ setup(
 	'All main functionality is implemented as a single-file module to be easily'
 	' included into your project and customized as a part of your distribution '
 	'(like in [PyCaBeM](https://github.com/eXascaleInfolab/PyCABeM) to execute'
-	' muliple apps in parralel on the dedicated CPU cores and avoiding their'
+	' multiple apps in parallel on the dedicated CPU cores and avoiding their'
 	' swapping from the main memory), also it can be installed as a library.'
 	' An optional minimalistic Web interface is provided in the separate module'
 	' to inspect the load balancer and execution pool.'
