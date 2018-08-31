@@ -26,7 +26,7 @@ setup(
     ' balancing of the external applications on NUMA architecture.  '
 	'All main functionality is implemented as a single-file module to be easily'
 	' included into your project and customized as a part of your distribution '
-	'(like in [PyCaBeM](https://github.com/eXascaleInfolab/PyCABeM) to execute'
+	'(like in [Clubmark](https://github.com/eXascaleInfolab/clubmark) to execute'
 	' multiple apps in parallel on the dedicated CPU cores and avoiding their'
 	' swapping from the main memory), also it can be installed as a library.'
 	' An optional minimalistic Web interface is provided in the separate module'
