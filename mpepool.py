@@ -1112,8 +1112,9 @@ class Job(object):
 
 	def complete(self, graceful=None):
 		"""Completion function
-		ATTENTION: This function is called after the destruction of the job-associated process
+		ATTENTION: This function is called AFTER the destruction of the job-associated process
 		to perform cleanup in the context of the caller (main thread).
+		In the abnormal case of existing the job process, it is killed.
 
 		graceful  - the job is successfully completed or it was terminated / crashed, bool.
 			None means use "not self.proc.returncode" (i.e. whether errcode is 0)
@@ -1122,7 +1123,7 @@ class Job(object):
 		# https://docs.python.org/3/library/subprocess.html#subprocess.Popen.waithttps://docs.python.org/3/library/subprocess.html#subprocess.Popen.wait
 		self.fetchPipedData(0)
 		timestamp = None
-		# Persis the piped output if required
+		# Persist the piped output if required
 		for pout, plog in ((self.pipedout, self.poutlog), (self.pipederr, self.perrlog)):
 			if not pout or plog is None:  # Omit production of the empty logs
 				continue
@@ -1607,7 +1608,7 @@ class ExecPool(object):
 		self.memlimit = 0. if not _LIMIT_WORKERS_RAM else max(0, min(memlimit, _RAM_LIMIT))  # in GB
 		self.latency = latency if latency else 1 + (self.memlimit != 0.)  # Seconds of sleep on pooling
 		# Predefined private attributes
-		self._termlatency = min(0.2, self.latency)  # 200 ms, job process (worker) termination latency
+		self._termlatency = max(0.01, min(0.2, self.latency))  # 200 ms, job process (worker) termination latency
 		# Lock for the __terminate() to avoid simultaneous call by the signal and normal execution flow
 		self.__termlock = Lock()
 		self.alive = True  # The execution pool is in the working state (has not been terminated)
@@ -1724,10 +1725,12 @@ class ExecPool(object):
 				print("WARNING, The execution pool{} is terminated and can't response the UI command: {}"
 					.format('' if not self.name else ' ' + self.name, self._uicmd.id.name, file=sys.stderr))
 				return
-
-			smr = SummaryBrief(workers=len(self._workers), jobs=len(self._jobs)
-				, jobsDone=self.jobsdone, jobsFailed=len(self.failures), tasks=len(self.tasks))
-			self.__termlock.release()
+			smr = None
+			try:
+				smr = SummaryBrief(workers=len(self._workers), jobs=len(self._jobs)
+					, jobsDone=self.jobsdone, jobsFailed=len(self.failures), tasks=len(self.tasks))
+			finally:
+				self.__termlock.release()
 			# Evaluate remained vars
 			# Evaluate tasksFailed and tasksRootFailed from failures
 			tasksRootFailed = 0
@@ -1967,61 +1970,66 @@ class ExecPool(object):
 			if acqlock:
 				self.__termlock.release()
 			return
-		tcur = time.perf_counter()  # Current time
-		print('WARNING{}, terminating the execution pool with {} non-started jobs and {} workers'
-			', executed {} h {} m {:.4f} s, call stack:'
-			.format('' if not self.name else ' ' + self.name, len(self._jobs), len(self._workers)
-			, *secondsToHms(0 if self._tstart is None else tcur - self._tstart)), file=sys.stderr)
-		traceback.print_stack(limit=5, file=sys.stderr)
+		try:
+			tcur = time.perf_counter()  # Current time
+			print('WARNING{}, terminating the execution pool with {} non-started jobs and {} workers'
+				', executed {} h {} m {:.4f} s, call stack:'
+				.format('' if not self.name else ' ' + self.name, len(self._jobs), len(self._workers)
+				, *secondsToHms(0 if self._tstart is None else tcur - self._tstart)), file=sys.stderr)
+			traceback.print_stack(limit=5, file=sys.stderr)
 
-		# Shut down all [non-started] jobs
-		for job in self._jobs:
-			# Note: the restarting jobs are also terminated here without the owner task notification
-			# since there is no time to execute the task handlers
-			# Add terminating deferred job to the list of failures
-			self.failures.append(JobInfo(job, tstop=tcur))
-			# Note: only executing jobs, i.e. workers might have activated affinity
-			print('  Scheduled non-started "{}" is removed'.format(job.name), file=sys.stderr)
-		self._jobs.clear()
+			# Shut down all [non-started] jobs
+			for job in self._jobs:
+				# Note: the restarting jobs are also terminated here without the owner task notification
+				# since there is no time to execute the task handlers
+				# Add terminating deferred job to the list of failures
+				self.failures.append(JobInfo(job, tstop=tcur))
+				# Note: only executing jobs, i.e. workers might have activated affinity
+				print('  Scheduled non-started "{}" is removed'.format(job.name), file=sys.stderr)
+			self._jobs.clear()
 
-		# Shut down all workers
-		active = False
-		for job in self._workers:
-			if job.proc.poll() is None:  # poll None means the process has not been terminated / completed
-				job.terminates += 1
-				print('  Terminating "{}" #{} ...'.format(job.name, job.proc.pid), file=sys.stderr)
-				job.proc.terminate()
-				active = True
-		# Wait a few sec for the successful process termination before killing it
-		i = 0
-		while active and i < self._KILLDELAY:
-			time.sleep(self._termlatency)
-			i += 1
+			# Shut down all workers
 			active = False
 			for job in self._workers:
 				if job.proc.poll() is None:  # poll None means the process has not been terminated / completed
 					job.terminates += 1
+					print('  Terminating "{}" #{} ...'.format(job.name, job.proc.pid), file=sys.stderr)
 					job.proc.terminate()
 					active = True
+			# Wait a few sec for the successful process termination before killing it
+			i = 0
+			while active and i < self._KILLDELAY:
+				time.sleep(self._termlatency)
+				i += 1
+				active = False
+				for job in self._workers:
+					if job.proc.poll() is None:  # poll None means the process has not been terminated / completed
+						job.terminates += 1
+						job.proc.terminate()
+						active = True
 
-		# Kill non-terminated processes
-		if active:
+			# Kill non-terminated processes
+			if active:
+				for job in self._workers:
+					if job.proc.poll() is None:
+						print('  Killing "{}" #{} ...'.format(job.name, job.proc.pid), file=sys.stderr)
+						job.proc.kill()
+			# Tidy jobs
 			for job in self._workers:
-				if job.proc.poll() is None:
-					print('  Killing "{}" #{} ...'.format(job.name, job.proc.pid), file=sys.stderr)
-					job.proc.kill()
-		# Tidy jobs
-		for job in self._workers:
-			self.__complete(job, False)
-		self._workers.clear()
-		## Set _wkslim to 0 to not start any jobs
-		#self._wkslim = 0  # ATTENTION: reset of the _wkslim can break silent subsequent reuse of the execution pool
-		self.__termlock.release()
-		self._traceFailures()
+				self.__complete(job, False)
+			self._workers.clear()
+			## Set _wkslim to 0 to not start any jobs
+			#self._wkslim = 0  # ATTENTION: reset of the _wkslim can break silent subsequent reuse of the execution pool
+			self._traceFailures()
+		except BaseException as err:
+			print('ERROR on the pool "{}" termination occurred: {}. {}'.format(
+				self.name, err, traceback.format_exc(5)), file=sys.stderr)
+		finally:
+			self.__termlock.release()
 
 
 	def _traceFailures(self):
-		"""Trace failed tasks with their jobs and jobs not belonging to any tasks"""
+		"""Trace failed tasks with their jobs and jobs not belonging to any tasks and clean this list afterwards"""
 		# Note: the lock for failures had to be used if the ExecPool would not be finished (unexpected)
 		assert not (self._workers or self._jobs), (
 			'Failures tracing is expected to be called after the ExecPool is finished')
@@ -2055,6 +2063,7 @@ class ExecPool(object):
 					tie = tinfe0.setdefault(fji.task, TaskInfoExt(props=(TaskInfo.iterprop()  #pylint: disable=E1101
 						, infodata(TaskInfo(fji.task))), jobs=[JobInfo.iterprop()]))  #pylint: disable=E1101
 				tie.jobs.append(data)
+		del self.failures[:]  # Required to avoid repetative tracing of the failures
 		if not tinfe0:
 			return
 
@@ -2375,7 +2384,7 @@ class ExecPool(object):
 
 
 	def __complete(self, job, graceful=None):
-		"""Complete the job clearing affinity if required
+		"""Complete the job tidying affinity if required
 
 		job  - the job to be completed
 		graceful  - the completion is graceful (job was not terminated internally
@@ -2913,7 +2922,8 @@ class ExecPool(object):
 			# Revise UI command(s) if the WebUI app has been connected
 			if self._uicmd is not None:
 				self.__reviseUi()
-		self._traceFailures()
+		with self.__termlock:  # , 0.05 50 ms
+			self._traceFailures()
 		print('The execution pool{} is completed, duration: {} h {} m {:.4f} s'.format(
 			'' if self.name is None else ' ' + self.name
 			, *secondsToHms(time.perf_counter() - self._tstart))
