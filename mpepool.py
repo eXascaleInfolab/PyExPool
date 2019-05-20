@@ -1154,10 +1154,12 @@ class Job(object):
 					print(timeheader(timestamp), file=flog)  # Note: prints also newline unlike flog.write()
 				# Append the log body itself if any
 				flog.write(pout)  # Write the piped output
-				# Note: the file is automatically closed by the object destructor,
-				# moreover some system files like devnull should not be closed by the user
+				# # Flush the file buffer if required
 				# if customfile:
-				# 	flog.close()
+				# 	flog.flush()
+				# 	# Note: the file is automatically closed by the object destructor,
+				# 	# moreover some system files like devnull should not be closed by the user
+				# 	# flog.close()
 			except IOError as err:
 				print('ERROR on logging piped data "{}" for "{}": {}'
 					.format(plog, self.name, err), file=sys.stdout)
