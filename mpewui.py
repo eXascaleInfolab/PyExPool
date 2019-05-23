@@ -522,7 +522,7 @@ class WebUiApp(threading.Thread):
 				bottle.response.status = 501
 				return 'Not Implemented'
 				# TOFIX
-				# return '\n'.join(['\t'.join([str(v) for v in cols]) for cols in cmd.data])
+				# return '\n'.join('\t'.join(str(v) for v in cols) for cols in cmd.data)
 			#elif fmt == UiResFmt.htm:
 			else:  # HTML format by default
 				smr = cmd.data.get('summary')
@@ -593,7 +593,7 @@ class WebUiApp(threading.Thread):
 				bottle.response.status = 501
 				return 'Not Implemented'
 				# TOFIX
-				# return '\n'.join(['\t'.join([str(v) for v in cols]) for cols in cmd.data])
+				# return '\n'.join('\t'.join(str(v) for v in cols) for cols in cmd.data)
 			#elif fmt == UiResFmt.htm:
 			else:  # HTML format by default
 				smr = cmd.data.get('summary')
@@ -657,7 +657,7 @@ class WebUiApp(threading.Thread):
 				bottle.response.status = 501
 				return 'Not Implemented'
 				# TOFIX
-				# return '\n'.join(['\t'.join([str(v) for v in cols]) for cols in cmd.data])
+				# return '\n'.join('\t'.join(str(v) for v in cols) for cols in cmd.data)
 			#elif fmt == UiResFmt.htm:
 			else:  # HTML format by default
 				smr = cmd.data.get('summary')
