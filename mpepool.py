@@ -268,7 +268,7 @@ def infodata(obj, propflt=None, objflt=None):
 				# print('>>> ret None, 1:', prop not in obj, '2:', pcon.end is None and pval != pcon.beg
 				# 	, '3:', pcon.end is not None, '4:', pval < pcon.beg or pval >= pcon.end)
 				return None
-	return tuple([tblfmt(obj.__getattribute__(prop)) for prop in (propflt if propflt else obj.iterprop())])  #pylint: disable=C0325
+	return tuple(tblfmt(obj.__getattribute__(prop)) for prop in (propflt if propflt else obj.iterprop()))  #pylint: disable=C0325
 
 
 def infoheader(objprops, propflt):
@@ -283,9 +283,9 @@ def infoheader(objprops, propflt):
 	"""
 	if propflt:
 		opr = set(objprops)
-		return tuple([h for h in propflt if h in opr])
-	return tuple([h for h in objprops])
-	# return tuple([h for h in objprops if not propflt or h in propflt])
+		return tuple(h for h in propflt if h in opr)
+	return tuple(h for h in objprops)
+	# return tuple(h for h in objprops if not propflt or h in propflt)
 
 
 def propslist(cls):
@@ -362,7 +362,7 @@ class JobInfo(object):
 	True
 
 	# Check `iterprop` execution (generated iterator)
-	>>> ' '.join([p for p in JobInfo(Job('tjob')).iterprop()]) == JobInfo(Job('tjob'))._props
+	>>> ' '.join(p for p in JobInfo(Job('tjob')).iterprop()) == JobInfo(Job('tjob'))._props
 	True
 	"""
 	__slots__ = ('name', 'pid', 'code', 'tstart', 'tstop', 'memsize', 'memkind', 'task', 'category')
@@ -528,14 +528,14 @@ def printDepthFirst(tinfext, cindent='', indstep='  ', colsep=' '):
 	strpad = 9  # Padding of the string cells
 	# Print task properties (properties header and values)
 	for props in tinfext.props:
-		print(cindent, colsep.join([tblfmt(v, strpad) for v in props]), sep=''
+		print(cindent, colsep.join(tblfmt(v, strpad) for v in props), sep=''
 			, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 	# assert isinstance(tinfext, TaskInfoExt), 'Unexpected type of tinfext: ' + type(tinfext).__name__
 	# Print task jobs and subtasks
 	cindent += indstep
 	if tinfext.jobs:  # Consider None
 		for tie in tinfext.jobs:
-			print(cindent, colsep.join([tblfmt(v, strpad) for v in tie]), sep=''
+			print(cindent, colsep.join(tblfmt(v, strpad) for v in tie), sep=''
 				, file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 	# print('>> Outputting task {} with {} subtasks'.format(tinfext.props[1][0]
 	# 	, 0 if not tinfext.subtasks else len(tinfext.subtasks)), file=sys.stderr)
@@ -759,7 +759,7 @@ class Task(object):
 		# Consider onfinish callback
 		if self.numdone + self.numterm == self.numadded:
 			assert not self._items, 'All subtasks should be already finished;  remained {} items: {}'.format(
-				len(self._items), ', '.join([st.name for st in self._items]))
+				len(self._items), ', '.join(st.name for st in self._items))
 			self.tstop = time.perf_counter()
 			if self.numdone == self.numadded and self.ondone:
 				applyCallback(self.ondone, self.name)
@@ -845,8 +845,8 @@ class Task(object):
 			# List should be generated on place while all the tasks are present
 			# Note: list extension should prevent lazy evaluation of the list generator
 			# otherwise the explicit conversion to the list should be performed here (within the lock)
-			res += [subtaskInfo(subtask) if not recursive or isinstance(subtask, Job)
-				else subtask.uncompleted(recursive) for subtask in self._items]
+			res += (subtaskInfo(subtask) if not recursive or isinstance(subtask, Job)
+				else subtask.uncompleted(recursive) for subtask in self._items)
 		finally:
 			self._lock.release()
 		return res
@@ -1339,20 +1339,20 @@ class AffinityMask(object):
 
 	# Mask for all cross-node logical CPUs in the group #1
 	>>> AffinityMask(AffinityMask.CORE_THREADS, first=False, sequential=False)(1) == \
-		','.join([str(1 + c*(AffinityMask.CPUS // (AffinityMask.NODES * AffinityMask.CORE_THREADS))) \
-		for c in range(AffinityMask.CORE_THREADS)])
+		','.join(str(1 + c*(AffinityMask.CPUS // (AffinityMask.NODES * AffinityMask.CORE_THREADS))) \
+		for c in range(AffinityMask.CORE_THREADS))
 	True
 
 	# Mask for all sequential logical CPUs in the group #1
 	>>> AffinityMask(AffinityMask.CORE_THREADS, False, sequential=True)(1) == \
-		'-'.join([str(1*(AffinityMask.CPUS // (AffinityMask.NODES * AffinityMask.CORE_THREADS)) + c) \
-		for c in range(AffinityMask.CORE_THREADS)])
+		'-'.join(str(1*(AffinityMask.CPUS // (AffinityMask.NODES * AffinityMask.CORE_THREADS)) + c) \
+		for c in range(AffinityMask.CORE_THREADS))
 	True
 
 	# Mask for all cross-node logical CPU on the NUMA node #0
 	>>> AffinityMask(AffinityMask.CPUS // AffinityMask.NODES, False, sequential=False)(0) == \
-		','.join(['{}-{}'.format(c*(AffinityMask.CPUS // AffinityMask.CORE_THREADS) \
-		, (c+1)*(AffinityMask.CPUS // AffinityMask.CORE_THREADS) - 1) for c in range(AffinityMask.CORE_THREADS)])
+		','.join('{}-{}'.format(c*(AffinityMask.CPUS // AffinityMask.CORE_THREADS) \
+		, (c+1)*(AffinityMask.CPUS // AffinityMask.CORE_THREADS) - 1) for c in range(AffinityMask.CORE_THREADS))
 	True
 
 	# Mask for all sequential logical CPU on the NUMA node #0
@@ -2055,10 +2055,10 @@ class ExecPool(object):
 				if header:
 					print('\nFAILED jobs not assigned to any tasks:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 					# Header of the jobs
-					print(colsep.join([tblfmt(h, strpad) for h in JobInfo.iterprop()])  #pylint: disable=E1101
+					print(colsep.join(tblfmt(h, strpad) for h in JobInfo.iterprop())  #pylint: disable=E1101
 						, file=sys.stderr if _DEBUG_TRACE else sys.stdout)  #pylint: disable=E1101
 					header = False
-				print(colsep.join([tblfmt(v, strpad) for v in data]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+				print(colsep.join(tblfmt(v, strpad) for v in data), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 			else:
 				tie = tinfe0.get(fji.task)
 				if tie is None:
@@ -2077,7 +2077,7 @@ class ExecPool(object):
 			len(viewvalues(ties)), len(tinfe0), len(self.tasks)), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		tinfe0 = None  # Release the initial dictionary
 		# List names of the root failed tasks
-		print(' '.join([tk.name for tk in ties]), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
+		print(' '.join(tk.name for tk in ties), file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		# Print hierarchy of the failed tasks from the root (top) level
 		print('\nFAILED tasks with their jobs:', file=sys.stderr if _DEBUG_TRACE else sys.stdout)
 		for task, tie in viewitems(ties):
@@ -2118,8 +2118,8 @@ class ExecPool(object):
 			'\nmem: {:.4f} / {:.4f} GB, exectime: {:.4f} ({} .. {}) / {:.4f} sec'.format(
 			job.name, job.terminates, job.tstart is not None, '-' if not self.memlimit else job.wkslim, self._wkslim
 			, priority, len(self._workers), len(self._jobs)
-			, ', '.join(['#{} {}'.format(ij, j.name) for ij, j in enumerate(self._jobs)]) if self.memlimit else (
-			', '.join(['#{} {}: {}'.format(ij, j.name, j.wkslim) for ij, j in enumerate(self._jobs)]))
+			, ', '.join('#{} {}'.format(ij, j.name) for ij, j in enumerate(self._jobs)) if self.memlimit else (
+			', '.join('#{} {}: {}'.format(ij, j.name, j.wkslim) for ij, j in enumerate(self._jobs)))
 			, 0 if not self.memlimit else job.mem, self.memlimit
 			, 0 if job.tstop is None else job.tstop - job.tstart, job.tstart, job.tstop, job.timeout))
 		# Postpone only the group-terminated jobs by memory limit, not a single worker
@@ -2127,7 +2127,7 @@ class ExecPool(object):
 		# restart via rsrtonto, which results the priority rescheduling)
 		# Note: job wkslim should be updated before adding to the _jobs to handle
 		# correctly the case when _jobs were empty
-		# print('>  Nonstarted initial jobs: ', ', '.join(['{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs]))
+		# print('>  Nonstarted initial jobs: ', ', '.join('{} ({})'.format(pj.name, pj.wkslim) for pj in self._jobs))
 		#
 		# Note: terminate time is reseted on job start in case of restarting
 		## Reset job.proc to remove it from the sub-processes table and avoid zombies for the postponed jobs
@@ -2186,7 +2186,7 @@ class ExecPool(object):
 							kend -= 1  # One more job is added before i
 							k -= 1  # Note: k is incremented below
 				k += 1
-		# print('>  Nonstarted updated jobs: ', ', '.join(['{} ({})'.format(pjob.name, pjob.wkslim) for pjob in self._jobs]))
+		# print('>  Nonstarted updated jobs: ', ', '.join('{} ({})'.format(pjob.name, pjob.wkslim) for pjob in self._jobs))
 
 
 	def __start(self, job, concur=True):
@@ -2567,7 +2567,7 @@ class ExecPool(object):
 								break  # Switch to the following job
 			# Traverse over the non-started jobs with defined job category and size removing too heavy jobs
 			# if _DEBUG_TRACE >= 2:
-			# 	print('>  Updating chained constraints in non-started jobs: ', ', '.join([job.name for job in self._jobs]))
+			# 	print('>  Updating chained constraints in non-started jobs: ', ', '.join(job.name for job in self._jobs))
 			jrot = 0  # Accumulated rotation
 			ij = 0  # Job index
 			while ij < len(self._jobs) - jrot:  # Note: len(jobs) catches external jobs termination / modification
@@ -2672,7 +2672,7 @@ class ExecPool(object):
 					memov -= job.mem
 				if _DEBUG_TRACE:
 					print('  Group mem limit violation removing jobs: {}, remained: {} (from the end)'
-						.format(', '.join([j.name for j in pjobs]), ', '.join([j.name for j in hws])))
+						.format(', '.join(j.name for j in pjobs), ', '.join(j.name for j in hws)))
 			# Terminate and remove worker processes of the postponing jobs
 			# New workers limit for the postponing job  # max(self._wkslim, len(self._workers))
 			wkslim = self._wkslim - len(pjobs)
@@ -2764,13 +2764,13 @@ class ExecPool(object):
 
 		# Start subsequent job or postpone it further
 		# if _DEBUG_TRACE >= 2:
-		# 	print('  Nonstarted jobs: ', ', '.join(['{} ({})'.format(job.name, job.wkslim) for job in self._jobs]))
+		# 	print('  Nonstarted jobs: ', ', '.join('{} ({})'.format(job.name, job.wkslim) for job in self._jobs))
 		if not terminating or not self._workers:  # Start only after the terminated jobs terminated and released the memory
 			while self._jobs and len(self._workers) < self._wkslim and self.alive:
 				#if _DEBUG_TRACE >= 3:
 				#	print('  "{}" (expected totmem: {:.4f} / {:.4f} GB) is being rescheduled, {} non-started jobs: {}'
 				#		.format(self._jobs[0].name, 0 if not self.memlimit else memall + job.mem, self.memlimit
-				#		, len(self._jobs), ', '.join([j.name for j in self._jobs])), file=sys.stderr)
+				#		, len(self._jobs), ', '.join(j.name for j in self._jobs)), file=sys.stderr)
 				job = self._jobs[0]
 				# Jobs should use less memory than the limit, a worker process violating
 				# (time/memory) constraints are already filtered out
